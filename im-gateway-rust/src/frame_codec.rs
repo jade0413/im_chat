@@ -21,6 +21,26 @@ pub fn new_frame(cmd: i32, req_id: u64, body: Vec<u8>) -> Frame {
     }
 }
 
+pub fn gateway_error_body(code: i32, message: impl Into<String>, req_id: u64) -> Vec<u8> {
+    // Mirrors body/messages.proto ErrorBody without making the gateway compile business body proto.
+    GatewayErrorBody {
+        code,
+        message: message.into(),
+        req_id,
+    }
+    .encode_to_vec()
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+struct GatewayErrorBody {
+    #[prost(int32, tag = "1")]
+    code: i32,
+    #[prost(string, tag = "2")]
+    message: String,
+    #[prost(uint64, tag = "3")]
+    req_id: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{decode, encode, new_frame};

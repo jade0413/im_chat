@@ -6,6 +6,11 @@ import com.im.common.redis.RedisKeys;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+/**
+ * Token version is shared infrastructure for platform-class session invalidation.
+ * It stays in im-common because user-service issues/verifies versions while push-service
+ * can invalidate them for kick/admin-offline flows without creating module coupling.
+ */
 @Service
 public class TokenVersionService {
 

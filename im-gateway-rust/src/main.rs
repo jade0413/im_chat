@@ -1,6 +1,7 @@
 mod config;
 mod connection;
 mod frame_codec;
+mod metrics;
 mod proto;
 mod push;
 mod rpc;
@@ -9,6 +10,7 @@ mod state;
 use crate::{
     config::Config,
     connection::{ConnectionRegistry, PendingAcks},
+    metrics::Metrics,
     rpc::RpcClients,
     state::AppState,
 };
@@ -16,7 +18,7 @@ use anyhow::Result;
 use axum::{routing::get, Router};
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tracing::{error, info};
+use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 #[tokio::main]
@@ -24,23 +26,23 @@ async fn main() -> Result<()> {
     init_tracing();
 
     let config = Arc::new(Config::from_env()?);
-    let rpc = RpcClients::connect(config.upstream_grpc.clone()).await?;
+    let rpc = RpcClients::connect(config.upstream_grpc.clone(), config.as_ref()).await?;
     let state = AppState {
         config: config.clone(),
         rpc,
         registry: ConnectionRegistry::new(),
         pending_acks: PendingAcks::new(),
+        metrics: Metrics::default(),
     };
 
     let push_state = state.clone();
     let push_task = tokio::spawn(async move {
-        if let Err(err) = push::run_push_consumer(push_state).await {
-            error!(?err, "push consumer stopped");
-        }
+        push::run_push_consumer_forever(push_state).await;
     });
 
     let app = Router::new()
         .route("/health", get(health))
+        .route("/metrics", get(metrics))
         .route("/ws", get(connection::ws_handler))
         .with_state(state);
 
@@ -62,6 +64,10 @@ async fn main() -> Result<()> {
 
 async fn health() -> &'static str {
     "OK"
+}
+
+async fn metrics(axum::extract::State(state): axum::extract::State<AppState>) -> String {
+    state.metrics.render_prometheus()
 }
 
 async fn shutdown_signal() {

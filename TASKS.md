@@ -1167,6 +1167,68 @@
 
 ---
 
+### T21 — PR2 审查阻塞项修复
+
+状态：DONE
+
+目标：
+
+- 按 `docs/reviews/2026-06-13-pr2-gateway-push.md` 修复 Rust 网关 R1~R5。
+- 顺手闭环 B1/B8 与 PR-A P2/P3，保持改动集中在网关生产成熟度与文档说明。
+
+涉及模块：
+
+- `im-gateway-rust`
+- `im-server/im-common`
+- `deploy`
+- `docs`
+
+需要修改的文件：
+
+- `im-gateway-rust/src/config.rs`
+- `im-gateway-rust/src/connection.rs`
+- `im-gateway-rust/src/frame_codec.rs`
+- `im-gateway-rust/src/main.rs`
+- `im-gateway-rust/src/metrics.rs`
+- `im-gateway-rust/src/push.rs`
+- `im-gateway-rust/src/rpc.rs`
+- `im-gateway-rust/src/state.rs`
+- `im-gateway-rust/README.md`
+- `im-server/im-common/src/main/java/com/im/common/auth/TokenVersionService.java`
+- `im-server/im-common/src/main/java/com/im/common/device/PlatformClass.java`
+- `deploy/README.md`
+- `docs/reviews/2026-06-13-pr2-gateway-push.md`
+
+验收标准：
+
+- R1：服务端按 `heartbeat_interval * 3` 执行 idle timeout，静默连接会清理 ConnMap 并上报断连。
+- R2：Verify/Dispatch/ConnEvent 都有 gRPC deadline；Dispatch 失败返回 `ERROR` 帧并保持连接。
+- R3：RabbitMQ push consumer 断开后指数退避重连，MQ 闪断不会让网关永久失去下行能力。
+- R4：单连接 outbound 队列有界，队列满按慢消费者断连并上报。
+- R5：提供 `/metrics`，输出在线连接数、上行帧计数、推送送达/失败、ack 超时断连。
+- B1：路由 TTL 续期降频为每 3 次 PING 一次。
+- B8：连接层硬编码错误码有注释标注来源。
+- PR-A P2/P3：部署文档说明 Redis token_ver 丢失影响；common 类注释说明基础设施边界。
+
+测试方式：
+
+- `cargo fmt --check`
+- `cargo test`
+- `cargo clippy --all-targets -- -D warnings`
+- `mvn -q -pl im-common -am test`
+
+完成记录：
+
+- Rust 网关新增 `Metrics` 模块和 `/metrics` endpoint。
+- `RpcClients` 统一增加 verify/dispatch/conn_event timeout。
+- `read_loop` 使用 heartbeat 三倍窗口做 idle timeout；dispatch 异常返回 `Cmd.ERROR`，不主动断开。
+- RabbitMQ push consumer 改成永久循环，失败后 1s..30s 指数退避重连。
+- outbound 改 bounded queue，满队列判慢消费者并清本地连接、上报 `OnDisconnected`。
+- 心跳路由续期由每次 PING 降为每 3 次 PING 一次。
+- 已补 Redis token_ver 运维说明和 im-common 边界注释。
+
+---
+
 ## 4. 后续候选任务（当前阶段不执行）
 
 这些任务进入后续阶段，不在当前 im-server MVP 优先队列：

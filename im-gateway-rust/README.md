@@ -27,8 +27,13 @@ cargo run
 | `UPSTREAM_GRPC` / `IM_GATEWAY_UPSTREAM_GRPC` | `http://127.0.0.1:9091` | Java im-server gRPC 地址 |
 | `RABBITMQ_URL` / `IM_GATEWAY_RABBITMQ_URL` | `amqp://im:im_dev_mq_pwd@127.0.0.1:5672/%2f` | RabbitMQ 连接串 |
 | `IM_GATEWAY_PUSH_ACK_TIMEOUT_SEC` | `10` | `need_ack` 下行帧 ack 超时秒数 |
+| `IM_GATEWAY_DISPATCH_TIMEOUT_SEC` | `10` | 上行业务帧 gRPC deadline |
+| `IM_GATEWAY_VERIFY_TIMEOUT_SEC` | `5` | 鉴权 gRPC deadline |
+| `IM_GATEWAY_OUTBOUND_QUEUE_SIZE` | `256` | 单连接下行有界队列大小，满则按慢消费者断连 |
+| `IM_GATEWAY_ROUTE_RENEW_HEARTBEATS` | `3` | 每 N 次 PING 续一次路由 TTL |
 
 入口：
 
 - `GET /health`
+- `GET /metrics`
 - `GET /ws`

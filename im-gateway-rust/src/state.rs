@@ -1,6 +1,7 @@
 use crate::{
     config::Config,
     connection::{ConnectionRegistry, PendingAcks},
+    metrics::Metrics,
     rpc::RpcClients,
 };
 use std::sync::Arc;
@@ -11,4 +12,5 @@ pub struct AppState {
     pub rpc: RpcClients,
     pub registry: ConnectionRegistry,
     pub pending_acks: PendingAcks,
+    pub metrics: Metrics,
 }

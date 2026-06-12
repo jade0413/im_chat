@@ -4,6 +4,11 @@ import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.proto.common.Platform;
 
+/**
+ * Platform class is a cross-cutting connection concept used by auth and push routing.
+ * It lives in im-common so user-service and push-service share the same D11 mapping
+ * without depending on each other's business modules.
+ */
 public enum PlatformClass {
   MOBILE("mobile"),
   DESKTOP("desktop"),

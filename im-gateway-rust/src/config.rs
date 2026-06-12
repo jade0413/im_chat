@@ -11,6 +11,11 @@ pub struct Config {
     pub auth_timeout: Duration,
     pub auth_replay_window: Duration,
     pub push_ack_timeout: Duration,
+    pub dispatch_timeout: Duration,
+    pub verify_timeout: Duration,
+    pub conn_event_timeout: Duration,
+    pub outbound_queue_size: usize,
+    pub route_renew_heartbeat_interval: u64,
     pub min_protocol_version: u32,
 }
 
@@ -36,6 +41,15 @@ impl Config {
             auth_timeout: read_duration_secs(&["IM_GATEWAY_AUTH_TIMEOUT_SEC"], 5),
             auth_replay_window: read_duration_secs(&["IM_GATEWAY_AUTH_REPLAY_WINDOW_SEC"], 300),
             push_ack_timeout: read_duration_secs(&["IM_GATEWAY_PUSH_ACK_TIMEOUT_SEC"], 10),
+            dispatch_timeout: read_duration_secs(&["IM_GATEWAY_DISPATCH_TIMEOUT_SEC"], 10),
+            verify_timeout: read_duration_secs(&["IM_GATEWAY_VERIFY_TIMEOUT_SEC"], 5),
+            conn_event_timeout: read_duration_secs(&["IM_GATEWAY_CONN_EVENT_TIMEOUT_SEC"], 5),
+            outbound_queue_size: read_env(&["IM_GATEWAY_OUTBOUND_QUEUE_SIZE"], "256")
+                .parse()
+                .context("invalid outbound queue size")?,
+            route_renew_heartbeat_interval: read_env(&["IM_GATEWAY_ROUTE_RENEW_HEARTBEATS"], "3")
+                .parse()
+                .context("invalid route renew heartbeat interval")?,
             min_protocol_version: read_env(&["IM_GATEWAY_MIN_PROTOCOL_VERSION"], "1")
                 .parse()
                 .context("invalid min protocol version")?,
@@ -77,6 +91,11 @@ mod tests {
             auth_timeout: std::time::Duration::from_secs(5),
             auth_replay_window: std::time::Duration::from_secs(300),
             push_ack_timeout: std::time::Duration::from_secs(10),
+            dispatch_timeout: std::time::Duration::from_secs(10),
+            verify_timeout: std::time::Duration::from_secs(5),
+            conn_event_timeout: std::time::Duration::from_secs(5),
+            outbound_queue_size: 256,
+            route_renew_heartbeat_interval: 3,
             min_protocol_version: 1,
         };
 

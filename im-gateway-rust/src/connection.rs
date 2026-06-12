@@ -1,5 +1,6 @@
 use crate::{
     frame_codec,
+    metrics::Metrics,
     proto::im::{
         rpc::v1::{ConnCtx, VerifyTokenReq},
         ws::v1::{AuthReq, AuthResp, Cmd, Frame, KickNotify},
@@ -26,10 +27,14 @@ use std::{
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tokio::{sync::mpsc, time};
+use tokio::{
+    sync::{mpsc, watch},
+    time,
+};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+// Connection-layer codes mirrored from common/error.proto and im-common ErrorCode.
 const OK: i32 = 0;
 const TOKEN_INVALID: i32 = 1001;
 const REPLAY_REJECTED: i32 = 1005;
@@ -119,17 +124,21 @@ impl ConnectionRegistry {
 pub struct ConnectionHandle {
     key: ConnKey,
     ctx: ConnCtx,
-    sender: mpsc::UnboundedSender<Outbound>,
+    sender: mpsc::Sender<Outbound>,
+    close_tx: watch::Sender<bool>,
     next_push_req_id: Arc<AtomicU64>,
+    heartbeat_count: Arc<AtomicU64>,
 }
 
 impl ConnectionHandle {
-    fn new(ctx: ConnCtx, sender: mpsc::UnboundedSender<Outbound>) -> Self {
+    fn new(ctx: ConnCtx, sender: mpsc::Sender<Outbound>, close_tx: watch::Sender<bool>) -> Self {
         Self {
             key: ConnKey::from_ctx(&ctx),
             ctx,
             sender,
+            close_tx,
             next_push_req_id: Arc::new(AtomicU64::new(1)),
+            heartbeat_count: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -158,7 +167,7 @@ impl ConnectionHandle {
             0
         };
         let frame = frame_codec::new_frame(cmd as i32, req_id, body);
-        if self.sender.send(Outbound::Frame(frame)).is_err() {
+        if !self.send_frame(frame) {
             return false;
         }
         if need_ack {
@@ -167,14 +176,37 @@ impl ConnectionHandle {
                 req_id,
                 runtime.registry,
                 runtime.rpc,
+                runtime.metrics,
                 runtime.ack_timeout,
             );
         }
         true
     }
 
+    fn send_frame(&self, frame: Frame) -> bool {
+        match self.sender.try_send(Outbound::Frame(frame)) {
+            Ok(()) => true,
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                warn!(
+                    tenant_id = self.ctx.tenant_id,
+                    user_id = self.ctx.user_id,
+                    platform = self.ctx.platform,
+                    conn_id = self.ctx.conn_id,
+                    "outbound queue full"
+                );
+                false
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => false,
+        }
+    }
+
     pub fn close(&self) {
-        let _ = self.sender.send(Outbound::Close);
+        let _ = self.close_tx.send(true);
+    }
+
+    fn should_refresh_route(&self, interval: u64) -> bool {
+        let interval = interval.max(1);
+        self.heartbeat_count.fetch_add(1, Ordering::Relaxed) % interval == interval - 1
     }
 }
 
@@ -183,12 +215,12 @@ pub struct PushSendRuntime {
     pub pending_acks: PendingAcks,
     pub registry: ConnectionRegistry,
     pub rpc: RpcClients,
+    pub metrics: Metrics,
     pub ack_timeout: Duration,
 }
 
 enum Outbound {
     Frame(Frame),
-    Close,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -215,6 +247,7 @@ impl PendingAcks {
         req_id: u64,
         registry: ConnectionRegistry,
         rpc: RpcClients,
+        metrics: Metrics,
         ack_timeout: Duration,
     ) {
         let ack_key = AckKey {
@@ -237,10 +270,13 @@ impl PendingAcks {
                 req_id,
                 "push ack timeout, close connection"
             );
-            registry.remove(&handle.key());
-            handle.close();
-            if let Err(err) = rpc.on_disconnected(handle.ctx()).await {
-                warn!(?err, "failed to report disconnected after push ack timeout");
+            if registry.remove(&handle.key()).is_some() {
+                metrics.connection_closed(handle.ctx.tenant_id);
+                metrics.ack_timeout_disconnect();
+                handle.close();
+                if let Err(err) = rpc.on_disconnected(handle.ctx()).await {
+                    warn!(?err, "failed to report disconnected after push ack timeout");
+                }
             }
         });
     }
@@ -339,8 +375,9 @@ async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
         trace_id: Uuid::new_v4().to_string(),
     };
 
-    let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel();
-    let handle = ConnectionHandle::new(ctx.clone(), outbound_tx);
+    let (outbound_tx, mut outbound_rx) = mpsc::channel(state.config.outbound_queue_size);
+    let (close_tx, mut close_rx) = watch::channel(false);
+    let handle = ConnectionHandle::new(ctx.clone(), outbound_tx, close_tx);
     let key = handle.key();
     state.registry.insert(handle.clone());
 
@@ -367,6 +404,7 @@ async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
     )
     .await?;
 
+    state.metrics.connection_opened(ctx.tenant_id);
     info!(
         tenant_id = ctx.tenant_id,
         user_id = ctx.user_id,
@@ -376,9 +414,12 @@ async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
     );
 
     let writer = tokio::spawn(async move {
-        while let Some(outbound) = outbound_rx.recv().await {
-            match outbound {
-                Outbound::Frame(frame) => {
+        loop {
+            tokio::select! {
+                outbound = outbound_rx.recv() => {
+                    let Some(Outbound::Frame(frame)) = outbound else {
+                        break;
+                    };
                     if ws_sender
                         .send(Message::Binary(frame_codec::encode(&frame)))
                         .await
@@ -387,37 +428,35 @@ async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
                         break;
                     }
                 }
-                Outbound::Close => {
-                    let _ = ws_sender.send(Message::Close(None)).await;
+                changed = close_rx.changed() => {
+                    if changed.is_ok() && *close_rx.borrow() {
+                        let _ = ws_sender.send(Message::Close(None)).await;
+                    }
                     break;
                 }
             }
         }
     });
 
-    let read_result = read_loop(&mut ws_receiver, ctx.clone(), key.clone(), state.clone()).await;
+    let heartbeat_interval = normalize_heartbeat_interval(verify.heartbeat_interval_sec);
+    let read_result = read_loop(
+        &mut ws_receiver,
+        ctx.clone(),
+        key.clone(),
+        state.clone(),
+        heartbeat_interval,
+    )
+    .await;
     state.pending_acks.cancel_connection(&key);
-    state.registry.remove(&key);
-    if let Err(err) = state.rpc.on_disconnected(ctx).await {
-        warn!(?err, "on_disconnected rpc failed");
+    if state.registry.remove(&key).is_some() {
+        state.metrics.connection_closed(ctx.tenant_id);
+        if let Err(err) = state.rpc.on_disconnected(ctx).await {
+            warn!(?err, "on_disconnected rpc failed");
+        }
+        handle.close();
     }
-    handle.close();
     let _ = writer.await;
     read_result
-}
-
-async fn read_auth_frame(
-    receiver: &mut SplitStream<WebSocket>,
-    timeout: Duration,
-) -> Result<Frame> {
-    let next = time::timeout(timeout, receiver.next())
-        .await
-        .context("AUTH timeout")?
-        .context("websocket closed before AUTH")??;
-    match next {
-        Message::Binary(payload) => frame_codec::decode(&payload),
-        _ => anyhow::bail!("AUTH must be sent as binary protobuf frame"),
-    }
 }
 
 async fn read_loop(
@@ -425,8 +464,13 @@ async fn read_loop(
     ctx: ConnCtx,
     key: ConnKey,
     state: AppState,
+    heartbeat_interval: Duration,
 ) -> Result<()> {
-    while let Some(message) = receiver.next().await {
+    let idle_timeout = heartbeat_interval * 3;
+    while let Ok(message) = time::timeout(idle_timeout, receiver.next()).await {
+        let Some(message) = message else {
+            break;
+        };
         let message = message?;
         let payload = match message {
             Message::Binary(payload) => payload,
@@ -446,11 +490,7 @@ async fn read_loop(
                     message: "protocol too old".to_string(),
                 }
                 .encode_to_vec();
-                let _ = handle.sender.send(Outbound::Frame(frame_codec::new_frame(
-                    Cmd::Kick as i32,
-                    0,
-                    body,
-                )));
+                handle.send_frame(frame_codec::new_frame(Cmd::Kick as i32, 0, body));
                 handle.close();
             }
             break;
@@ -463,19 +503,21 @@ async fn read_loop(
                     key.platform,
                     key.conn_id.as_str(),
                 ) {
-                    let _ = handle.sender.send(Outbound::Frame(frame_codec::new_frame(
+                    handle.send_frame(frame_codec::new_frame(
                         Cmd::Pong as i32,
                         frame.req_id,
                         Vec::new(),
-                    )));
-                }
-                let rpc = state.rpc.clone();
-                let heartbeat_ctx = ctx.clone();
-                tokio::spawn(async move {
-                    if let Err(err) = rpc.on_connected(heartbeat_ctx).await {
-                        warn!(?err, "failed to refresh route on heartbeat");
+                    ));
+                    if handle.should_refresh_route(state.config.route_renew_heartbeat_interval) {
+                        let rpc = state.rpc.clone();
+                        let heartbeat_ctx = ctx.clone();
+                        tokio::spawn(async move {
+                            if let Err(err) = rpc.on_connected(heartbeat_ctx).await {
+                                warn!(?err, "failed to refresh route on heartbeat");
+                            }
+                        });
                     }
-                });
+                }
             }
             cmd if cmd == Cmd::MsgRecvAck as i32 => {
                 let acked = state.pending_acks.ack(&key, frame.req_id);
@@ -496,27 +538,82 @@ async fn read_loop(
                 break;
             }
             cmd if cmd >= 0 => {
-                let response = state
+                let cmd = cmd as u32;
+                state.metrics.uplink_frame(cmd);
+                match state
                     .rpc
-                    .dispatch(ctx.clone(), cmd as u32, frame.body, frame.req_id)
-                    .await?;
-                if let Some(handle) = state.registry.get(
-                    key.tenant_id,
-                    key.user_id,
-                    key.platform,
-                    key.conn_id.as_str(),
-                ) {
-                    let _ = handle.sender.send(Outbound::Frame(frame_codec::new_frame(
-                        response.cmd as i32,
-                        frame.req_id,
-                        response.body,
-                    )));
+                    .dispatch(ctx.clone(), cmd, frame.body, frame.req_id)
+                    .await
+                {
+                    Ok(response) => {
+                        if let Some(handle) = state.registry.get(
+                            key.tenant_id,
+                            key.user_id,
+                            key.platform,
+                            key.conn_id.as_str(),
+                        ) {
+                            handle.send_frame(frame_codec::new_frame(
+                                response.cmd as i32,
+                                frame.req_id,
+                                response.body,
+                            ));
+                        }
+                    }
+                    Err(err) => {
+                        warn!(
+                            ?err,
+                            tenant_id = ctx.tenant_id,
+                            user_id = ctx.user_id,
+                            conn_id = ctx.conn_id,
+                            cmd,
+                            req_id = frame.req_id,
+                            "dispatch failed"
+                        );
+                        if let Some(handle) = state.registry.get(
+                            key.tenant_id,
+                            key.user_id,
+                            key.platform,
+                            key.conn_id.as_str(),
+                        ) {
+                            handle.send_frame(frame_codec::new_frame(
+                                Cmd::Error as i32,
+                                frame.req_id,
+                                frame_codec::gateway_error_body(
+                                    INTERNAL_ERROR,
+                                    "upstream unavailable",
+                                    frame.req_id,
+                                ),
+                            ));
+                        }
+                    }
                 }
             }
             _ => warn!(cmd = frame.cmd, "skip invalid negative cmd"),
         }
     }
+    warn!(
+        tenant_id = ctx.tenant_id,
+        user_id = ctx.user_id,
+        platform = ctx.platform,
+        conn_id = ctx.conn_id,
+        timeout_ms = idle_timeout.as_millis(),
+        "connection idle timeout or closed"
+    );
     Ok(())
+}
+
+async fn read_auth_frame(
+    receiver: &mut SplitStream<WebSocket>,
+    timeout: Duration,
+) -> Result<Frame> {
+    let next = time::timeout(timeout, receiver.next())
+        .await
+        .context("AUTH timeout")?
+        .context("websocket closed before AUTH")??;
+    match next {
+        Message::Binary(payload) => frame_codec::decode(&payload),
+        _ => anyhow::bail!("AUTH must be sent as binary protobuf frame"),
+    }
 }
 
 async fn send_auth_resp<S>(
@@ -572,6 +669,10 @@ fn timestamp_in_window(now: i64, timestamp: i64, window: Duration) -> bool {
     timestamp > 0 && now.abs_diff(timestamp) <= window.as_secs()
 }
 
+fn normalize_heartbeat_interval(heartbeat_interval_sec: u32) -> Duration {
+    Duration::from_secs(u64::from(heartbeat_interval_sec.max(30)))
+}
+
 fn unix_ts() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -581,7 +682,7 @@ fn unix_ts() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::timestamp_in_window;
+    use super::{normalize_heartbeat_interval, timestamp_in_window};
     use std::time::Duration;
 
     #[test]
@@ -590,5 +691,12 @@ mod tests {
         assert!(timestamp_in_window(1_000, 1_005, Duration::from_secs(5)));
         assert!(!timestamp_in_window(1_000, 994, Duration::from_secs(5)));
         assert!(!timestamp_in_window(1_000, 0, Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn heartbeat_interval_has_safe_default_floor() {
+        assert_eq!(normalize_heartbeat_interval(0), Duration::from_secs(30));
+        assert_eq!(normalize_heartbeat_interval(10), Duration::from_secs(30));
+        assert_eq!(normalize_heartbeat_interval(45), Duration::from_secs(45));
     }
 }
