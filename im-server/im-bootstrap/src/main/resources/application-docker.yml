@@ -7,6 +7,11 @@ spring:
     username: ${MYSQL_USER:root}
     password: ${MYSQL_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
   rabbitmq:
     host: ${RABBITMQ_HOST:rabbitmq}
     port: ${RABBITMQ_PORT:5672}
@@ -14,6 +19,13 @@ spring:
     password: ${RABBITMQ_PASSWORD}
 
 im:
+  startup-check:
+    enabled: ${IM_STARTUP_CHECK_ENABLED:true}
+    minio-config:
+      endpoint: ${MINIO_ENDPOINT:http://minio:9000}
+      access-key: ${MINIO_ROOT_USER}
+      secret-key: ${MINIO_ROOT_PASSWORD}
+      bucket: ${MINIO_BUCKET:im-media}
   outbox:
     enabled: ${OUTBOX_ENABLED:true}
   rpc:

@@ -1329,17 +1329,193 @@
 
 ---
 
+### T24 — 启动自检、Dockerfile 与网关握手防护
+
+状态：DONE
+
+目标：
+
+- 补齐 `docs/im-server-design.md` §6 的启动期自检：MySQL schema、Redis、RabbitMQ、MinIO bucket、workerId 租约 fail-fast。
+- 交付 compose app profile 可构建的 Dockerfile，解决 PR1 Q2 部署物挂账。
+- 补齐 `docs/architecture.md` §13.8 的 WebSocket Origin 校验和 §13.3 的实例级握手限流。
+
+涉及模块：
+
+- `im-server/im-bootstrap`
+- `im-gateway-rust`
+- `deploy/docker-compose`
+- `docs`
+
+需要修改的文件：
+
+- `im-server/Dockerfile`
+- `im-server/pom.xml`
+- `im-server/im-bootstrap/pom.xml`
+- `im-server/im-bootstrap/src/main/java/com/im/bootstrap/selfcheck/**`
+- `im-server/im-bootstrap/src/main/resources/application.yml`
+- `im-server/im-bootstrap/src/main/resources/application-docker.yml`
+- `im-gateway-rust/Dockerfile`
+- `im-gateway-rust/src/config.rs`
+- `im-gateway-rust/src/connection.rs`
+- `im-gateway-rust/src/handshake_limiter.rs`
+- `im-gateway-rust/src/main.rs`
+- `im-gateway-rust/src/state.rs`
+- `im-gateway-rust/README.md`
+- `im-web/Dockerfile`
+- `deploy/docker-compose/docker-compose.yml`
+- `deploy/docker-compose/.env.example`
+- `deploy/README.md`
+- `TASKS.md`
+
+验收标准：
+
+- docker profile 下 `im-server` 默认开启启动自检；本地 profile 默认关闭，不影响无中间件空跑。
+- 启动自检任一依赖失败会抛出 `ImException` 并终止应用。
+- `docker compose --profile app config` 可解析 app 服务构建配置。
+- `im-server`、`im-gateway-rust` Dockerfile 以仓库根为 build context，可读取 `im-proto`。
+- 网关 `/ws` 握手先做实例级令牌桶限流，再做 Origin 白名单校验；无 Origin 的原生客户端连接不受影响。
+- Origin 白名单、握手速率和突发容量均可通过环境变量配置。
+
+测试方式：
+
+- `mvn -q -pl im-bootstrap -am test`
+- `cargo fmt --check`
+- `cargo test`
+- `cargo clippy --all-targets -- -D warnings`
+- `docker compose --profile app config`
+
+完成记录：
+
+- 已新增 `StartupSelfCheckRunner`，docker profile 默认开启 MySQL 表、Redis PING、RabbitMQ exchange、MinIO bucket 和 workerId 租约自检；本地默认关闭。
+- 已新增 `im-server/Dockerfile`、`im-gateway-rust/Dockerfile`、`im-web/Dockerfile` 和根 `.dockerignore`。
+- compose app profile 已改为仓库根 build context，server/gateway 构建时可读取同级 `im-proto`；`im-server` 等待 `minio-init` 完成后启动。
+- 网关 `/ws` 已在 upgrade 前加入实例级 token bucket 握手限流和 Origin 白名单校验；无 Origin 的原生客户端连接允许通过。
+- 已执行 `mvn -q -pl im-bootstrap -am test`、`cargo fmt --check`、`cargo test`、`cargo clippy --all-targets -- -D warnings`，均通过。
+- 当前环境没有 Docker CLI，无法执行 `docker compose --profile app config`；已用 Ruby YAML 解析兜底校验 app build context 和 dockerfile 字段。
+
+---
+
+### T25 — 已读回执 MVP
+
+状态：PENDING
+
+目标：
+
+- 实现会话级 read_seq 上报，支持客户端同步已读位置。
+- 保持 MVP 简化：只做会话级已读，不做逐消息已读成员列表和复杂多端回执。
+
+涉及模块：
+
+- `im-proto`
+- `im-server/im-conversation-service`
+- `im-server/im-message-service`
+- `im-server/im-push-service`
+- `docs`
+
+需要修改的文件：
+
+- `im-proto/proto/body/messages.proto`
+- `im-server/im-conversation-service/src/main/java/com/im/conversation/**`
+- `im-server/im-message-service/src/main/java/com/im/message/**`
+- `im-server/im-push-service/src/main/java/com/im/push/**`
+- `TASKS.md`
+
+验收标准：
+
+- `READ_REPORT` 按 tenant/user/conv 校验成员身份后更新 `conversation_member.read_seq`。
+- read_seq 不允许回退，不允许超过会话当前 max_seq。
+- 推送只发轻量已读通知，不影响消息可靠链路。
+- 同步/历史接口能返回当前用户会话 read_seq。
+
+测试方式：
+
+- `mvn -q -pl im-conversation-service,im-message-service,im-push-service -am test`
+
+---
+
+### T26 — 群聊 MVP
+
+状态：PENDING
+
+目标：
+
+- 实现 500 人以内群聊的建群、成员变更、群消息发送与同步。
+- 复用 conversation/topic 模型和 PushEnvelope 批量路由，不做大群特殊路径。
+
+涉及模块：
+
+- `im-proto`
+- `im-server/im-group-service`
+- `im-server/im-conversation-service`
+- `im-server/im-message-service`
+- `im-server/im-push-service`
+- `docs`
+
+需要修改的文件：
+
+- `im-proto/proto/body/messages.proto`
+- `im-server/im-group-service/src/main/java/com/im/group/**`
+- `im-server/im-conversation-service/src/main/java/com/im/conversation/**`
+- `im-server/im-message-service/src/main/java/com/im/message/**`
+- `TASKS.md`
+
+验收标准：
+
+- 建群默认创建 GROUP conversation，写入 operator 和初始成员。
+- 群成员上限默认 500，超限拒绝。
+- 群消息只允许成员发送；收件人按群成员扇出，排除发送者由产品决定并记录。
+- 成员变更产生 `NotificationContent` 系统消息并拿会话 seq。
+
+测试方式：
+
+- `mvn -q -pl im-group-service,im-conversation-service,im-message-service -am test`
+
+---
+
+### T27 — 文件上传 MVP
+
+状态：PENDING
+
+目标：
+
+- 实现 MinIO 预签名直传和上传确认，支持后续图片/语音消息引用文件元数据。
+- MVP 只做对象凭证和元数据落库，不走业务服务器中转文件流。
+
+涉及模块：
+
+- `im-server/im-file-service`
+- `im-server/im-message-service`
+- `deploy`
+- `docs`
+
+需要修改的文件：
+
+- `im-server/im-file-service/src/main/java/com/im/file/**`
+- `im-server/im-message-service/src/main/java/com/im/message/**`
+- `im-server/im-bootstrap/src/main/resources/application.yml`
+- `deploy/docker-compose/docker-compose.yml`
+- `TASKS.md`
+
+验收标准：
+
+- `POST /api/v1/files/presign` 返回 5 分钟有效的 PUT 预签名 URL。
+- 限制 content-type、大小、对象 key 前缀和租户隔离。
+- 上传确认落库文件元数据，消息发送只能引用同租户已确认文件。
+- 不实现转码、缩略图、病毒扫描和第三方离线推送。
+
+测试方式：
+
+- `mvn -q -pl im-file-service,im-message-service -am test`
+
+---
+
 ## 4. 后续候选任务（当前阶段不执行）
 
 这些任务进入后续阶段，不在当前 im-server MVP 优先队列：
 
-- 已读回执。
-- 群聊。
-- 文件上传和 MinIO 预签名。
 - 内容安全审核。
 - 客服会话。
 - Web/App 客户端。
-- Dockerfile/compose app 部署物（PR1 复审 L3/Q2）：进入部署收尾 PR。
 - 图片/语音消息（PR1 复审 Q3）：进入文件上传与消息类型 PR。
 
 ## 5. 当前待确认点

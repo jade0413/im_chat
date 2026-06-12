@@ -16,6 +16,7 @@ spring:
     redis:
       host: ${IM_REDIS_HOST:localhost}
       port: ${IM_REDIS_PORT:6379}
+      password: ${IM_REDIS_PASSWORD:${REDIS_PASSWORD:}}
   rabbitmq:
     host: ${IM_RABBITMQ_HOST:${RABBITMQ_HOST:localhost}}
     port: ${IM_RABBITMQ_PORT:${RABBITMQ_PORT:5672}}
@@ -61,7 +62,7 @@ im:
       port: ${IM_CONVERSATION_RPC_PORT:${im.grpc.port}}
   auth:
     jwt:
-      secret: ${IM_AUTH_JWT_SECRET:dev-only-change-me-please-dev-only-change-me}
+      secret: ${IM_AUTH_JWT_SECRET:${JWT_SECRET:dev-only-change-me-please-dev-only-change-me}}
       issuer: im-server
       access-ttl: 2h
       refresh-ttl: 30d
@@ -78,3 +79,21 @@ im:
     event-dedup-ttl: ${IM_PUSH_EVENT_DEDUP_TTL:24h}
     gateway-queue-prefix: ${IM_PUSH_GATEWAY_QUEUE_PREFIX:push.gw.}
     msg-saved-queue: ${IM_PUSH_MSG_SAVED_QUEUE:im.push.msg.saved}
+  startup-check:
+    enabled: ${IM_STARTUP_CHECK_ENABLED:false}
+    mysql: ${IM_STARTUP_CHECK_MYSQL:true}
+    redis: ${IM_STARTUP_CHECK_REDIS:true}
+    rabbitmq: ${IM_STARTUP_CHECK_RABBITMQ:true}
+    minio: ${IM_STARTUP_CHECK_MINIO:true}
+    required-tables:
+      - tenant
+      - user
+      - conversation
+      - conversation_member
+      - message
+      - outbox_event
+    minio-config:
+      endpoint: ${IM_MINIO_ENDPOINT:${MINIO_ENDPOINT:http://localhost:9000}}
+      access-key: ${IM_MINIO_ACCESS_KEY:${MINIO_ROOT_USER:im_minio}}
+      secret-key: ${IM_MINIO_SECRET_KEY:${MINIO_ROOT_PASSWORD:im_dev_minio_pwd}}
+      bucket: ${IM_MINIO_BUCKET:im-media}

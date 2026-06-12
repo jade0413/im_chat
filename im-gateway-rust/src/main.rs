@@ -1,6 +1,7 @@
 mod config;
 mod connection;
 mod frame_codec;
+mod handshake_limiter;
 mod metrics;
 mod proto;
 mod push;
@@ -10,6 +11,7 @@ mod state;
 use crate::{
     config::Config,
     connection::{ConnectionRegistry, PendingAcks},
+    handshake_limiter::HandshakeLimiter,
     metrics::Metrics,
     rpc::RpcClients,
     state::AppState,
@@ -32,6 +34,10 @@ async fn main() -> Result<()> {
         rpc,
         registry: ConnectionRegistry::new(),
         pending_acks: PendingAcks::new(),
+        handshake_limiter: HandshakeLimiter::new(
+            config.handshake_rate_limit_per_sec,
+            config.handshake_rate_limit_burst,
+        ),
         metrics: Metrics::default(),
     };
 
@@ -55,9 +61,12 @@ async fn main() -> Result<()> {
         queue = queue_name.as_str(),
         "im gateway started"
     );
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
     push_task.abort();
     Ok(())
 }

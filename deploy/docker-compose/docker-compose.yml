@@ -99,10 +99,13 @@ services:
   # ---------------- 应用（profile: app，镜像就绪后启用） ----------------
   im-server:
     profiles: ["app"]
-    build: ../../im-server
+    build:
+      context: ../..
+      dockerfile: im-server/Dockerfile
     container_name: im-server
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      IM_STARTUP_CHECK_ENABLED: "true"
       MYSQL_URL: jdbc:mysql://mysql:3306/im
       MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       REDIS_HOST: redis
@@ -113,39 +116,46 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
+      MINIO_BUCKET: im-media
+      IM_AUTH_JWT_SECRET: ${JWT_SECRET}
     ports:
       - "8081:8081"    # REST
       - "9091:9091"    # gRPC（网关 -> Uplink/GatewayAuth/ConnEvent）
     depends_on:
-      mysql:    { condition: service_healthy }
-      redis:    { condition: service_healthy }
-      rabbitmq: { condition: service_healthy }
-      minio:    { condition: service_healthy }
+      mysql:      { condition: service_healthy }
+      redis:      { condition: service_healthy }
+      rabbitmq:   { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
 
   im-gateway:
     profiles: ["app"]
-    build: ../../im-gateway-rust
+    build:
+      context: ../..
+      dockerfile: im-gateway-rust/Dockerfile
     container_name: im-gateway
     environment:
       GW_INSTANCE_ID: gw-1
       GW_WS_BIND: 0.0.0.0:8080
       UPSTREAM_GRPC: http://im-server:9091
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/%2f
+      IM_GATEWAY_ALLOWED_ORIGINS: ${IM_GATEWAY_ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1}
+      IM_GATEWAY_HANDSHAKE_RATE_LIMIT_PER_SEC: ${IM_GATEWAY_HANDSHAKE_RATE_LIMIT_PER_SEC:-200}
+      IM_GATEWAY_HANDSHAKE_RATE_LIMIT_BURST: ${IM_GATEWAY_HANDSHAKE_RATE_LIMIT_BURST:-400}
     ports:
       - "8080:8080"    # WSS 由前置 nginx/SLB 卸载 TLS，容器内明文
     depends_on:
-      - im-server
+      im-server: { condition: service_healthy }
 
   im-web:
     profiles: ["app"]
-    build: ../../im-web
+    build:
+      context: ../..
+      dockerfile: im-web/Dockerfile
     container_name: im-web
     ports:
       - "80:80"
     depends_on:
-      - im-gateway
+      im-gateway: { condition: service_healthy }
 
   # ---------------- 观测栈（profile: obs，架构 §13.4） ----------------
   prometheus:

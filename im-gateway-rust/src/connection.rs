@@ -11,9 +11,11 @@ use crate::{
 use anyhow::{Context, Result};
 use axum::{
     extract::{
+        connect_info::ConnectInfo,
         ws::{Message, WebSocket, WebSocketUpgrade},
         State,
     },
+    http::{header::ORIGIN, HeaderMap, StatusCode},
     response::IntoResponse,
 };
 use dashmap::DashMap;
@@ -341,7 +343,23 @@ impl PendingAcks {
     }
 }
 
-pub async fn ws_handler(State(state): State<AppState>, ws: WebSocketUpgrade) -> impl IntoResponse {
+pub async fn ws_handler(
+    State(state): State<AppState>,
+    ConnectInfo(peer_addr): ConnectInfo<std::net::SocketAddr>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    if !state.handshake_limiter.allow() {
+        warn!(%peer_addr, "websocket handshake rejected by rate limit");
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    }
+    if !origin_allowed(
+        headers.get(ORIGIN).and_then(|value| value.to_str().ok()),
+        &state.config.allowed_origins,
+    ) {
+        warn!(%peer_addr, "websocket handshake rejected by origin policy");
+        return StatusCode::FORBIDDEN.into_response();
+    }
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
@@ -728,11 +746,20 @@ fn unix_ts() -> i64 {
         .as_secs() as i64
 }
 
+fn origin_allowed(origin: Option<&str>, allowed_origins: &[String]) -> bool {
+    let Some(origin) = origin else {
+        return true;
+    };
+    allowed_origins
+        .iter()
+        .any(|allowed| allowed == "*" || allowed.eq_ignore_ascii_case(origin))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        frame_codec, normalize_heartbeat_interval, timestamp_in_window, ConnCtx, ConnectionHandle,
-        FrameSendResult,
+        frame_codec, normalize_heartbeat_interval, origin_allowed, timestamp_in_window, ConnCtx,
+        ConnectionHandle, FrameSendResult,
     };
     use std::time::Duration;
     use tokio::sync::{mpsc, watch};
@@ -750,6 +777,20 @@ mod tests {
         assert_eq!(normalize_heartbeat_interval(0), Duration::from_secs(30));
         assert_eq!(normalize_heartbeat_interval(10), Duration::from_secs(30));
         assert_eq!(normalize_heartbeat_interval(45), Duration::from_secs(45));
+    }
+
+    #[test]
+    fn validates_origin_against_allowlist() {
+        let allowed = vec!["https://app.example.com".to_string()];
+
+        assert!(origin_allowed(None, &allowed));
+        assert!(origin_allowed(Some("https://app.example.com"), &allowed));
+        assert!(origin_allowed(Some("HTTPS://APP.EXAMPLE.COM"), &allowed));
+        assert!(!origin_allowed(Some("https://evil.example.com"), &allowed));
+        assert!(origin_allowed(
+            Some("https://evil.example.com"),
+            &["*".to_string()]
+        ));
     }
 
     #[test]

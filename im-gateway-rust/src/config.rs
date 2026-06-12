@@ -8,6 +8,9 @@ pub struct Config {
     pub upstream_grpc: String,
     pub rabbitmq_url: String,
     pub gateway_queue_prefix: String,
+    pub allowed_origins: Vec<String>,
+    pub handshake_rate_limit_per_sec: u32,
+    pub handshake_rate_limit_burst: u32,
     pub auth_timeout: Duration,
     pub auth_replay_window: Duration,
     pub push_ack_timeout: Duration,
@@ -39,6 +42,16 @@ impl Config {
                 &["IM_PUSH_GATEWAY_QUEUE_PREFIX", "GW_PUSH_QUEUE_PREFIX"],
                 "push.gw.",
             ),
+            allowed_origins: read_csv_env(&["IM_GATEWAY_ALLOWED_ORIGINS"], "*"),
+            handshake_rate_limit_per_sec: read_env(
+                &["IM_GATEWAY_HANDSHAKE_RATE_LIMIT_PER_SEC"],
+                "200",
+            )
+            .parse()
+            .context("invalid handshake rate limit per second")?,
+            handshake_rate_limit_burst: read_env(&["IM_GATEWAY_HANDSHAKE_RATE_LIMIT_BURST"], "400")
+                .parse()
+                .context("invalid handshake rate limit burst")?,
             auth_timeout: read_duration_secs(&["IM_GATEWAY_AUTH_TIMEOUT_SEC"], 5),
             auth_replay_window: read_duration_secs(&["IM_GATEWAY_AUTH_REPLAY_WINDOW_SEC"], 300),
             push_ack_timeout: read_duration_secs(&["IM_GATEWAY_PUSH_ACK_TIMEOUT_SEC"], 10),
@@ -74,6 +87,15 @@ fn read_env(keys: &[&str], default: &str) -> String {
         .unwrap_or_else(|| default.to_string())
 }
 
+fn read_csv_env(keys: &[&str], default: &str) -> Vec<String> {
+    read_env(keys, default)
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
 fn read_duration_secs(keys: &[&str], default_secs: u64) -> Duration {
     let secs = keys
         .iter()
@@ -95,6 +117,9 @@ mod tests {
             upstream_grpc: "http://127.0.0.1:9091".to_string(),
             rabbitmq_url: "amqp://localhost:5672/%2f".to_string(),
             gateway_queue_prefix: "push.gw.".to_string(),
+            allowed_origins: vec!["*".to_string()],
+            handshake_rate_limit_per_sec: 200,
+            handshake_rate_limit_burst: 400,
             auth_timeout: std::time::Duration::from_secs(5),
             auth_replay_window: std::time::Duration::from_secs(300),
             push_ack_timeout: std::time::Duration::from_secs(10),

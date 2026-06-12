@@ -1,0 +1,9 @@
+.git
+.idea
+**/target
+**/build
+**/.gradle
+**/node_modules
+**/.DS_Store
+deploy/docker-compose/.env
+im-gateway-rust/target
