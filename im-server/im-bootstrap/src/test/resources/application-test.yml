@@ -1,0 +1,28 @@
+spring:
+  config:
+    activate:
+      on-profile: test
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: im
+    password: im_dev_mq_pwd
+
+management:
+  health:
+    db:
+      enabled: false
+    redis:
+      enabled: false
+    rabbit:
+      enabled: false
+
+im:
+  outbox:
+    enabled: false
+  auth:
+    jwt:
+      secret: test-only-secret-test-only-secret-123456
+      issuer: im-server
+      access-ttl: 2h
+      refresh-ttl: 30d

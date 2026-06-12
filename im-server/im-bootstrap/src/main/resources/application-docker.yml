@@ -1,0 +1,21 @@
+spring:
+  config:
+    activate:
+      on-profile: docker
+  datasource:
+    url: ${MYSQL_URL:jdbc:mysql://mysql:3306/im?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:im}
+    password: ${RABBITMQ_PASSWORD}
+
+im:
+  outbox:
+    enabled: ${OUTBOX_ENABLED:true}
+  rpc:
+    gateway:
+      port: 9091

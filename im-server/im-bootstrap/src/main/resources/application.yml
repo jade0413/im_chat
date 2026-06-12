@@ -1,0 +1,67 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: im-server
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${IM_MYSQL_URL:jdbc:mysql://localhost:3306/im?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    username: ${IM_MYSQL_USERNAME:root}
+    password: ${IM_MYSQL_PASSWORD:im_dev_mysql_pwd}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${IM_REDIS_HOST:localhost}
+      port: ${IM_REDIS_PORT:6379}
+  rabbitmq:
+    host: ${IM_RABBITMQ_HOST:${RABBITMQ_HOST:localhost}}
+    port: ${IM_RABBITMQ_PORT:${RABBITMQ_PORT:5672}}
+    username: ${IM_RABBITMQ_USERNAME:${RABBITMQ_USER:im}}
+    password: ${IM_RABBITMQ_PASSWORD:${RABBITMQ_PASSWORD:im_dev_mq_pwd}}
+    publisher-confirm-type: correlated
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    db:
+      enabled: false
+    redis:
+      enabled: false
+    rabbit:
+      enabled: false
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+im:
+  grpc:
+    port: ${IM_GRPC_PORT:9091}
+  rpc:
+    conversation:
+      host: ${IM_CONVERSATION_RPC_HOST:localhost}
+      port: ${IM_CONVERSATION_RPC_PORT:${im.grpc.port}}
+  auth:
+    jwt:
+      secret: ${IM_AUTH_JWT_SECRET:dev-only-change-me-please-dev-only-change-me}
+      issuer: im-server
+      access-ttl: 2h
+      refresh-ttl: 30d
+  gateway-auth:
+    heartbeat-interval-sec: ${IM_GATEWAY_AUTH_HEARTBEAT_INTERVAL_SEC:30}
+  outbox:
+    enabled: ${IM_OUTBOX_ENABLED:false}
+    tenant-id: ${IM_OUTBOX_TENANT_ID:1}
+    batch-size: ${IM_OUTBOX_BATCH_SIZE:100}
+    interval: ${IM_OUTBOX_INTERVAL:100ms}
+    max-retries: ${IM_OUTBOX_MAX_RETRIES:16}
+    confirm-timeout: ${IM_OUTBOX_CONFIRM_TIMEOUT:5s}
