@@ -13,6 +13,7 @@ import com.im.push.config.PushProperties;
 import com.im.push.route.OnlineRoute;
 import com.im.push.route.OnlineRouteRepository;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,10 +46,11 @@ class PushDispatchServiceTest {
 
   @Test
   void groupsPushEnvelopeByGatewayInstance() {
-    when(routeRepository.findAll(1L, 100L)).thenReturn(List.of(route(100L, "gw-a", "conn-a")));
-    when(routeRepository.findAll(1L, 200L)).thenReturn(List.of(route(200L, "gw-a", "conn-b")));
-    when(routeRepository.findAll(1L, 300L)).thenReturn(List.of(route(300L, "gw-b", "conn-c")));
-    when(routeRepository.findAll(1L, 400L)).thenReturn(List.of());
+    when(routeRepository.findAllByUsers(1L, List.of(100L, 200L, 300L, 400L)))
+        .thenReturn(List.of(
+            route(100L, "gw-a", "conn-a"),
+            route(200L, "gw-a", "conn-b"),
+            route(300L, "gw-b", "conn-c")));
 
     PushResult result = service.pushToUsers(1L, List.of(100L, 200L, 300L, 400L),
         Cmd.MSG_PUSH_VALUE, "body".getBytes(), true);
@@ -61,6 +63,19 @@ class PushDispatchServiceTest {
     assertThat(gwAEnvelope.getTargetsList()).hasSize(2);
     assertThat(gwAEnvelope.getCmd()).isEqualTo(Cmd.MSG_PUSH_VALUE);
     assertThat(gwAEnvelope.getNeedAck()).isTrue();
+  }
+
+  @Test
+  void normalizesDuplicateAndInvalidTargetsBeforeBatchLookup() {
+    when(routeRepository.findAllByUsers(1L, List.of(100L, 200L)))
+        .thenReturn(List.of(route(100L, "gw-a", "conn-a")));
+
+    PushResult result = service.pushToUsers(1L, Arrays.asList(null, -1L, 100L, 100L, 200L),
+        Cmd.MSG_PUSH_VALUE, null, false);
+
+    assertThat(result.onlineCount()).isEqualTo(1);
+    assertThat(result.offlineCount()).isEqualTo(1);
+    verify(routeRepository).findAllByUsers(1L, List.of(100L, 200L));
   }
 
   @Test

@@ -17,6 +17,7 @@ import com.im.push.route.OnlineRouteRepository;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
@@ -44,14 +45,17 @@ public class PushDispatchService {
     if (userIds == null || userIds.isEmpty()) {
       return new PushResult(0, 0);
     }
+    List<Long> targetUserIds = normalizeUserIds(userIds);
+    if (targetUserIds.isEmpty()) {
+      return new PushResult(0, 0);
+    }
+    Map<Long, List<OnlineRoute>> routesByUser = groupRoutesByUser(
+        routeRepository.findAllByUsers(tenantId, targetUserIds));
     Map<String, List<OnlineRoute>> routesByGateway = new LinkedHashMap<>();
     int offlineUsers = 0;
     int onlineRoutes = 0;
-    for (Long userId : userIds) {
-      if (userId == null || userId <= 0) {
-        continue;
-      }
-      List<OnlineRoute> routes = routeRepository.findAll(tenantId, userId);
+    for (Long userId : targetUserIds) {
+      List<OnlineRoute> routes = routesByUser.getOrDefault(userId, List.of());
       if (routes.isEmpty()) {
         offlineUsers++;
         continue;
@@ -101,6 +105,24 @@ public class PushDispatchService {
       entry.getValue().forEach(route -> envelope.addTargets(toTarget(route)));
       gatewayPushPublisher.publish(entry.getKey(), envelope.build());
     }
+  }
+
+  private List<Long> normalizeUserIds(Collection<Long> userIds) {
+    LinkedHashSet<Long> normalized = new LinkedHashSet<>();
+    for (Long userId : userIds) {
+      if (userId != null && userId > 0) {
+        normalized.add(userId);
+      }
+    }
+    return List.copyOf(normalized);
+  }
+
+  private Map<Long, List<OnlineRoute>> groupRoutesByUser(List<OnlineRoute> routes) {
+    Map<Long, List<OnlineRoute>> grouped = new LinkedHashMap<>();
+    for (OnlineRoute route : routes) {
+      grouped.computeIfAbsent(route.userId(), ignored -> new ArrayList<>()).add(route);
+    }
+    return grouped;
   }
 
   private void publishKick(OnlineRoute route, int reason) {

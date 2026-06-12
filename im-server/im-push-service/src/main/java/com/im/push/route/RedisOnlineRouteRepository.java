@@ -6,10 +6,12 @@ import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.common.redis.RedisKeys;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Repository;
@@ -46,8 +48,18 @@ public class RedisOnlineRouteRepository implements OnlineRouteRepository {
 
   @Override
   public List<OnlineRoute> findAll(long tenantId, long userId) {
-    Set<String> keys = redisTemplate.keys(RedisKeys.userRoutePattern(tenantId, userId));
-    if (keys == null || keys.isEmpty()) {
+    validateRouteOwner(tenantId, userId);
+    return findAllByUsers(tenantId, List.of(userId));
+  }
+
+  @Override
+  public List<OnlineRoute> findAllByUsers(long tenantId, Collection<Long> userIds) {
+    validateTenant(tenantId);
+    if (userIds == null || userIds.isEmpty()) {
+      return List.of();
+    }
+    List<String> keys = routeKeys(tenantId, userIds);
+    if (keys.isEmpty()) {
       return List.of();
     }
     List<String> values = redisTemplate.opsForValue().multiGet(keys);
@@ -69,6 +81,35 @@ public class RedisOnlineRouteRepository implements OnlineRouteRepository {
 
   private String key(OnlineRoute route) {
     return RedisKeys.route(route.tenantId(), route.userId(), route.platformClass());
+  }
+
+  private List<String> routeKeys(long tenantId, Collection<Long> userIds) {
+    LinkedHashSet<Long> normalizedUserIds = new LinkedHashSet<>();
+    for (Long userId : userIds) {
+      if (userId != null && userId > 0) {
+        normalizedUserIds.add(userId);
+      }
+    }
+    if (normalizedUserIds.isEmpty()) {
+      return List.of();
+    }
+    List<String> keys = new ArrayList<>(normalizedUserIds.size() * PlatformClass.values().length);
+    for (Long userId : normalizedUserIds) {
+      for (PlatformClass platformClass : PlatformClass.values()) {
+        keys.add(RedisKeys.route(tenantId, userId, platformClass.key()));
+      }
+    }
+    return keys;
+  }
+
+  private void validateRouteOwner(long tenantId, long userId) {
+    RedisKeys.route(tenantId, userId, PlatformClass.MOBILE.key());
+  }
+
+  private void validateTenant(long tenantId) {
+    if (tenantId <= 0) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "tenantId must be positive");
+    }
   }
 
   private String encode(OnlineRoute route) {

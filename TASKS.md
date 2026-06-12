@@ -1229,6 +1229,56 @@
 
 ---
 
+### T22 — push 路由批量查询优化与 enforcer 挂账核验
+
+状态：DONE
+
+目标：
+
+- 先解决群聊/已读回执 PR 前置的 P1：push 模块路由查询必须支持批量用户查询。
+- 去掉按用户循环 `KEYS route:{tenant}:{user}:*` 的实现，避免群聊 500 人扇出时放大 Redis RTT 和阻塞扫描风险。
+- 核验 PR-1 L1：`im-common` 必须绑定 Maven enforcer，不能让业务模块互依赖规则漏检。
+
+涉及模块：
+
+- `im-server/im-push-service`
+- `im-server/im-common`
+- `docs`
+
+需要修改的文件：
+
+- `im-server/im-push-service/src/main/java/com/im/push/route/OnlineRouteRepository.java`
+- `im-server/im-push-service/src/main/java/com/im/push/route/RedisOnlineRouteRepository.java`
+- `im-server/im-push-service/src/main/java/com/im/push/service/PushDispatchService.java`
+- `im-server/im-push-service/src/test/java/com/im/push/service/PushDispatchServiceTest.java`
+- `im-server/im-push-service/src/test/java/com/im/push/route/RedisOnlineRouteRepositoryTest.java`
+- `TASKS.md`
+- `docs/reviews/2026-06-13-pr3-gateway-rereview.md`
+
+验收标准：
+
+- `PushDispatchService.pushToUsers` 对目标用户去重后只调用一次批量路由查询。
+- Redis 路由查询按 `mobile/desktop/web` 三类平台 key 构造固定 key 列表并一次 `multiGet`，不再使用 `KEYS` 通配扫描。
+- 在线连接仍按 `gw_instance` 分组生成 `PushEnvelope`，离线用户计数按去重后的目标用户计算。
+- 重复 userId、null userId、非法 userId 不会造成重复推送或 Redis 无效查询。
+- `im-common` 的 enforcer 插件绑定已通过 `validate` 阶段核验。
+
+测试方式：
+
+- `mvn -q -pl im-push-service -am test`
+- `mvn -q -pl im-common validate`
+
+完成记录：
+
+- 已新增 `OnlineRouteRepository.findAllByUsers`，`PushDispatchService.pushToUsers` 对目标用户去重后一次批量查询路由。
+- `RedisOnlineRouteRepository` 不再使用 `KEYS route:{tenant}:{user}:*`，改为按 `mobile/desktop/web` 三类固定 key 构造后一次 `multiGet`。
+- 已补单测覆盖网关分组不变、重复/非法目标用户去重、Redis 批量查询不调用 `keys(pattern)`。
+- PR-1 L1 挂账已核验：`im-common` 已绑定父 POM enforcer，`mvn -q -pl im-common validate` 通过。
+- 已执行 `mvn -q -pl im-push-service -am test`，通过；当前环境无 `/var/run/docker.sock`，Testcontainers 探测日志仍会出现但未导致测试失败。
+- 已补跑 PR-3 复审备注要求的 `cargo fmt --check`、`cargo test`、`cargo clippy --all-targets -- -D warnings`，均通过。
+
+---
+
 ## 4. 后续候选任务（当前阶段不执行）
 
 这些任务进入后续阶段，不在当前 im-server MVP 优先队列：
