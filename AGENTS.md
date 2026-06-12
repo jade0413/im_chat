@@ -38,6 +38,7 @@
 | D25 | 2026-06-13 | TenantContext = **普通 ThreadLocal**（finally 清理），**禁用 --enable-preview**（PR-1 审查 S3 的裁决） | ScopedValue 在 JDK21 是预览特性，测试加参数而生产没加 → 启动即崩；虚拟线程不复用，ThreadLocal 无泄漏风险 |
 | D26 | 2026-06-13 | seq 方案采纳 **MySQL conversation 行锁自增**：`UPDATE conversation SET max_seq=max_seq+1` 与 message/conversation/outbox 同事务；Redis seq 降级为高吞吐预留路径 | PR-1 审查 S7 补流程：实现偏离文档但技术方向更稳，同事务无空洞、回滚一致、少一个 Redis 故障依赖；流程教训记录在案：后续偏离文档必须先提 Open Question |
 | D27 | 2026-06-13 | `token_ver` 精确语义：REST 登录/注册按平台类递增 `token_ver` 并写入 JWT；`GatewayAuth.VerifyToken` 校验 token 内版本等于 Redis 当前版本；`ConnEvent.OnConnected` 只负责 KICK 旧连接并替换路由 | 避免 OnConnected 递增版本后把新连接 token 一并失效；仍满足同类互踢时旧 token 立即失效 |
+| D28 | 2026-06-13 | `need_ack` 下行确认使用 `Frame.req_id`：网关为每个目标连接分配非 0 `req_id`，客户端 `MSG_RECV_ACK` 回带同 `req_id`；业务 ack body 仍原样转发 Java | 网关不编译业务 body proto，仍能精确跟踪下行送达；10s 未 ack 主动断连并走 SYNC 补齐，不做服务端重推 |
 
 ## 设计文档索引
 
@@ -46,7 +47,7 @@
 
 ## 技术栈
 
-- 网关：Rust stable, tokio, tonic(gRPC client), prost(protobuf), redis-rs
+- 网关：Rust stable, tokio, axum ws, tonic(gRPC client), prost(protobuf), lapin(RabbitMQ)；MVP 路由表由 Java push 模块通过 ConnEvent 维护
 - 业务：JDK 21（虚拟线程开启）, Spring Boot 3.2, MyBatis-Plus, grpc-java
 - 协议：Protobuf3（im-proto 是唯一事实来源，Rust 用 prost 生成，Java 用 protoc 插件生成）
 - 存储：MySQL 8（消息/业务/会话级 seq）、Redis 7（路由表/在线状态/缓存/幂等）、MinIO（对象存储）

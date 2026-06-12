@@ -1112,11 +1112,65 @@
 
 ---
 
+### T20 — Rust 网关基础链路
+
+状态：DONE
+
+目标：
+
+- 建立 `im-gateway-rust` 可维护工程骨架。
+- 实现 WS 连接鉴权、PING/PONG、上行业务帧透传 `Uplink.Dispatch`。
+- 实现消费 `push.gw.{instance}` 的 `PushEnvelope`，按本地连接投递下行帧。
+- 对 `need_ack=true` 的下行帧使用网关分配的 `req_id` 做送达跟踪，超时主动断连，依赖客户端重连 `SYNC_REQ` 补齐。
+
+涉及模块：
+
+- `im-gateway-rust`
+- `im-proto`
+- `docs`
+
+需要修改的文件：
+
+- `im-gateway-rust/Cargo.toml`
+- `im-gateway-rust/build.rs`
+- `im-gateway-rust/src/**`
+- `im-gateway-rust/README.md`
+- `TASKS.md`
+- `AGENTS.md`
+- `CLAUDE.md`
+- `docs/protocol.md`
+- `docs/architecture.md`
+
+验收标准：
+
+- 网关只编译 `ws/frame.proto` 与 `rpc/gateway.proto`，不编译业务 body proto。
+- WS 建连后 5s 内必须收到 `AUTH`，鉴权成功后调用 `ConnEvent.OnConnected`，断连调用 `ConnEvent.OnDisconnected`。
+- `PING` 返回 `PONG`；业务上行帧原样调用 `Uplink.Dispatch` 并回写同 `req_id` 响应。
+- RabbitMQ 队列 `push.gw.{instance}` 消费 `PushEnvelope`，只投递本实例本地连接；`KICK` 投递后主动断连。
+- `need_ack=true` 时网关为下行帧分配非 0 `req_id`，收到同连接 `MSG_RECV_ACK` 且 `req_id` 一致才清除 pending ack。
+- ack 超时不重推，主动关闭连接并通知 `ConnEvent.OnDisconnected`，后续由客户端重连同步补齐。
+
+测试方式：
+
+- `cargo fmt --check`
+- `cargo test`
+- `cargo clippy --all-targets -- -D warnings`
+
+完成记录：
+
+- 已新增 Rust 工程 `im-gateway-rust`，通过 `build.rs` 只生成 `ws/frame.proto` 与 `rpc/gateway.proto`。
+- 已实现 `/ws`：5s 内 AUTH、gRPC `GatewayAuth.VerifyToken`、`ConnEvent.OnConnected/OnDisconnected`、PING/PONG、业务帧 `Uplink.Dispatch` 透传。
+- 已实现 RabbitMQ `push.gw.{instance}` 消费，按本地 ConnMap 投递 `PushEnvelope`，`KICK` 下发后关闭连接。
+- 已实现 D28：`need_ack=true` 下行帧由网关分配 `req_id`，`MSG_RECV_ACK` 回同 `req_id` 才清 pending；超时关闭连接并通知断连，不做重推。
+- 已在 PING 时异步调用幂等 `ConnEvent.OnConnected` 刷新 Java push 模块里的 Redis 路由 TTL。
+- 已执行 `cargo fmt --check`、`cargo test`、`cargo clippy --all-targets -- -D warnings`，均通过。
+
+---
+
 ## 4. 后续候选任务（当前阶段不执行）
 
 这些任务进入后续阶段，不在当前 im-server MVP 优先队列：
 
-- Rust 网关骨架、AUTH/PING、Uplink 转发。
 - 已读回执。
 - 群聊。
 - 文件上传和 MinIO 预签名。
@@ -1128,4 +1182,4 @@
 
 ## 5. 当前待确认点
 
-- `architecture.md` 部分文字提到 WS 长度前缀和 `seq_id`，实际 `frame.proto` 已明确为一个 WebSocket Binary Message 对应一个 `Frame`，字段名为 `req_id`。后续实现以 proto 为准。
+- 暂无。T20 已修正 `architecture.md` 中与当前网关协议和职责边界不一致的旧表述。

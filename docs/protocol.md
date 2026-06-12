@@ -35,9 +35,9 @@ WSS 连接 → 5s 内必须发 AUTH（否则断）→ 网关 gRPC VerifyToken（
 
 ## 3. req/ack 配对与可靠性
 
-- `req_id`：客户端连接内自增；同步语义帧（MSG_SEND/SYNC_REQ/READ_REPORT）的响应帧回带同 req_id；服务端主动推送 req_id=0
+- `req_id`：客户端连接内自增；同步语义帧（MSG_SEND/SYNC_REQ/READ_REPORT）的响应帧回带同 req_id；不需 ack 的服务端主动推送 req_id=0；`PushEnvelope.need_ack=true` 的下行帧由网关分配非 0 req_id（D28），客户端 `MSG_RECV_ACK` 必须回带同 req_id
 - 客户端对 MSG_SEND 维护待确认队列：5s 无 MSG_SEND_ACK → 原 client_msg_id 重发（服务端幂等去重）→ 3 次失败标记发送失败
-- 服务端推送可靠性：PushEnvelope.need_ack=true 的帧（MSG_PUSH），网关跟踪 MSG_RECV_ACK，不重推——
+- 服务端推送可靠性：PushEnvelope.need_ack=true 的帧（MSG_PUSH），网关按 `req_id` 跟踪 MSG_RECV_ACK，不解码业务 ack body，不重推——
   对半死链重推 N 次照样全丢，是无效功。改用**死链判定**：
   10s 未收到 ack → 网关判定该连接为半死链 → 主动断开 + 清路由 → 客户端检测到断连立即自动重连 → 重连必发 SYNC_REQ → seq 对齐补回全部缺失。
   效果：在线接收方的最坏空窗 ≈ 10s(ack超时) + 重连耗时，且一次同步补齐所有积压，无重复消息；

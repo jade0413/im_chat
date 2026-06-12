@@ -114,13 +114,13 @@ CS_SESSION 语义精确化（D23）：它是**带生命周期状态机的会话*
 职责清单（也是职责上限，核心约定2）：
 
 1. WS 握手：读取 `token` + `tenant_id` + `device_id` + `platform`，gRPC 调 user 模块校验 token 中的平台类和 `token_ver`，失败即断
-2. 连接注册：本地 ConnMap（DashMap<user_key, conn>），并写 Redis 路由表 `route:{tenant}:{uid}:{platform_class} -> {gw_instance,conn_id,platform,device_id}`（TTL 默认 90s，心跳续期）
-3. 帧编解码：长度前缀 + protobuf `Frame`（见 §6），心跳 PING/PONG（30s，2 次超时踢线）
-4. 上行：`MsgSend` 帧 → gRPC `MessageRpc.SendMsg` → 把返回的 seq/server_msg_id 包成 `MsgSendAck` 回写
-5. 下行：消费 `push.gw.{self}` 队列 → 查本地 ConnMap → 写 WS → 等客户端 `MsgRecvAck`，超时上报 push 模块标记未达
-6. 断线：清理 ConnMap + 删 Redis 路由 + 通知 push 模块（在线状态变更）
+2. 连接注册：本地 ConnMap（DashMap<conn_key, conn>），调用 `ConnEvent.OnConnected`；Java push 模块按 D27 负责 KICK 旧连接并写 Redis 路由表 `route:{tenant}:{uid}:{platform_class}`
+3. 帧编解码：1 个 WebSocket Binary Message = 1 个 protobuf `Frame`（见 protocol.md §1），心跳 PING/PONG（30s，2 次超时踢线）；网关收到 PING 后异步调用一次幂等 `ConnEvent.OnConnected` 刷新路由 TTL
+4. 上行：业务帧 → gRPC `Uplink.Dispatch(cmd, bytes)` → 把返回的 `cmd/body` 包成同 `req_id` 的 `Frame` 回写
+5. 下行：消费 `push.gw.{self}` 队列 → 查本地 ConnMap → 写 WS；`need_ack=true` 时按 D28 分配 `req_id` 等客户端 `MSG_RECV_ACK`，10s 超时主动断连，不重推
+6. 断线：清理 ConnMap + 通知 `ConnEvent.OnDisconnected`，Java push 模块用当前连接比较删除 Redis 路由
 
-技术栈：tokio + tokio-tungstenite（或 axum ws）+ tonic + prost + redis-rs + lapin(RabbitMQ)。
+技术栈：tokio + axum ws + tonic + prost + lapin(RabbitMQ)。
 无状态：路由信息全在 Redis，实例扩缩容只影响其上连接重连（客户端自动重连+增量同步兜底，不丢消息）。
 
 ## 5. 消息链路设计（抄 OpenIM，见 docs/research）
@@ -222,14 +222,14 @@ content 用 protobuf oneof：Text / Image / Voice / File / Custom(JSON) / Notifi
 ```
 proto/
 ├── common/  enums.proto(ConvType,MsgType,Platform...) model.proto(MsgContent oneof...)
-├── ws/      frame.proto    # WS 帧：Frame{ seq_id, cmd, body }
+├── ws/      frame.proto    # WS 帧：Frame{ req_id, cmd, body }
 │            # cmd: AUTH, PING/PONG, MSG_SEND, MSG_SEND_ACK, MSG_PUSH,
 │            #      MSG_RECV_ACK, SYNC_REQ, SYNC_RESP, READ_REPORT, READ_NOTIFY, KICK
 └── rpc/     user.proto(VerifyToken,GetUser...) message.proto(SendMsg,PullMsgs,SyncDiff)
              conversation.proto(ListConv,MarkRead) push.proto(OnlineStatusChanged,PushToUser)
 ```
 
-- WS 帧 `seq_id` 是**请求级**序号（客户端递增，用于 req/ack 配对），与消息 seq 无关，命名上严格区分
+- WS 帧 `req_id` 是**请求级**序号（客户端递增，用于 req/ack 配对；D28 下行 ack 帧由网关分配），与消息 seq 无关，命名上严格区分
 - REST 仅用于：登录/注册（颁 JWT）、历史消息分页、文件凭证、管理后台。实时链路全在 WS
 
 ## 7. 数据模型（MySQL，首版字段从简）
