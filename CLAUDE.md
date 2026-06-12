@@ -43,6 +43,7 @@
 | D24 | 2026-06-13 | 生产部署 = **云服务器自装（compose）**；中间件选型复审后**全部维持**：MySQL8/Redis7/RabbitMQ/MinIO，明确不引入 ES/ClickHouse/Mongo/注册中心；升级路径：消息表 分区→分表/TiDB，MQ 百万级换 Kafka，存储上云换 OSS（S3 兼容抽象） | 自装环境运维成本优先；逐层对比与 HA 底线见 docs/middleware-selection.md |
 | D25 | 2026-06-13 | TenantContext = **普通 ThreadLocal**（finally 清理），**禁用 --enable-preview**（PR-1 审查 S3 的裁决） | ScopedValue 在 JDK21 是预览特性，测试加参数而生产没加 → 启动即崩；虚拟线程不复用，ThreadLocal 无泄漏风险 |
 | D26 | 2026-06-13 | seq 方案采纳 **MySQL conversation 行锁自增**：`UPDATE conversation SET max_seq=max_seq+1` 与 message/conversation/outbox 同事务；Redis seq 降级为高吞吐预留路径 | PR-1 审查 S7 补流程：实现偏离文档但技术方向更稳，同事务无空洞、回滚一致、少一个 Redis 故障依赖；流程教训记录在案：后续偏离文档必须先提 Open Question |
+| D27 | 2026-06-13 | `token_ver` 精确语义：REST 登录/注册按平台类递增 `token_ver` 并写入 JWT；`GatewayAuth.VerifyToken` 校验 token 内版本等于 Redis 当前版本；`ConnEvent.OnConnected` 只负责 KICK 旧连接并替换路由 | 避免 OnConnected 递增版本后把新连接 token 一并失效；仍满足同类互踢时旧 token 立即失效 |
 
 ## 设计文档索引
 

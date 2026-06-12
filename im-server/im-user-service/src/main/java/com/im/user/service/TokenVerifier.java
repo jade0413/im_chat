@@ -1,5 +1,7 @@
 package com.im.user.service;
 
+import com.im.common.auth.TokenVersionService;
+import com.im.common.device.PlatformClass;
 import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.common.tenant.TenantContext;
@@ -16,15 +18,17 @@ public class TokenVerifier {
   private final JwtService jwtService;
   private final UserMapper userMapper;
   private final GatewayAuthProperties gatewayAuthProperties;
+  private final TokenVersionService tokenVersionService;
 
   public TokenVerifier(JwtService jwtService, UserMapper userMapper,
-      GatewayAuthProperties gatewayAuthProperties) {
+      GatewayAuthProperties gatewayAuthProperties, TokenVersionService tokenVersionService) {
     this.jwtService = jwtService;
     this.userMapper = userMapper;
     this.gatewayAuthProperties = gatewayAuthProperties;
+    this.tokenVersionService = tokenVersionService;
   }
 
-  public VerifyTokenResult verify(String token, long tenantId) {
+  public VerifyTokenResult verify(String token, long tenantId, int platform) {
     if (tenantId <= 0) {
       throw new ImException(ErrorCode.TOKEN_INVALID);
     }
@@ -32,6 +36,11 @@ public class TokenVerifier {
     if (claims.tenantId() != tenantId) {
       throw new ImException(ErrorCode.TOKEN_INVALID);
     }
+    String platformClass = PlatformClass.fromPlatform(platform).key();
+    if (!platformClass.equals(claims.platformClass())) {
+      throw new ImException(ErrorCode.TOKEN_INVALID);
+    }
+    tokenVersionService.ensureCurrent(tenantId, claims.userId(), platformClass, claims.tokenVersion());
     try {
       return TenantContext.callWithTenant(tenantId, () -> verifyUser(claims.userId()));
     } catch (ImException ex) {

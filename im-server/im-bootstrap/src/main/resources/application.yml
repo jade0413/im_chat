@@ -22,6 +22,9 @@ spring:
     username: ${IM_RABBITMQ_USERNAME:${RABBITMQ_USER:im}}
     password: ${IM_RABBITMQ_PASSWORD:${RABBITMQ_PASSWORD:im_dev_mq_pwd}}
     publisher-confirm-type: correlated
+    listener:
+      simple:
+        auto-startup: ${IM_RABBITMQ_LISTENER_AUTO_STARTUP:true}
 
 management:
   endpoints:
@@ -70,3 +73,8 @@ im:
     interval: ${IM_OUTBOX_INTERVAL:100ms}
     max-retries: ${IM_OUTBOX_MAX_RETRIES:16}
     confirm-timeout: ${IM_OUTBOX_CONFIRM_TIMEOUT:5s}
+  push:
+    route-ttl: ${IM_PUSH_ROUTE_TTL:90s}
+    event-dedup-ttl: ${IM_PUSH_EVENT_DEDUP_TTL:24h}
+    gateway-queue-prefix: ${IM_PUSH_GATEWAY_QUEUE_PREFIX:push.gw.}
+    msg-saved-queue: ${IM_PUSH_MSG_SAVED_QUEUE:im.push.msg.saved}

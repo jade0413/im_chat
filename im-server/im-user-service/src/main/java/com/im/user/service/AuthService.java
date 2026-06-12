@@ -1,6 +1,8 @@
 package com.im.user.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.im.common.auth.TokenVersionService;
+import com.im.common.device.PlatformClass;
 import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.common.id.SnowflakeIdGenerator;
@@ -27,13 +29,15 @@ public class AuthService {
   private final PasswordService passwordService;
   private final JwtService jwtService;
   private final SnowflakeIdGenerator idGenerator;
+  private final TokenVersionService tokenVersionService;
 
   public AuthService(UserMapper userMapper, PasswordService passwordService, JwtService jwtService,
-      SnowflakeIdGenerator idGenerator) {
+      SnowflakeIdGenerator idGenerator, TokenVersionService tokenVersionService) {
     this.userMapper = userMapper;
     this.passwordService = passwordService;
     this.jwtService = jwtService;
     this.idGenerator = idGenerator;
+    this.tokenVersionService = tokenVersionService;
   }
 
   @Transactional
@@ -57,7 +61,7 @@ public class AuthService {
     user.setStatus(STATUS_NORMAL);
     userMapper.insert(user);
 
-    return issueTokens(tenantId, user.getId());
+    return issueNewLoginTokens(tenantId, user.getId(), request.platform());
   }
 
   public TokenResponse login(LoginRequest request) {
@@ -67,7 +71,7 @@ public class AuthService {
       throw new ImException(ErrorCode.TOKEN_INVALID, "account or password is incorrect");
     }
     ensureUserCanLogin(user);
-    return issueTokens(tenantId, user.getId());
+    return issueNewLoginTokens(tenantId, user.getId(), request.platform());
   }
 
   public TokenResponse refresh(String refreshToken) {
@@ -78,7 +82,8 @@ public class AuthService {
     }
     UserEntity user = loadCurrentUser(claims.userId());
     ensureUserCanLogin(user);
-    return issueTokens(tenantId, user.getId());
+    ensureTokenVersionCurrent(claims);
+    return issueTokens(tenantId, user.getId(), claims.platformClass(), claims.tokenVersion());
   }
 
   public UserProfileResponse currentUser(String accessToken) {
@@ -87,6 +92,7 @@ public class AuthService {
     if (claims.tenantId() != tenantId) {
       throw new ImException(ErrorCode.TOKEN_INVALID);
     }
+    ensureTokenVersionCurrent(claims);
     return toProfile(loadCurrentUser(claims.userId()));
   }
 
@@ -110,13 +116,34 @@ public class AuthService {
     }
   }
 
-  private TokenResponse issueTokens(long tenantId, long userId) {
+  private TokenResponse issueNewLoginTokens(long tenantId, long userId, Integer platform) {
+    String platformClass = platformClass(platform).key();
+    long tokenVersion = tokenVersionService.nextVersion(tenantId, userId, platformClass);
+    return issueTokens(tenantId, userId, platformClass, tokenVersion);
+  }
+
+  private TokenResponse issueTokens(long tenantId, long userId, String platformClass, long tokenVersion) {
     return new TokenResponse(
-        jwtService.createAccessToken(tenantId, userId),
-        jwtService.createRefreshToken(tenantId, userId),
+        jwtService.createAccessToken(tenantId, userId, platformClass, tokenVersion),
+        jwtService.createRefreshToken(tenantId, userId, platformClass, tokenVersion),
         TOKEN_TYPE,
         jwtService.accessExpiresInSeconds(),
         jwtService.refreshExpiresInSeconds());
+  }
+
+  private void ensureTokenVersionCurrent(TokenClaims claims) {
+    if (claims.platformClass() == null || claims.platformClass().isBlank()) {
+      return;
+    }
+    tokenVersionService.ensureCurrent(
+        claims.tenantId(), claims.userId(), claims.platformClass(), claims.tokenVersion());
+  }
+
+  private PlatformClass platformClass(Integer platform) {
+    if (platform == null || platform == 0) {
+      return PlatformClass.defaultForRest();
+    }
+    return PlatformClass.fromPlatform(platform);
   }
 
   private UserProfileResponse toProfile(UserEntity user) {

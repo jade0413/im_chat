@@ -14,6 +14,7 @@ import com.im.proto.rpc.ResolveConvReq;
 import com.im.proto.rpc.ResolveConvResp;
 import io.grpc.Metadata;
 import io.grpc.stub.MetadataUtils;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -21,7 +22,9 @@ public class GrpcConversationResolver implements ConversationResolver {
 
   private final ConversationRpcGrpc.ConversationRpcBlockingStub conversationStub;
 
-  public GrpcConversationResolver(ConversationRpcGrpc.ConversationRpcBlockingStub conversationStub) {
+  public GrpcConversationResolver(
+      @Qualifier("conversationRpcBlockingStub")
+      ConversationRpcGrpc.ConversationRpcBlockingStub conversationStub) {
     this.conversationStub = conversationStub;
   }
 

@@ -30,7 +30,7 @@
 
 ## 3. user 模块 PR（§8-3）
 
-- [ ] bcrypt；JWT 2h+refresh 30d；VerifyToken 校验 token_ver（互踢 D11 的失效机制）
+- [ ] bcrypt；JWT 2h+refresh 30d；登录/注册按平台类递增 token_ver 并写入 JWT；VerifyToken 校验 token_ver（互踢 D11/D27 的失效机制）
 - [ ] 登录失败不区分"账号不存在/密码错"（防枚举）；登录接口限流
 - [ ] account 列兼容手机号/用户名（D22）；user_type/verified_type 枚举对齐 proto
 
@@ -46,7 +46,7 @@
 ## 5. push 模块 PR（§8-5）
 
 - [ ] 按 gw_instance 分组批量投 PushEnvelope（§5.7 扇出优化），禁止逐用户逐条投
-- [ ] 互踢顺序对齐 protocol/architecture §5.5：token_ver++ → KICK → 断连清路由 → 新连接注册
+- [ ] 互踢顺序对齐 protocol/architecture §5.5/D27：登录发 token 时 token_ver++ → VerifyToken 校验 → OnConnected KICK 旧连接 → 断连清路由 → 新连接注册
 - [ ] OnDisconnected 清路由有幂等保护；路由表 TTL 与心跳续期匹配（30s 心跳 → TTL≥90s）
 
 ## 6. 收尾 PR（§8-6：已读/群/文件/审核）

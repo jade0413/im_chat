@@ -10,6 +10,8 @@ public record LoginRequest(
 
     @NotBlank
     @Size(min = 8, max = 72)
-    String password
+    String password,
+
+    Integer platform
 ) {
 }

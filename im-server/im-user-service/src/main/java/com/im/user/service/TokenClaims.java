@@ -6,6 +6,9 @@ public record TokenClaims(
     long tenantId,
     long userId,
     String tokenType,
-    Instant expiresAt
+    Instant issuedAt,
+    Instant expiresAt,
+    String platformClass,
+    long tokenVersion
 ) {
 }

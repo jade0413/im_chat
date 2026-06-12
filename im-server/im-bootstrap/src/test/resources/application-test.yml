@@ -7,6 +7,9 @@ spring:
     port: 5672
     username: im
     password: im_dev_mq_pwd
+    listener:
+      simple:
+        auto-startup: false
 
 management:
   health:

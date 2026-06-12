@@ -991,31 +991,58 @@
 
 ### T18 — 多端同步与推送补偿基础
 
-状态：PENDING
+状态：DONE
 
 目标：
 
-- 为后续 push 模块补齐路由表、消费失败补偿、离线/多端同步边界。
+- 实现 push 模块 MVP：在线路由表、PushEnvelope 批量投递、msg.saved 消费扇出。
+- 实现同平台类互踢与 `token_ver` 失效闭环。
+- 保证 push 失败不影响消息落库与客户端 SYNC 补齐路径。
 
 涉及模块：
 
 - `im-server/im-push-service`
 - `im-server/im-common`
-- `im-server/im-message-service`
+- `im-server/im-user-service`
+- `im-server/im-bootstrap`
 
 需要修改的文件：
 
-- 待进入任务前细化。
+- `im-server/im-common/src/main/java/com/im/common/device/PlatformClass.java`
+- `im-server/im-common/src/main/java/com/im/common/auth/TokenVersionService.java`
+- `im-server/im-common/src/main/java/com/im/common/redis/RedisKeys.java`
+- `im-server/im-user-service/src/main/java/com/im/user/service/JwtService.java`
+- `im-server/im-user-service/src/main/java/com/im/user/service/AuthService.java`
+- `im-server/im-user-service/src/main/java/com/im/user/service/TokenVerifier.java`
+- `im-server/im-push-service/src/main/java/com/im/push/**`
+- `im-server/im-bootstrap/src/test/java/com/im/bootstrap/e2e/ImServerMvpE2eTest.java`
+- `docs/architecture.md`
+- `docs/im-server-design.md`
+- `docs/review-checklist.md`
 
 验收标准：
 
 - msg.saved 消费后按用户在线路由投递，离线不重复推送。
-- 推送失败不丢事件，有重试或补偿路径。
+- `PushEnvelope` 按 `gw_instance` 分组批量投递，禁止逐用户逐条投。
+- REST 登录/注册按平台类递增 `token_ver` 并写入 JWT，`GatewayAuth.VerifyToken` 校验 Redis 当前版本。
+- `ConnEvent.OnConnected` 同平台类新连接会向旧连接投 `KICK`，再覆盖路由。
+- `ConnEvent.OnDisconnected` 只删除当前连接对应路由，不能误删新连接。
+- 路由表 TTL 默认 90s，匹配 30s 心跳两次容错。
 - 多端同步不依赖 push 成功，重连可通过 SYNC 补齐。
 
 测试方式：
 
-- 待进入任务前细化。
+- `mvn -q -pl im-user-service,im-push-service -am test`
+- `mvn -q verify`
+
+完成记录：
+
+- 已新增 `PlatformClass` 和 `TokenVersionService`；JWT access/refresh token 增加 `platform_class/token_ver` claim。
+- `AuthService` 登录/注册会按平台类递增 `token_ver` 后发 token；refresh/current user 会校验 token 版本仍有效。
+- `GatewayAuth.VerifyToken` 会校验请求平台类与 token 平台类一致，并校验 Redis 当前 `token_ver`。
+- push 模块新增 Redis 路由仓储、`PushDispatchService`、`PushRpcGrpcService`、`ConnEventGrpcService`、`MsgSavedEventConsumer`。
+- `msg.saved` 消费后用 `ConversationRpc.GetMembers` 查成员，按在线路由批量投 `PushEnvelope` 到 `push.gw.{instance}`；重复 MQ 事件用 `push:event:{tenant}:{event_id}` 去重。
+- 已补测试覆盖平台类映射、token_ver 过期、PushEnvelope 分组、同类互踢、重复 msg.saved 跳过。
 
 ---
 
@@ -1090,14 +1117,14 @@
 这些任务进入后续阶段，不在当前 im-server MVP 优先队列：
 
 - Rust 网关骨架、AUTH/PING、Uplink 转发。
-- push 模块消费 `msg.saved` 并投递 `PushEnvelope`。
-- 多端互踢和 token_ver 完整实现。
 - 已读回执。
 - 群聊。
 - 文件上传和 MinIO 预签名。
 - 内容安全审核。
 - 客服会话。
 - Web/App 客户端。
+- Dockerfile/compose app 部署物（PR1 复审 L3/Q2）：进入部署收尾 PR。
+- 图片/语音消息（PR1 复审 Q3）：进入文件上传与消息类型 PR。
 
 ## 5. 当前待确认点
 

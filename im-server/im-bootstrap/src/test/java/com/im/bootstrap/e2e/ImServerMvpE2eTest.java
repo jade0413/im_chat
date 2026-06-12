@@ -160,7 +160,7 @@ class ImServerMvpE2eTest extends IntegrationTestSupport {
             .header(TenantContextFilter.TENANT_HEADER, TENANT_ID)
             .contentType("application/json")
             .content("""
-                {"account":"%s","password":"password123","nickname":"%s"}
+                {"account":"%s","password":"password123","nickname":"%s","platform":1}
                 """.formatted(account, nickname)))
         .andExpect(status().isOk());
   }
@@ -170,7 +170,7 @@ class ImServerMvpE2eTest extends IntegrationTestSupport {
             .header(TenantContextFilter.TENANT_HEADER, TENANT_ID)
             .contentType("application/json")
             .content("""
-                {"account":"%s","password":"password123"}
+                {"account":"%s","password":"password123","platform":1}
                 """.formatted(account)))
         .andExpect(status().isOk())
         .andReturn();

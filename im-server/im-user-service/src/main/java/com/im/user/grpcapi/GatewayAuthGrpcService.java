@@ -23,7 +23,8 @@ public class GatewayAuthGrpcService extends GatewayAuthGrpc.GatewayAuthImplBase 
   public void verifyToken(VerifyTokenReq request, StreamObserver<VerifyTokenResp> responseObserver) {
     VerifyTokenResp response;
     try {
-      VerifyTokenResult result = tokenVerifier.verify(request.getToken(), request.getTenantId());
+      VerifyTokenResult result = tokenVerifier.verify(
+          request.getToken(), request.getTenantId(), request.getPlatform());
       response = VerifyTokenResp.newBuilder()
           .setCode(ErrorCode.OK.code())
           .setMessage(ErrorCode.OK.defaultMessage())

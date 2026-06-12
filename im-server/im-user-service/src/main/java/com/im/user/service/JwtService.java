@@ -44,12 +44,22 @@ public class JwtService {
   }
 
   public String createAccessToken(long tenantId, long userId) {
-    return createToken(tenantId, userId, ACCESS_TOKEN,
+    return createToken(tenantId, userId, ACCESS_TOKEN, "", 0L,
         clock.instant().plus(authProperties.jwt().accessTtl()));
   }
 
   public String createRefreshToken(long tenantId, long userId) {
-    return createToken(tenantId, userId, REFRESH_TOKEN,
+    return createToken(tenantId, userId, REFRESH_TOKEN, "", 0L,
+        clock.instant().plus(authProperties.jwt().refreshTtl()));
+  }
+
+  public String createAccessToken(long tenantId, long userId, String platformClass, long tokenVersion) {
+    return createToken(tenantId, userId, ACCESS_TOKEN, platformClass, tokenVersion,
+        clock.instant().plus(authProperties.jwt().accessTtl()));
+  }
+
+  public String createRefreshToken(long tenantId, long userId, String platformClass, long tokenVersion) {
+    return createToken(tenantId, userId, REFRESH_TOKEN, platformClass, tokenVersion,
         clock.instant().plus(authProperties.jwt().refreshTtl()));
   }
 
@@ -69,7 +79,8 @@ public class JwtService {
     return authProperties.jwt().refreshTtl().toSeconds();
   }
 
-  private String createToken(long tenantId, long userId, String tokenType, Instant expiresAt) {
+  private String createToken(long tenantId, long userId, String tokenType, String platformClass,
+      long tokenVersion, Instant expiresAt) {
     Map<String, Object> header = new LinkedHashMap<>();
     header.put("alg", "HS256");
     header.put("typ", "JWT");
@@ -82,6 +93,10 @@ public class JwtService {
     payload.put("typ", tokenType);
     payload.put("iat", issuedAt.getEpochSecond());
     payload.put("exp", expiresAt.getEpochSecond());
+    if (platformClass != null && !platformClass.isBlank()) {
+      payload.put("platform_class", platformClass);
+      payload.put("token_ver", tokenVersion);
+    }
 
     String encodedHeader = encodeJson(header);
     String encodedPayload = encodeJson(payload);
@@ -119,11 +134,15 @@ public class JwtService {
       throw new ImException(ErrorCode.TOKEN_EXPIRED);
     }
 
+    Instant issuedAt = Instant.ofEpochSecond(longClaim(payload, "iat"));
     return new TokenClaims(
         longClaim(payload, "tenant_id"),
         Long.parseLong(stringClaim(payload, "sub")),
         tokenType,
-        expiresAt);
+        issuedAt,
+        expiresAt,
+        optionalStringClaim(payload, "platform_class"),
+        optionalLongClaim(payload, "token_ver"));
   }
 
   private String encodeJson(Map<String, Object> value) {
@@ -162,6 +181,18 @@ public class JwtService {
       throw new ImException(ErrorCode.TOKEN_INVALID);
     }
     return value.toString();
+  }
+
+  private String optionalStringClaim(Map<String, Object> payload, String name) {
+    Object value = payload.get(name);
+    return value == null ? "" : value.toString();
+  }
+
+  private long optionalLongClaim(Map<String, Object> payload, String name) {
+    if (!payload.containsKey(name)) {
+      return 0L;
+    }
+    return longClaim(payload, name);
   }
 
   private long longClaim(Map<String, Object> payload, String name) {

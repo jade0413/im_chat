@@ -113,8 +113,8 @@ CS_SESSION 语义精确化（D23）：它是**带生命周期状态机的会话*
 
 职责清单（也是职责上限，核心约定2）：
 
-1. WS 握手：读取 `token` + `tenant_id` + `device_id` + `platform`，gRPC 调 user 模块校验，失败即断
-2. 连接注册：本地 ConnMap（DashMap<user_key, conn>），并写 Redis 路由表 `route:{tenant}:{uid}:{platform} -> gw_instance_id`（带 TTL，心跳续期）
+1. WS 握手：读取 `token` + `tenant_id` + `device_id` + `platform`，gRPC 调 user 模块校验 token 中的平台类和 `token_ver`，失败即断
+2. 连接注册：本地 ConnMap（DashMap<user_key, conn>），并写 Redis 路由表 `route:{tenant}:{uid}:{platform_class} -> {gw_instance,conn_id,platform,device_id}`（TTL 默认 90s，心跳续期）
 3. 帧编解码：长度前缀 + protobuf `Frame`（见 §6），心跳 PING/PONG（30s，2 次超时踢线）
 4. 上行：`MsgSend` 帧 → gRPC `MessageRpc.SendMsg` → 把返回的 seq/server_msg_id 包成 `MsgSendAck` 回写
 5. 下行：消费 `push.gw.{self}` 队列 → 查本地 ConnMap → 写 WS → 等客户端 `MsgRecvAck`，超时上报 push 模块标记未达
@@ -178,11 +178,12 @@ client          gateway              message模块                  push模块  
 
 互踢时序：
 ```
-新设备登录 → user模块校验通过 → 查路由表发现同类已有 route:{t}:{uid}:{MOBILE}
-  → 1. token 版本号 +1（Redis token_ver:{t}:{uid}:{platform}，旧 token 立即失效）
-  → 2. 经 push 模块向旧连接所在网关投 KICK 帧（带原因：被新设备顶替/被管理员下线）
-  → 3. 旧网关推 KICK 后主动断开、清路由；若旧网关已死，路由 TTL 兜底过期
-  → 4. 新连接写入路由表，登录完成
+REST 登录/注册 → user 模块按平台类递增 token_ver:{t}:{uid}:{platform_class} 并把版本写入 JWT
+  → GatewayAuth.VerifyToken 校验 token 内 platform_class/token_ver 等于 Redis 当前值
+  → ConnEvent.OnConnected 查路由表发现同类已有 route:{t}:{uid}:{MOBILE}
+  → push 模块向旧连接所在网关投 KICK 帧（原因：被新设备顶替/被管理员下线）
+  → 旧网关推 KICK 后主动断开、清路由；若旧网关已死，路由 TTL 兜底过期
+  → 新连接写入路由表，登录完成
 ```
 
 多端共存的连带设计（都已被 seq 机制覆盖，无额外成本）：
@@ -266,8 +267,8 @@ moderation_log(id, tenant_id, message_id, provider, category, score, action_take
      original_content /*留证,仅审计可查*/, audit_status ENUM('AUTO','REVIEWING','UPHELD','OVERTURNED'))
 ```
 
-Redis 键位规划：`route:{t}:{uid}:{platform}`、`online:{t}:{uid}`、
-`token_ver:{t}:{uid}:{platform}`（互踢令牌失效）、`dedup:{t}:{cmid}`、`im:worker:{id}`、
+Redis 键位规划：`route:{t}:{uid}:{platform_class}`、`online:{t}:{uid}`、
+`token_ver:{t}:{uid}:{platform_class}`（互踢令牌失效）、`dedup:{t}:{cmid}`、`im:worker:{id}`、
 最近消息缓存 `msgs:{t}:{conv}`(ZSET by seq, 容量 100)。
 
 `outbox` 是基础设施全局轮询表，MyBatis 租户拦截器忽略该表；写入方必须显式写入 `tenant_id`，
