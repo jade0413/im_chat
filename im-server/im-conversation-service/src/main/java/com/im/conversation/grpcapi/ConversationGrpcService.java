@@ -7,6 +7,8 @@ import com.im.proto.body.ConvInfo;
 import com.im.proto.rpc.ConversationRpcGrpc;
 import com.im.proto.rpc.GetMembersReq;
 import com.im.proto.rpc.GetMembersResp;
+import com.im.proto.rpc.ListMemberConvsReq;
+import com.im.proto.rpc.ListMemberConvsResp;
 import com.im.proto.rpc.ResolveConvReq;
 import com.im.proto.rpc.ResolveConvResp;
 import io.grpc.stub.StreamObserver;
@@ -54,6 +56,21 @@ public class ConversationGrpcService extends ConversationRpcGrpc.ConversationRpc
           .build();
     } catch (Exception ex) {
       response = GetMembersResp.getDefaultInstance();
+    }
+    responseObserver.onNext(response);
+    responseObserver.onCompleted();
+  }
+
+  @Override
+  public void listMemberConvs(ListMemberConvsReq request,
+      StreamObserver<ListMemberConvsResp> responseObserver) {
+    ListMemberConvsResp response;
+    try {
+      response = ListMemberConvsResp.newBuilder()
+          .addAllConvs(conversationService.listMemberConvs(request.getUserId(), request.getLimit()))
+          .build();
+    } catch (Exception ex) {
+      response = ListMemberConvsResp.getDefaultInstance();
     }
     responseObserver.onNext(response);
     responseObserver.onCompleted();

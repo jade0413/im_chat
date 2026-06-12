@@ -22,6 +22,13 @@ public final class RedisKeys {
     return "dedup:" + tenantId + ":" + clientMsgId;
   }
 
+  public static String workerIdLease(long workerId) {
+    if (workerId < 0) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "workerId must be non-negative");
+    }
+    return "im:worker:" + workerId;
+  }
+
   private static void validatePositive(String name, long value) {
     if (value <= 0) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, name + " must be positive");

@@ -10,6 +10,8 @@ import com.im.proto.body.ConvInfo;
 import com.im.proto.common.ConvType;
 import com.im.proto.rpc.GetMembersReq;
 import com.im.proto.rpc.GetMembersResp;
+import com.im.proto.rpc.ListMemberConvsReq;
+import com.im.proto.rpc.ListMemberConvsResp;
 import com.im.proto.rpc.ResolveConvReq;
 import com.im.proto.rpc.ResolveConvResp;
 import io.grpc.stub.StreamObserver;
@@ -70,6 +72,26 @@ class ConversationGrpcServiceTest {
         .getMembers(GetMembersReq.newBuilder().setConvId(501L).build(), observer);
 
     assertThat(observer.value.getUserIdsList()).containsExactly(100L, 200L);
+    assertThat(observer.completed).isTrue();
+  }
+
+  @Test
+  void returnsMemberConversations() {
+    ConvInfo conv = ConvInfo.newBuilder()
+        .setConvId(501L)
+        .setType(ConvType.C2C)
+        .setPeerUserId(200L)
+        .setMaxSeq(3L)
+        .setReadSeq(1L)
+        .build();
+    when(conversationService.listMemberConvs(100L, 100)).thenReturn(List.of(conv));
+
+    CapturingObserver<ListMemberConvsResp> observer = new CapturingObserver<>();
+    new ConversationGrpcService(conversationService)
+        .listMemberConvs(ListMemberConvsReq.newBuilder().setUserId(100L).setLimit(100).build(), observer);
+
+    assertThat(observer.value.getConvsList()).hasSize(1);
+    assertThat(observer.value.getConvs(0).getReadSeq()).isEqualTo(1L);
     assertThat(observer.completed).isTrue();
   }
 

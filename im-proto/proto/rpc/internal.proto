@@ -41,6 +41,7 @@ message RevokeMsgResp { int32 code = 1; }
 service ConversationRpc {
   rpc ResolveConv (ResolveConvReq) returns (ResolveConvResp);  // 由 target 解析/创建会话（MsgSend 首聊）
   rpc GetMembers (GetMembersReq) returns (GetMembersResp);     // 推送扇出取成员
+  rpc ListMemberConvs (ListMemberConvsReq) returns (ListMemberConvsResp); // 新设备 SYNC 空列表时拉取用户会话水位
 }
 message ResolveConvReq {
   oneof target { int64 to_user_id = 1; int64 group_id = 2; int64 conv_id = 3; }
@@ -49,6 +50,12 @@ message ResolveConvReq {
 message ResolveConvResp { int32 code = 1; im.body.v1.ConvInfo conv = 2; }
 message GetMembersReq  { int64 conv_id = 1; bool online_hint = 2; }
 message GetMembersResp { repeated int64 user_ids = 1; }
+message ListMemberConvsReq { int64 user_id = 1; int32 limit = 2; }
+message ListMemberConvsResp {
+  repeated im.body.v1.ConvInfo convs = 1;
+  bool has_more = 2;
+  int64 conv_list_version = 3;
+}
 
 // ---- push 模块 ----
 service PushRpc {

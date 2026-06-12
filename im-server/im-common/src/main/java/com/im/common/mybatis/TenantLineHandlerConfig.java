@@ -17,6 +17,7 @@ public class TenantLineHandlerConfig implements TenantLineHandler {
 
   private static final Set<String> IGNORED_TABLES = Set.of(
       "tenant",
+      "outbox",
       "flyway_schema_history"
   );
 

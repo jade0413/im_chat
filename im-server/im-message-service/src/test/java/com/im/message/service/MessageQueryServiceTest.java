@@ -14,6 +14,8 @@ import com.im.message.dao.mapper.MessageMapper;
 import com.im.proto.body.MsgPush;
 import com.im.proto.body.SyncReq;
 import com.im.proto.body.SyncResp;
+import com.im.proto.body.ConvInfo;
+import com.im.proto.common.ConvType;
 import com.im.proto.common.MsgContent;
 import com.im.proto.common.TextContent;
 import java.time.LocalDateTime;
@@ -65,6 +67,31 @@ class MessageQueryServiceTest {
     assertThat(response.getDeltas(0).getMsgsList()).extracting(MsgPush::getSeq)
         .containsExactly(2L, 3L);
     assertThat(response.getDeltas(0).getHasMore()).isFalse();
+  }
+
+  @Test
+  void syncEmptyConvVersionsReturnsMemberConversations() {
+    MessageEntity first = message(1L);
+    MessageEntity second = message(2L);
+    when(memberClient.listMemberConvs(100L)).thenReturn(List.of(ConvInfo.newBuilder()
+        .setConvId(501L)
+        .setType(ConvType.C2C)
+        .setPeerUserId(200L)
+        .setMaxSeq(2L)
+        .setReadSeq(1L)
+        .build()));
+    when(messageMapper.selectList(anyWrapper())).thenReturn(List.of(first, second));
+    when(assembler.toPush(first)).thenReturn(push(1L));
+    when(assembler.toPush(second)).thenReturn(push(2L));
+
+    SyncResp response = syncWithTenant(100L, SyncReq.getDefaultInstance());
+
+    assertThat(response.getDeltasList()).hasSize(1);
+    assertThat(response.getDeltas(0).getConv().getConvId()).isEqualTo(501L);
+    assertThat(response.getDeltas(0).getConv().getReadSeq()).isEqualTo(1L);
+    assertThat(response.getDeltas(0).getServerMaxSeq()).isEqualTo(2L);
+    assertThat(response.getDeltas(0).getMsgsList()).extracting(MsgPush::getSeq)
+        .containsExactly(1L, 2L);
   }
 
   @Test

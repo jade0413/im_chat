@@ -266,7 +266,7 @@
 目标：
 
 - 建立租户上下文和数据库访问基线。
-- 用 `ScopedValue` 或等价的虚拟线程安全机制承载 tenant。
+- 用普通 `ThreadLocal` + finally 清理承载 tenant（D25，不依赖 JDK preview）。
 - 配置 MyBatis-Plus、数据源和基础 mapper。
 
 涉及模块：
@@ -301,15 +301,15 @@
 
 完成记录：
 
-- 已新增 `TenantContext`，使用 JDK 21 `ScopedValue` 承载租户上下文，缺失 tenant 时通过 `TenantRequiredException` fail-closed。
+- 已新增 `TenantContext`，使用普通 `ThreadLocal` 承载租户上下文并在 finally 中恢复/清理，缺失 tenant 时通过 `TenantRequiredException` fail-closed。
 - 已新增 MyBatis-Plus `TenantLineInnerInterceptor` 装配，统一处理 SELECT、UPDATE、DELETE 和 INSERT 的 `tenant_id` 注入。
 - 已将 `tenant`、`flyway_schema_history` 加入租户拦截忽略表。
 - 已为 local/docker profile 补充 MySQL datasource 基线配置，供后续 mapper 和集成测试复用。
-- 已在父 POM 为编译和测试开启 `--enable-preview`，并在 README 记录运行 jar 需要 `java --enable-preview`。
+- 已在 PR1 复审修复中移除全部 `--enable-preview`，README 记录裸 `java -jar` 启动。
 - 已新增单测覆盖租户上下文绑定/恢复、缺失租户失败、SELECT/UPDATE/DELETE/INSERT SQL 改写和显式 `tenant_id` 不重复注入。
 - 已执行 `mvn -q -pl im-common -am test`，通过。
 - 已执行完整 `mvn -q verify`，通过。
-- 已用 `java --enable-preview -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`。
+- 已用 `java -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`。
 
 ---
 
@@ -421,14 +421,14 @@
 - 已新增 `AuthService`，完成账号密码注册、登录、refresh token 换发、当前用户查询；登录失败统一返回 `TOKEN_INVALID`，不区分账号不存在和密码错误。
 - 已新增 `PasswordService`，密码使用 BCrypt 哈希和校验。
 - 已新增 `JwtService`，使用 HMAC-SHA256 生成/校验 access token 与 refresh token；JWT secret、issuer、TTL 均来自 `im.auth.jwt.*` 配置。
-- 已新增 `TenantContextFilter`，REST `/api/**` 请求必须携带 `X-Tenant-Id`，并用 `ScopedValue` 绑定到请求执行范围。
+- 已新增 `TenantContextFilter`，REST `/api/**` 请求必须携带 `X-Tenant-Id`，并用 `TenantContext` 绑定到请求执行范围。
 - 已新增 `SnowflakeIdGenerator`，用于注册用户时生成 BIGINT 用户 ID。
 - 已在 bootstrap 引入 MyBatis-Plus Boot starter，并补充默认 datasource 配置；默认关闭 DB health，避免未启动本地 MySQL 时健康检查被判 DOWN。
 - 已补充全局异常处理：缺少必需请求头返回 `VALIDATION_FAILED` 400。
 - 已新增 MockMvc 测试覆盖注册、登录、刷新、当前用户、缺租户头和参数校验；新增 service 测试覆盖注册入库字段、重复账号、登录成功、登录失败泛化、封禁用户、刷新、当前用户和跨租户 token 拒绝。
 - 已执行 `mvn -q -pl im-user-service,im-bootstrap -am test`，通过；T05 的 UserMapper Testcontainers 测试仍因当前环境无 Docker socket 跳过 1 个。
 - 已执行完整 `mvn -q verify`，通过。
-- 已用 `java --enable-preview -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`。
+- 已用 `java -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`。
 
 ---
 
@@ -478,7 +478,7 @@
 - 已新增 gRPC in-process 测试，覆盖有效 token、非法 token、跨租户 token、封禁用户。
 - 已执行 `mvn -q -pl im-user-service,im-bootstrap -am test`，通过；T05 的 UserMapper Testcontainers 测试仍因当前环境无 Docker socket 跳过 1 个。
 - 已执行完整 `mvn -q verify`，通过。
-- 已用 `java --enable-preview -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`，`localhost:9091` 端口监听成功。
+- 已用 `java -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`，`localhost:9091` 端口监听成功。
 - 暂未实现 token_ver、同类互踢和 kick_old=true，符合本任务验收范围。
 
 ---
@@ -528,7 +528,7 @@
 - 已新增 `UplinkGrpcServiceTest`，覆盖成功路由、未知 cmd、业务异常、未知异常、缺失 ctx。
 - 已执行 `mvn -q -pl im-bootstrap -am test`，通过；T05 的 UserMapper Testcontainers 测试仍因当前环境无 Docker socket 跳过 1 个。
 - 已执行完整 `mvn -q verify`，通过。
-- 已用 `java --enable-preview -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`，`localhost:9091` 端口监听成功。
+- 已用 `java -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`，`localhost:9091` 端口监听成功。
 - 本任务未实现具体业务 handler，符合任务边界。
 
 ---
@@ -584,7 +584,7 @@
 - 已新增 Testcontainers 并发集成测试，验证同一 C2C 并发解析只生成一条 conversation 和双方成员；当前环境无 `/var/run/docker.sock`，该测试自动跳过。
 - 已执行 `mvn -q -pl im-conversation-service -am test`，通过；conversation 模块单元测试 13 个通过，Testcontainers 测试跳过 3 个。
 - 已执行完整 `mvn -q verify`，通过。
-- 已用 `java --enable-preview -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`，`localhost:9091` 端口监听成功。
+- 已用 `java -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`，`localhost:9091` 端口监听成功。
 
 ---
 
@@ -631,7 +631,7 @@
 - 支持 `MsgSend` 的 `to_user_id` 和 `conv_id` 两种 C2C 路径。
 - 只处理 `TextContent`；其他内容类型返回明确错误。
 - `client_msg_id` 幂等：重复请求返回原 `server_msg_id/conv_id/seq`。
-- seq 使用 Redis `INCR seq:{tenant}:{conv}`。
+- seq 使用 DB 事务内 `conversation.max_seq = max_seq + 1` 行锁自增（D26）。
 - 同一事务写入 `message`、更新 `conversation.max_seq/last_msg_*`、写入 `outbox`。
 - 并发同会话发送后 seq 连续无空洞。
 - 本任务不实现 RabbitMQ 投递，只写 outbox。
@@ -644,18 +644,18 @@
 完成记录：
 
 - 已新增 `MsgSendHandler`，注册 `Cmd.MSG_SEND`，成功和业务错误均返回 `MSG_SEND_ACK`，protobuf 解码失败交给 Uplink ERROR 兜底。
-- 已新增 `MessageSendService`，链路顺序为参数校验 → DB 幂等查询 → Redis SETNX 去重锁 → ConversationRpc 解析会话 → Redis INCR seq → 同事务写 DB。
+- 已新增 `MessageSendService`，链路顺序为参数校验 → DB 幂等查询 → Redis SETNX 去重锁 → 关系校验 → ConversationRpc 解析会话 → DB 事务内分配 seq → 同事务写 DB。
 - 已新增 `GrpcConversationResolver` 和 `MessageRpcClientConfig`，message 模块通过 proto/gRPC 调 conversation，不引入业务模块编译依赖。
 - 已新增 `GrpcMetadataKeys` 和 `TenantContextServerInterceptor`，内部 gRPC 调用通过 metadata 透传 tenant/trace，服务端自动绑定 `TenantContext`。
-- 已新增 `SequenceService`，使用 Redis key `seq:{tenant}:{conv}` 执行 `INCR`。
+- 已新增 `SequenceService`，通过 `conversation.max_seq = max_seq + 1` 在 DB 事务内分配会话级 seq。
 - 已新增 `MessageIdempotencyService`，使用 Redis key `dedup:{tenant}:{client_msg_id}` 做并发重复请求保护，并用 `message.uk_client_msg` 做 DB 双保险。
 - 已新增 `MessagePersistService`，在一个事务中写 `message`、条件更新 `conversation.max_seq/last_msg_*`、写 `outbox`。
 - 已新增 `MessageAssembler`，负责 message/entity、`MsgPush`、`MsgSavedEvent` outbox payload、ACK 结果组装。
 - 已新增 Docker 环境下的并发集成测试：20 并发同会话发送，验证 seq 为 1..20、message/outbox 写入、conversation.max_seq 更新；当前环境无 `/var/run/docker.sock`，该集成测试自动跳过。
-- 黑名单/好友开关校验未在本任务落地，遵循本文档“当前待确认点”；后续关系链任务确定语义后接入发送链路。
+- PR1 复审修复已接入黑名单关系校验；好友开关仍保留为二阶段租户配置。
 - 已执行 `mvn -q -pl im-message-service -am test`，通过；message 模块单元测试 17 个通过，Testcontainers 测试跳过 3 个。
 - 已执行完整 `mvn -q verify`，通过。
-- 已用 `java --enable-preview -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`，`localhost:9091` 端口监听成功。
+- 已用 `java -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`，`localhost:9091` 端口监听成功。
 
 ---
 
@@ -718,7 +718,7 @@
 - 已新增单测覆盖 JWT access 校验、SYNC handler、MessageRpc.PullMsgs、REST history、成员校验、has_more 语义。
 - 已执行 `mvn -q -pl im-message-service,im-bootstrap -am test`，通过；message 模块单元测试 25 个通过，Testcontainers 测试跳过 3 个；common 新增 JWT 测试 4 个通过。
 - 已执行完整 `mvn -q verify`，通过。
-- 已用 `java --enable-preview -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`，`localhost:9091` 端口监听成功。
+- 已用 `java -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`，`localhost:9091` 端口监听成功。
 
 ---
 
@@ -764,14 +764,14 @@
 
 完成记录：
 
-- 已新增 `OutboxWriter`、`OutboxPoller`、公共 outbox entity/mapper，轮询在配置租户上下文内执行，不手写 `tenant_id` 过滤。
+- 已新增 `OutboxWriter`、`OutboxPoller`、公共 outbox entity/mapper；PR1 复审修复后 outbox 作为基础设施表由 poller 全租户扫描，写入侧必须显式写入 `tenant_id`。
 - 已新增 `RabbitMqConfig`、`RabbitMqPublisher`，启动声明 `im.events` topic exchange，发布时携带 `tenant_id`、`trace_id`、`event_id`、`event_type` headers，并等待 publisher confirm。
 - 已新增 `MsgSavedEventFactory`，message 持久化链路改为同事务调用公共 `OutboxWriter` 写入 `msg.saved.{tenant_id}` outbox。
 - 默认 profile 下 `im.outbox.enabled=false`，避免本地未启动 RabbitMQ 时影响开发；docker profile 下默认启用 outbox poller。
 - 已补充单测覆盖 outbox 写入校验、poller 成功删除、失败 retry、RabbitMQ headers 和 nack；RabbitMQ Testcontainers 集成测试在无 `/var/run/docker.sock` 环境自动跳过。
 - 已执行 `mvn -q -pl im-common,im-message-service -am test`，通过。
 - 已执行完整 `mvn -q verify`，通过。
-- 已用 `java --enable-preview -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`。
+- 已用 `java -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar` 启动，`/actuator/health` 返回 `{"status":"UP","groups":["liveness","readiness"]}`。
 
 ---
 
@@ -872,7 +872,7 @@
 
 ### T15 — 修复 Outbox/MQ 投递语义与消费幂等基础
 
-状态：PENDING
+状态：PENDING（PR1 已完成 mandatory return 与 DEAD 状态；多实例 claim/lock 和消费幂等模板仍待后续任务）
 
 目标：
 
@@ -905,11 +905,18 @@
 - `mvn -q -pl im-common -am test`
 - 有 Docker 时执行 RabbitMQ Testcontainers 集成测试。
 
+完成记录：
+
+- PR1 复审修复已把 `outbox` 加入租户拦截忽略表，`OutboxPoller` 改为全租户扫描并使用事件行内 `tenant_id` 投 MQ。
+- `RabbitTemplate` 已启用 mandatory publish；exchange ack 但消息被 broker return 时不会删除 outbox。
+- 超过最大重试次数后 outbox 状态进入 `DEAD(2)`，避免无限重试掩盖问题。
+- 多实例 claim/lock 与消费侧幂等模板仍保留在本任务后续范围。
+
 ---
 
 ### T16 — 修复 SYNC_REQ 空列表全量同步与分页语义
 
-状态：PENDING
+状态：DONE
 
 目标：
 
@@ -939,6 +946,13 @@
 测试方式：
 
 - `mvn -q -pl im-message-service,im-conversation-service -am test`
+
+完成记录：
+
+- 已新增 `ConversationRpc.ListMemberConvs`，conversation 模块可按当前用户列出会话同步源。
+- `MessageQueryService.sync` 在 `conv_versions` 为空时会拉取成员会话并按 `[local_max_seq + 1, server_max]` 生成增量。
+- 已补充 message/conversation 单元测试覆盖空 `conv_versions`、指定会话缺口、gRPC 会话列表响应。
+- 已执行 `mvn -q -pl im-message-service -am test`、`mvn -q -pl im-user-service,im-conversation-service -am test` 和完整 `mvn -q verify`，通过；当前环境无 `/var/run/docker.sock`，Testcontainers 集成/E2E 用例自动跳过。
 
 ---
 
@@ -1005,6 +1019,72 @@
 
 ---
 
+### T19 — PR1 复审阻塞项修复
+
+状态：DONE
+
+目标：
+
+- 按 `docs/reviews/2026-06-13-pr1-mvp-foundation.md` 修复 S1~S7。
+- 采纳 Jade 对 S3/S7 的裁决：TenantContext 改普通 ThreadLocal；seq 采纳 DB 行锁自增并修订文档。
+- 顺手完成 B1/B2，提升线上排障和 SQL 防护基线。
+
+涉及模块：
+
+- `im-server/im-common`
+- `im-server/im-bootstrap`
+- `im-server/im-user-service`
+- `im-server/im-conversation-service`
+- `im-server/im-message-service`
+- `im-proto`
+- `docs`
+
+需要修改的文件：
+
+- `im-server/pom.xml`
+- `im-server/im-bootstrap/pom.xml`
+- `im-server/im-common/src/main/java/com/im/common/tenant/TenantContext.java`
+- `im-server/im-common/src/main/java/com/im/common/mybatis/**`
+- `im-server/im-common/src/main/java/com/im/common/outbox/**`
+- `im-server/im-common/src/main/java/com/im/common/mq/RabbitMqPublisher.java`
+- `im-server/im-common/src/main/java/com/im/common/id/WorkerIdLease.java`
+- `im-server/im-user-service/src/main/java/com/im/user/**`
+- `im-server/im-message-service/src/main/java/com/im/message/**`
+- `im-server/im-conversation-service/src/main/java/com/im/conversation/**`
+- `im-proto/proto/rpc/internal.proto`
+- `AGENTS.md`
+- `CLAUDE.md`
+- `docs/architecture.md`
+- `docs/im-server-design.md`
+- `docs/review-checklist.md`
+- `TASKS.md`
+
+验收标准：
+
+- Maven enforcer 在父 POM 生效，bootstrap 明确 skip 业务模块依赖规则。
+- Outbox poller 不再固定 tenant 1，支持全租户扫描；RabbitMQ mandatory return 不误删 outbox；超过最大重试进入 DEAD。
+- 生产启动不依赖 `--enable-preview`。
+- `MessageSendService` 在发送链路调用 `UserRpc.CheckRelation`，被拉黑返回 `BLOCKED_BY_PEER`。
+- `SYNC_REQ` 空 `conv_versions` 能返回当前用户会话增量。
+- Snowflake workerId 启动时通过 Redis 租约 fail-fast 防冲突。
+- 文档正式采纳 DB 行锁 seq，Redis seq 只作为二阶段高吞吐预留方案。
+
+测试方式：
+
+- `mvn -q -pl im-common -am test`
+- `mvn -q -pl im-message-service -am test`
+- `mvn -q -pl im-user-service,im-conversation-service -am test`
+- `mvn -q verify`
+
+完成记录：
+
+- 已完成 S1~S7 和 B1/B2。
+- 已补充 `UserRpc.CheckRelation`、`ConversationRpc.ListMemberConvs`、workerId Redis 租约、outbox 全租户扫描与 mandatory return 单元测试。
+- 已修订 AGENTS/CLAUDE/architecture/design/checklist/TASKS，补齐 S7 的流程记录。
+- 已执行上述测试命令，均通过；当前环境无 `/var/run/docker.sock`，Testcontainers 集成/E2E 用例自动跳过。
+
+---
+
 ## 4. 后续候选任务（当前阶段不执行）
 
 这些任务进入后续阶段，不在当前 im-server MVP 优先队列：
@@ -1021,5 +1101,4 @@
 
 ## 5. 当前待确认点
 
-- 黑名单语义在文档中存在差异：`architecture.md` 倾向静默拒收，`error.proto` 注释倾向明确报错。当前任务队列暂不实现黑名单发送拦截，等进入关系链任务前再由 Jade 拍板。
 - `architecture.md` 部分文字提到 WS 长度前缀和 `seq_id`，实际 `frame.proto` 已明确为一个 WebSocket Binary Message 对应一个 `Frame`，字段名为 `req_id`。后续实现以 proto 为准。

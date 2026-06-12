@@ -64,7 +64,7 @@ CREATE TABLE conversation (
   type          TINYINT      NOT NULL COMMENT '1c2c 2group 3cs 4system',
   c2c_key       VARCHAR(64)  NULL COMMENT 'c2c防重: 小uid_大uid',
   group_id      BIGINT       NULL,
-  max_seq       BIGINT       NOT NULL DEFAULT 0 COMMENT 'Redis seq 兜底回写(§13.9)',
+  max_seq       BIGINT       NOT NULL DEFAULT 0 COMMENT 'DB事务内会话级seq水位(D26)',
   last_msg_abstract VARCHAR(255) NOT NULL DEFAULT '',
   last_msg_time DATETIME     NULL,
   cs_status     TINYINT      NULL COMMENT '客服预留 1open 2assigned 3resolved',
@@ -150,7 +150,7 @@ CREATE TABLE user_blacklist (
   blocked_user_id BIGINT NOT NULL,
   created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (tenant_id, user_id, blocked_user_id)
-) ENGINE=InnoDB COMMENT='黑名单(D17,静默拒收)';
+) ENGINE=InnoDB COMMENT='黑名单(D17,BLOCKED_BY_PEER)';
 
 CREATE TABLE friend (
   tenant_id     BIGINT      NOT NULL,
@@ -194,7 +194,7 @@ CREATE TABLE outbox (
   event_type    VARCHAR(64)  NOT NULL COMMENT 'msg.saved/msg.revoked/...',
   routing_key   VARCHAR(128) NOT NULL,
   payload       VARBINARY(16384) NOT NULL COMMENT 'events.proto pb bytes',
-  status        TINYINT      NOT NULL DEFAULT 0 COMMENT '0待投 1投失败重试中',
+  status        TINYINT      NOT NULL DEFAULT 0 COMMENT '0待投 1投失败重试中 2死亡需人工处理',
   retry_count   INT          NOT NULL DEFAULT 0,
   created_at    DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),

@@ -1,6 +1,7 @@
 package com.im.common.mybatis;
 
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
+import com.baomidou.mybatisplus.extension.plugins.inner.BlockAttackInnerInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.TenantLineInnerInterceptor;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -16,6 +17,7 @@ public class MybatisPlusConfig {
   public MybatisPlusInterceptor mybatisPlusInterceptor(TenantLineHandlerConfig tenantLineHandler) {
     MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
     interceptor.addInnerInterceptor(new TenantLineInnerInterceptor(tenantLineHandler));
+    interceptor.addInnerInterceptor(new BlockAttackInnerInterceptor());
     return interceptor;
   }
 }

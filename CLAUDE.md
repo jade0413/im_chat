@@ -20,7 +20,7 @@
 | D1 | 2026-06-13 | 网关用 **Rust**（tokio + axum/tokio-tungstenite），业务用 **Java 21 + Spring Boot 3.2** | 网关只做 IO 密集的连接管理，Rust 内存占用低、无 GC 抖动；业务逻辑迭代快用 Java |
 | D2 | 2026-06-13 | Java 使用 **JDK 21 虚拟线程**，gRPC/DB 调用按阻塞风格写 | 虚拟线程使阻塞式代码具备异步吞吐，省去响应式编程复杂度 |
 | D3 | 2026-06-13 | 多租户隔离：**共享库 + tenant_id 列** | 万级规模下成本最低；MyBatis 拦截器统一注入 tenant_id；预留大客户独立库升级路径 |
-| D4 | 2026-06-13 | 规模目标：**1~5 万同时在线**，单机可扛 | 单 MySQL + RabbitMQ 足够；架构预留水平扩展点（网关无状态、seq 在 Redis） |
+| D4 | 2026-06-13 | 规模目标：**1~5 万同时在线**，单机可扛 | 单 MySQL + RabbitMQ 足够；架构预留水平扩展点（网关无状态、会话级 seq 可按 D26 演进） |
 | D5 | 2026-06-13 | 服务粒度：**模块化单体起步**（Maven 多模块 + im-bootstrap 单进程） | gRPC 接口先定义好，模块间禁止直接调内部类，后期可无痛拆分 |
 | D6 | 2026-06-13 | 客服能力：**第一阶段只做 IM，但协议/表结构现在就预留** | conversation 带 type（C2C/GROUP/CS），用户带 user_type（member/agent/visitor） |
 | D7 | 2026-06-13 | 消息模型：借鉴 OpenIM 的 **收件箱模型 + 会话级 seq** | seq 单调递增做消息对齐/增量同步/去重，比 Matrix DAG 简单得多，够用 |
@@ -40,6 +40,9 @@
 | D21 | 2026-06-13 | **主租户模式**：自营聊天 App = tenant 1（平台自营租户），SaaS 客服客户 = 其他租户。产品定位以 IM 聊天软件为主，多租户是内建能力非负担 | 单租户运行时 tenant_id 恒为 1、拦截器自动注入，运行期零感知；产品形态（自营+SaaS客服 vs 白标）Jade 尚未定，按前者设计但不封死白标路 |
 | D22 | 2026-06-13 | 账号体系：**手机号+验证码为主（生产形态），MVP 先账号密码联调**；user.account 列两者兼容 | 国内聊天 App 标配；短信通道接入前不阻塞开发 |
 | D23 | 2026-06-13 | 客服会话语义精确化：**带生命周期状态机的会话**（open→assigned→resolved），"临时"只体现在访客身份可过期、会话可关闭重开；**数据不删**（质检/审计/举证依赖） | 修正"临时会话=用完即删"的直觉；resolved 后访客再来开新会话还是续旧会话→租户配置，二阶段定 |
+| D24 | 2026-06-13 | 生产部署 = **云服务器自装（compose）**；中间件选型复审后**全部维持**：MySQL8/Redis7/RabbitMQ/MinIO，明确不引入 ES/ClickHouse/Mongo/注册中心；升级路径：消息表 分区→分表/TiDB，MQ 百万级换 Kafka，存储上云换 OSS（S3 兼容抽象） | 自装环境运维成本优先；逐层对比与 HA 底线见 docs/middleware-selection.md |
+| D25 | 2026-06-13 | TenantContext = **普通 ThreadLocal**（finally 清理），**禁用 --enable-preview**（PR-1 审查 S3 的裁决） | ScopedValue 在 JDK21 是预览特性，测试加参数而生产没加 → 启动即崩；虚拟线程不复用，ThreadLocal 无泄漏风险 |
+| D26 | 2026-06-13 | seq 方案采纳 **MySQL conversation 行锁自增**：`UPDATE conversation SET max_seq=max_seq+1` 与 message/conversation/outbox 同事务；Redis seq 降级为高吞吐预留路径 | PR-1 审查 S7 补流程：实现偏离文档但技术方向更稳，同事务无空洞、回滚一致、少一个 Redis 故障依赖；流程教训记录在案：后续偏离文档必须先提 Open Question |
 
 ## 设计文档索引
 
@@ -51,7 +54,7 @@
 - 网关：Rust stable, tokio, tonic(gRPC client), prost(protobuf), redis-rs
 - 业务：JDK 21（虚拟线程开启）, Spring Boot 3.2, MyBatis-Plus, grpc-java
 - 协议：Protobuf3（im-proto 是唯一事实来源，Rust 用 prost 生成，Java 用 protoc 插件生成）
-- 存储：MySQL 8（消息/业务）、Redis 7（seq/路由表/在线状态/缓存）、MinIO（对象存储）
+- 存储：MySQL 8（消息/业务/会话级 seq）、Redis 7（路由表/在线状态/缓存/幂等）、MinIO（对象存储）
 - MQ：RabbitMQ（topic exchange，按 tenant+conversation 路由）
 - 部署：Docker Compose（MVP）→ K8s（二阶段）
 

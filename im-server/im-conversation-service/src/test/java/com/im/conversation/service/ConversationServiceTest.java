@@ -142,6 +142,25 @@ class ConversationServiceTest {
         .isEqualTo(ErrorCode.VALIDATION_FAILED);
   }
 
+  @Test
+  void listsMemberConversationsForFullSync() {
+    ConversationEntity existing = conversation(501L, "100_200");
+    existing.setMaxSeq(3L);
+    when(memberMapper.selectList(anyWrapper()))
+        .thenReturn(List.of(member(501L, 100L)), List.of(member(501L, 100L), member(501L, 200L)));
+    when(conversationMapper.selectById(501L)).thenReturn(existing);
+
+    AtomicReference<List<ConvInfo>> result = new AtomicReference<>();
+    TenantContext.runWithTenant(1L, () -> result.set(service.listMemberConvs(100L, 100)));
+
+    assertThat(result.get()).hasSize(1);
+    assertThat(result.get().getFirst().getConvId()).isEqualTo(501L);
+    assertThat(result.get().getFirst().getType()).isEqualTo(ConvType.C2C);
+    assertThat(result.get().getFirst().getTitle()).isEqualTo("200");
+    assertThat(result.get().getFirst().getPeerUserId()).isEqualTo(200L);
+    assertThat(result.get().getFirst().getMaxSeq()).isEqualTo(3L);
+  }
+
   private ConvInfo resolveWithTenant(ResolveConvReq request) {
     AtomicReference<ConvInfo> result = new AtomicReference<>();
     TenantContext.runWithTenant(1L, () -> result.set(service.resolve(request)));

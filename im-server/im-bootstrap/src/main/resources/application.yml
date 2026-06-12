@@ -44,6 +44,12 @@ management:
       application: ${spring.application.name}
 
 im:
+  id:
+    worker-id: ${IM_WORKER_ID:1}
+    lease:
+      enabled: ${IM_WORKER_ID_LEASE_ENABLED:true}
+      ttl: ${IM_WORKER_ID_LEASE_TTL:30s}
+      renew-interval: ${IM_WORKER_ID_LEASE_RENEW_INTERVAL:10s}
   grpc:
     port: ${IM_GRPC_PORT:9091}
   rpc:
@@ -60,7 +66,6 @@ im:
     heartbeat-interval-sec: ${IM_GATEWAY_AUTH_HEARTBEAT_INTERVAL_SEC:30}
   outbox:
     enabled: ${IM_OUTBOX_ENABLED:false}
-    tenant-id: ${IM_OUTBOX_TENANT_ID:1}
     batch-size: ${IM_OUTBOX_BATCH_SIZE:100}
     interval: ${IM_OUTBOX_INTERVAL:100ms}
     max-retries: ${IM_OUTBOX_MAX_RETRIES:16}

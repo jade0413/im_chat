@@ -38,7 +38,6 @@ class OutboxPollerTest {
   @Test
   void publishesAndDeletesConfirmedEvents() {
     OutboxProperties properties = new OutboxProperties();
-    properties.setTenantId(1L);
     OutboxEntity event = event(10L, 1L, 0);
     when(outboxMapper.selectList(any(Wrapper.class))).thenReturn(List.of(event));
     when(outboxMapper.deleteById(10L)).thenReturn(1);
@@ -56,7 +55,21 @@ class OutboxPollerTest {
   @Test
   void marksFailedEventsForRetryWithoutDeleting() {
     OutboxProperties properties = new OutboxProperties();
-    properties.setTenantId(1L);
+    OutboxEntity event = event(10L, 1L, 2);
+    when(outboxMapper.selectList(any(Wrapper.class))).thenReturn(List.of(event));
+    doThrow(new ImException(ErrorCode.INTERNAL_ERROR, "publish failed"))
+        .when(publisher).publish(any(RabbitMqEvent.class));
+
+    int published = new OutboxPoller(outboxMapper, publisher, properties).pollOnce();
+
+    assertThat(published).isZero();
+    verify(outboxMapper).update(isNull(), any(Wrapper.class));
+  }
+
+  @Test
+  void marksEventsDeadAfterMaxRetries() {
+    OutboxProperties properties = new OutboxProperties();
+    properties.setMaxRetries(3);
     OutboxEntity event = event(10L, 1L, 2);
     when(outboxMapper.selectList(any(Wrapper.class))).thenReturn(List.of(event));
     doThrow(new ImException(ErrorCode.INTERNAL_ERROR, "publish failed"))

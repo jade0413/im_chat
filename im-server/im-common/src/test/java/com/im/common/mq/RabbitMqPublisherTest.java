@@ -18,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessagePostProcessor;
 import org.springframework.amqp.core.MessageProperties;
+import org.springframework.amqp.core.ReturnedMessage;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
@@ -74,6 +75,40 @@ class RabbitMqPublisherTest {
         new RabbitMqEvent(10L, 1L, "msg.saved", "msg.saved.1", new byte[] {1})))
         .isInstanceOf(ImException.class)
         .hasMessageContaining("rabbitmq publish nack");
+  }
+
+  @Test
+  void rejectsReturnedMessageAfterAck() {
+    doAnswer(invocation -> {
+      CorrelationData correlationData = invocation.getArgument(4, CorrelationData.class);
+      correlationData.setReturned(new ReturnedMessage(
+          new Message(new byte[] {1}, new MessageProperties()),
+          312,
+          "NO_ROUTE",
+          RabbitMqConfig.EVENTS_EXCHANGE,
+          "msg.saved.1"));
+      correlationData.getFuture().complete(new CorrelationData.Confirm(true, null));
+      return null;
+    }).when(rabbitTemplate).convertAndSend(
+        anyString(),
+        anyString(),
+        any(Object.class),
+        any(MessagePostProcessor.class),
+        any(CorrelationData.class));
+
+    RabbitMqPublisher publisher = new RabbitMqPublisher(rabbitTemplate, properties());
+
+    assertThatThrownBy(() -> publisher.publish(
+        new RabbitMqEvent(10L, 1L, "msg.saved", "msg.saved.1", new byte[] {1})))
+        .isInstanceOf(ImException.class)
+        .hasMessageContaining("rabbitmq publish returned");
+  }
+
+  @Test
+  void enablesMandatoryPublish() {
+    new RabbitMqPublisher(rabbitTemplate, properties());
+
+    org.mockito.Mockito.verify(rabbitTemplate).setMandatory(true);
   }
 
   private OutboxProperties properties() {

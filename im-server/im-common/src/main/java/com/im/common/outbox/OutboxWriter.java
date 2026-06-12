@@ -17,6 +17,7 @@ public class OutboxWriter {
 
   public static final int STATUS_PENDING = 0;
   public static final int STATUS_FAILED = 1;
+  public static final int STATUS_DEAD = 2;
 
   private static final int MAX_EVENT_TYPE_LENGTH = 64;
   private static final int MAX_ROUTING_KEY_LENGTH = 128;

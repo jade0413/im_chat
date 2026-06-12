@@ -41,15 +41,14 @@ JAVA_HOME=/Users/yupeiyan/Library/Java/JavaVirtualMachines/temurin-21.0.11/Conte
   "/Applications/IntelliJ IDEA.app/Contents/plugins/maven/lib/maven3/bin/mvn" verify
 ```
 
-从 T04 起，`TenantContext` 使用 JDK 21 `ScopedValue`，当前属于 preview API。
-Maven 编译和测试已在父 POM 中统一开启 `--enable-preview`。
+`TenantContext` 使用普通 `ThreadLocal` 并在 finally 中清理；项目不依赖 JDK preview API，启动不需要 `--enable-preview`。
 
 ## 启动
 
 ```bash
 cd im-server
 mvn -pl im-bootstrap -am package
-java --enable-preview -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar
+java -jar im-bootstrap/target/im-bootstrap-0.1.0-SNAPSHOT.jar
 ```
 
 健康检查：

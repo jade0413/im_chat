@@ -5,7 +5,6 @@ import com.im.common.mq.RabbitMqEvent;
 import com.im.common.mq.RabbitMqPublisher;
 import com.im.common.outbox.dao.entity.OutboxEntity;
 import com.im.common.outbox.dao.mapper.CommonOutboxMapper;
-import com.im.common.tenant.TenantContext;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -41,8 +40,7 @@ public class OutboxPoller implements SmartLifecycle {
     }
     executor = Executors.newVirtualThreadPerTaskExecutor();
     executor.submit(this::pollLoop);
-    log.info("outbox poller started, tenant_id={}, batch_size={}",
-        properties.getTenantId(), properties.normalizedBatchSize());
+    log.info("outbox poller started, batch_size={}", properties.normalizedBatchSize());
   }
 
   @Override
@@ -67,9 +65,9 @@ public class OutboxPoller implements SmartLifecycle {
 
   public int pollOnce() {
     try {
-      return TenantContext.callWithTenant(properties.getTenantId(), this::pollOnceInTenant);
+      return pollOnceBatch();
     } catch (Exception ex) {
-      log.warn("outbox poll failed, tenant_id={}", properties.getTenantId(), ex);
+      log.warn("outbox poll failed", ex);
       return 0;
     }
   }
@@ -90,7 +88,7 @@ public class OutboxPoller implements SmartLifecycle {
     }
   }
 
-  private int pollOnceInTenant() {
+  private int pollOnceBatch() {
     List<OutboxEntity> events = outboxMapper.selectList(Wrappers.<OutboxEntity>query()
         .in("status", OutboxWriter.STATUS_PENDING, OutboxWriter.STATUS_FAILED)
         .lt("retry_count", properties.normalizedMaxRetries())
@@ -131,9 +129,12 @@ public class OutboxPoller implements SmartLifecycle {
 
   private void markFailed(OutboxEntity event, Exception ex) {
     int nextRetryCount = safeRetryCount(event) + 1;
+    int nextStatus = nextRetryCount >= properties.normalizedMaxRetries()
+        ? OutboxWriter.STATUS_DEAD
+        : OutboxWriter.STATUS_FAILED;
     outboxMapper.update(null, Wrappers.<OutboxEntity>update()
         .eq("id", event.getId())
-        .set("status", OutboxWriter.STATUS_FAILED)
+        .set("status", nextStatus)
         .set("retry_count", nextRetryCount));
 
     if (nextRetryCount >= properties.normalizedMaxRetries()) {

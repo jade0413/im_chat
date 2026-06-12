@@ -7,7 +7,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class OutboxProperties {
 
   private boolean enabled = false;
-  private long tenantId = 1L;
   private int batchSize = 100;
   private Duration interval = Duration.ofMillis(100);
   private int maxRetries = 16;
@@ -19,14 +18,6 @@ public class OutboxProperties {
 
   public void setEnabled(boolean enabled) {
     this.enabled = enabled;
-  }
-
-  public long getTenantId() {
-    return tenantId;
-  }
-
-  public void setTenantId(long tenantId) {
-    this.tenantId = tenantId;
   }
 
   public int getBatchSize() {

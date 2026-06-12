@@ -36,6 +36,9 @@ class MessageSendServiceTest {
   private ConversationResolver conversationResolver;
 
   @Mock
+  private UserRelationClient relationClient;
+
+  @Mock
   private MessagePersistService persistService;
 
   @Mock
@@ -48,6 +51,7 @@ class MessageSendServiceTest {
     service = new MessageSendService(
         idempotencyService,
         conversationResolver,
+        relationClient,
         persistService,
         assembler);
   }
@@ -77,6 +81,20 @@ class MessageSendServiceTest {
     MessageSendResult result = sendWithTenant(request());
 
     assertThat(result).isSameAs(expected);
+  }
+
+  @Test
+  void rejectsWhenBlockedByPeer() {
+    when(idempotencyService.findExisting("client-1")).thenReturn(null);
+    when(idempotencyService.tryAcquire(1L, "client-1")).thenReturn(true);
+    org.mockito.Mockito.doThrow(new ImException(ErrorCode.BLOCKED_BY_PEER))
+        .when(relationClient).ensureCanSendC2c(100L, 200L);
+
+    assertThatThrownBy(() -> sendWithTenant(request()))
+        .isInstanceOf(ImException.class)
+        .extracting("errorCode")
+        .isEqualTo(ErrorCode.BLOCKED_BY_PEER);
+    verify(conversationResolver, never()).resolve(ctx(), request());
   }
 
   @Test

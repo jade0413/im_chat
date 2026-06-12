@@ -42,12 +42,12 @@ im-server (parent pom)
 
 | 包 | 内容 |
 |---|---|
-| `com.im.common.tenant` | TenantContext（ScopedValue 实现，虚拟线程安全）、MyBatis 租户拦截器（自动注入 tenant_id 条件与插入列）、gRPC ServerInterceptor/ClientInterceptor（metadata 透传 tenant_id/trace_id，核心约定 1） |
-| `com.im.common.id` | Snowflake 生成器（workerId 取自实例配置） |
+| `com.im.common.tenant` | TenantContext（**普通 ThreadLocal + finally 清理**，D25 修订：不用 ScopedValue——JDK21 预览特性，生产运行需 --enable-preview，不值）、MyBatis 租户拦截器（自动注入 tenant_id 条件与插入列）、gRPC ServerInterceptor/ClientInterceptor（metadata 透传 tenant_id/trace_id，核心约定 1） |
+| `com.im.common.id` | Snowflake 生成器（workerId 取自实例配置）+ Redis SETNX workerId 租约（冲突 fail-fast，TTL 续期，D6/S6） |
 | `com.im.common.error` | ImException + ErrorCode 映射（对齐 common/error.proto 分段） |
 | `com.im.common.outbox` | OutboxWriter（同事务写入）+ OutboxPoller（虚拟线程轮询 100ms，批量投 RabbitMQ confirm 后删，D18） |
 | `com.im.common.mq` | RabbitMQ 封装：exchange/queue 声明（im.events topic）、pb 序列化、消费幂等模板（按 event_id） |
-| `com.im.common.redis` | 键位常量类（seq:/route:/online:/token_ver:/dedup:，对齐架构 §7）+ 常用 Lua（seq INCR 带回写水位） |
+| `com.im.common.redis` | 键位常量类（route:/online:/token_ver:/dedup:/im:worker:，对齐架构 §7）；seq 主路径按 D26 走 MySQL conversation 行锁自增 |
 | `com.im.common.uplink` | **CmdHandler SPI**：`interface CmdHandler { int cmd(); byte[] handle(ConnCtx, byte[]); }`——业务模块实现并注册为 Spring Bean，路由器收集成表 |
 | `com.im.common.trace` | trace_id 生成/透传工具（WS帧→gRPC metadata→MQ header，§13.4） |
 

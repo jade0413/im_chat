@@ -61,6 +61,23 @@ public class ConversationService {
         .toList();
   }
 
+  public List<ConvInfo> listMemberConvs(long userId, int limit) {
+    TenantContext.requiredTenantId();
+    if (userId <= 0) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "user_id must be positive");
+    }
+    int effectiveLimit = limit <= 0 ? 100 : Math.min(limit, 100);
+    List<ConversationMemberEntity> memberships = memberMapper.selectList(
+        Wrappers.lambdaQuery(ConversationMemberEntity.class)
+            .eq(ConversationMemberEntity::getUserId, userId)
+            .isNull(ConversationMemberEntity::getDeletedAt)
+            .orderByDesc(ConversationMemberEntity::getCreatedAt)
+            .last("LIMIT " + effectiveLimit));
+    return memberships.stream()
+        .map(member -> toMemberConvInfo(userId, member))
+        .toList();
+  }
+
   private ConvInfo resolveC2c(long fromUserId, long toUserId) {
     String c2cKey = c2cKeyGenerator.generate(fromUserId, toUserId);
     ConversationEntity existing = findByC2cKey(c2cKey);
@@ -129,12 +146,31 @@ public class ConversationService {
     return toConvInfo(conversation, peerUserId, member);
   }
 
+  private ConvInfo toMemberConvInfo(long userId, ConversationMemberEntity member) {
+    ConversationEntity conversation = conversationMapper.selectById(member.getConvId());
+    if (conversation == null) {
+      throw new ImException(ErrorCode.CONV_NOT_FOUND);
+    }
+    long peerUserId = 0L;
+    if (Integer.valueOf(ConvType.C2C.getNumber()).equals(conversation.getType())) {
+      peerUserId = findMembers(conversation.getId()).stream()
+          .map(ConversationMemberEntity::getUserId)
+          .filter(memberUserId -> memberUserId != userId)
+          .findFirst()
+          .orElse(0L);
+    }
+    return toConvInfo(conversation, peerUserId, member);
+  }
+
   private ConvInfo toConvInfo(ConversationEntity conversation, long peerUserId,
       ConversationMemberEntity member) {
+    ConvType type = convType(conversation);
     ConvInfo.Builder builder = ConvInfo.newBuilder()
         .setConvId(conversation.getId())
-        .setType(ConvType.C2C)
+        .setType(type)
+        .setTitle(defaultTitle(type, peerUserId))
         .setPeerUserId(peerUserId)
+        .setGroupId(nullToZero(conversation.getGroupId()))
         .setMaxSeq(nullToZero(conversation.getMaxSeq()))
         .setReadSeq(nullToZero(member.getReadSeq()))
         .setPinned(toBool(member.getPinned()))
@@ -144,6 +180,18 @@ public class ConversationService {
       builder.setLastMsgTime(conversation.getLastMsgTime().toInstant(ZoneOffset.UTC).toEpochMilli());
     }
     return builder.build();
+  }
+
+  private ConvType convType(ConversationEntity conversation) {
+    ConvType type = ConvType.forNumber(conversation.getType() == null ? 0 : conversation.getType());
+    return type == null ? ConvType.CONV_TYPE_UNSPECIFIED : type;
+  }
+
+  private String defaultTitle(ConvType type, long peerUserId) {
+    if (type == ConvType.C2C && peerUserId > 0) {
+      return Long.toString(peerUserId);
+    }
+    return "";
   }
 
   private long nullToZero(Long value) {

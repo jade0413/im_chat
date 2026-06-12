@@ -11,6 +11,7 @@ import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.core.MessagePostProcessor;
 import org.springframework.amqp.core.MessageProperties;
+import org.springframework.amqp.core.ReturnedMessage;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Service;
@@ -29,6 +30,7 @@ public class RabbitMqPublisher {
   public RabbitMqPublisher(RabbitTemplate rabbitTemplate, OutboxProperties properties) {
     this.rabbitTemplate = rabbitTemplate;
     this.properties = properties;
+    this.rabbitTemplate.setMandatory(true);
   }
 
   public void publish(RabbitMqEvent event) {
@@ -41,6 +43,7 @@ public class RabbitMqPublisher {
           messagePostProcessor(event),
           correlationData);
       awaitConfirm(event, correlationData);
+      ensureRouted(event, correlationData);
     } catch (AmqpException ex) {
       throw new ImException(ErrorCode.INTERNAL_ERROR, "rabbitmq publish failed", ex);
     }
@@ -75,6 +78,16 @@ public class RabbitMqPublisher {
       throw new ImException(ErrorCode.INTERNAL_ERROR, "rabbitmq publish confirm failed", ex);
     } catch (TimeoutException ex) {
       throw new ImException(ErrorCode.INTERNAL_ERROR, "rabbitmq publish confirm timeout", ex);
+    }
+  }
+
+  private void ensureRouted(RabbitMqEvent event, CorrelationData correlationData) {
+    ReturnedMessage returned = correlationData.getReturned();
+    if (returned != null) {
+      throw new ImException(ErrorCode.INTERNAL_ERROR,
+          "rabbitmq publish returned: event_id=" + event.eventId()
+              + ", reply_code=" + returned.getReplyCode()
+              + ", reply_text=" + returned.getReplyText());
     }
   }
 }

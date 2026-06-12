@@ -38,23 +38,19 @@ public class MessageQueryService {
     SyncResp.Builder response = SyncResp.newBuilder()
         .setFullSync(false)
         .setConvListVersion(request.getConvListVersion());
+    if (request.getConvVersionsCount() == 0) {
+      for (ConvInfo conv : memberClient.listMemberConvs(userId)) {
+        addDelta(response, conv, 1L, conv.getMaxSeq());
+      }
+      return response.build();
+    }
     for (SyncReq.ConvVersion version : request.getConvVersionsList()) {
       long conversationId = version.getConvId();
       ensureMember(conversationId, userId);
       long serverMaxSeq = maxSeq(conversationId);
       long beginSeq = version.getLocalMaxSeq() + 1;
-      if (serverMaxSeq < beginSeq) {
-        continue;
-      }
-      MessagePage page = range(conversationId, beginSeq, serverMaxSeq, DEFAULT_LIMIT);
-      response.addDeltas(SyncResp.ConvDelta.newBuilder()
-          .setConv(ConvInfo.newBuilder()
-              .setConvId(conversationId)
-              .setType(com.im.proto.common.ConvType.C2C)
-              .setMaxSeq(serverMaxSeq))
-          .addAllMsgs(page.messages())
-          .setServerMaxSeq(serverMaxSeq)
-          .setHasMore(page.hasMore()));
+      addDelta(response, ConvInfo.newBuilder().setConvId(conversationId).setMaxSeq(serverMaxSeq).build(),
+          beginSeq, serverMaxSeq);
     }
     return response.build();
   }
@@ -102,6 +98,25 @@ public class MessageQueryService {
       entities = entities.subList(0, effectiveLimit);
     }
     return new MessagePage(entities.stream().map(assembler::toPush).toList(), hasMore);
+  }
+
+  private void addDelta(SyncResp.Builder response, ConvInfo conv, long beginSeq, long serverMaxSeq) {
+    if (serverMaxSeq <= 0) {
+      response.addDeltas(SyncResp.ConvDelta.newBuilder()
+          .setConv(conv.toBuilder().setMaxSeq(0L))
+          .setServerMaxSeq(0L)
+          .setHasMore(false));
+      return;
+    }
+    if (serverMaxSeq < beginSeq) {
+      return;
+    }
+    MessagePage page = range(conv.getConvId(), beginSeq, serverMaxSeq, DEFAULT_LIMIT);
+    response.addDeltas(SyncResp.ConvDelta.newBuilder()
+        .setConv(conv.toBuilder().setMaxSeq(serverMaxSeq))
+        .addAllMsgs(page.messages())
+        .setServerMaxSeq(serverMaxSeq)
+        .setHasMore(page.hasMore()));
   }
 
   private long maxSeq(long conversationId) {

@@ -13,10 +13,14 @@ import com.im.proto.rpc.UplinkReq;
 import com.im.proto.rpc.UplinkResp;
 import com.im.proto.ws.Cmd;
 import io.grpc.stub.StreamObserver;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class UplinkGrpcService extends UplinkGrpc.UplinkImplBase {
+
+  private static final Logger log = LoggerFactory.getLogger(UplinkGrpcService.class);
 
   private final CmdHandlerRegistry cmdHandlerRegistry;
 
@@ -32,6 +36,9 @@ public class UplinkGrpcService extends UplinkGrpc.UplinkImplBase {
     } catch (ImException ex) {
       response = errorResponse(request.getReqId(), ex.errorCode(), ex.getMessage());
     } catch (Exception ex) {
+      ConnCtx ctx = request.hasCtx() ? request.getCtx() : ConnCtx.getDefaultInstance();
+      log.error("uplink dispatch failed, tenant_id={}, user_id={}, cmd={}, req_id={}, trace_id={}",
+          ctx.getTenantId(), ctx.getUserId(), request.getCmd(), request.getReqId(), ctx.getTraceId(), ex);
       response = errorResponse(request.getReqId(), ErrorCode.INTERNAL_ERROR,
           ErrorCode.INTERNAL_ERROR.defaultMessage());
     }

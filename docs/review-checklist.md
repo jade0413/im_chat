@@ -6,12 +6,12 @@
 ## 0. 全局拒收线（每个 PR 都查）
 
 - [ ] 业务模块 POM 没有出现其他业务模块坐标（enforcer 规则在且生效）
-- [ ] 所有 SQL 经 MyBatis 租户拦截器（禁止绕过 mapper 裸写 SQL/JdbcTemplate，例外需文档批准）
+- [ ] 所有 SQL 经 MyBatis 租户拦截器（禁止绕过 mapper 裸写 SQL/JdbcTemplate；`outbox` 作为全局基础设施轮询表是已批准例外，见 architecture §7）
 - [ ] 应用代码**没有手写 tenant_id 过滤条件**（那是拦截器的事；手写=拦截器失效的信号）
 - [ ] 新增/变更表结构：同步改 docs/architecture.md §7 + Flyway 迁移（不改 compose 的 01-schema.sql）
 - [ ] 改 proto：Rust+Java 两端编译通过；字段号只增不删改；frame.proto 的 Cmd↔body 注释同步更新（D19/协议纪律 §6）
 - [ ] gRPC/MQ/日志带 tenant_id + trace_id（§13.4）；异常用 ImException+ErrorCode，禁止裸抛 RuntimeException
-- [ ] 无 `new Thread()`/自建平台线程池处理请求（虚拟线程由框架管理，D2）；ThreadLocal 一律换 ScopedValue/框架机制
+- [ ] 无 `new Thread()`/自建平台线程池处理请求（虚拟线程由框架管理，D2）；上下文传递统一用 im-common 的 TenantContext/TraceContext（ThreadLocal+finally，D25），禁止自建；**禁止 --enable-preview**
 - [ ] 密码/密钥不进代码与日志；输入参数有校验（长度/格式/枚举值）
 
 ## 1. 骨架 PR（design §8-1）
@@ -22,7 +22,7 @@
 
 ## 2. im-common PR（§8-2）
 
-- [ ] TenantContext 用 ScopedValue；拦截器对 SELECT/UPDATE/DELETE 注入 where、INSERT 注入列，**有单测证明**（含子查询/join 场景）
+- [ ] TenantContext 用 ThreadLocal+finally 清理（D25）；拦截器对 SELECT/UPDATE/DELETE 注入 where、INSERT 注入列，**有单测证明**（含子查询/join 场景）
 - [ ] 缺失 tenant 上下文时拦截器**抛异常**而非放行（fail-closed）
 - [ ] Snowflake workerId Redis 租约（SETNX+TTL+续期），冲突时启动失败
 - [ ] Outbox：同事务写入验证（事务回滚则 outbox 无残留）；poller confirm 后才删；投失败退避重试有上限告警
@@ -36,7 +36,7 @@
 
 ## 4. message+conversation PR（§8-4）★ 核心链路，重点审
 
-- [ ] 发送链路顺序严格对齐 architecture §5.2：幂等检查→关系校验(黑名单/好友开关 D17)→INCR seq→同事务(消息+会话+outbox)→ack
+- [ ] 发送链路顺序严格对齐 architecture §5.2：幂等检查→关系校验(黑名单/好友开关 D17)→DB 事务内分配 seq→同事务(消息+会话+outbox)→ack
 - [ ] client_msg_id 幂等：Redis SETNX + DB 唯一键双保险，重复请求返回**原结果**而非报错
 - [ ] seq 无空洞：并发发送压测（100 并发同会话）后 max(seq)=count(*)
 - [ ] SYNC_REQ：缺口区间正确、分页 has_more 正确、新设备(local=0)全量路径、full_sync 阈值

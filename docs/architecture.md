@@ -33,8 +33,8 @@
 │  ──────────── im-common(tenant上下文/ID/MQ封装) ──────────── │
 └───┬────────┬─────────┬───────────┬──────────────────────┘
     ▼        ▼         ▼           ▼
- MySQL8   Redis7    RabbitMQ     MinIO
- (业务+消息) (seq/路由/在线) (异步链路)  (图片/语音/文件)
+ MySQL8      Redis7       RabbitMQ     MinIO
+ (业务+消息+seq) (路由/在线/缓存) (异步链路)  (图片/语音/文件)
 ```
 
 要点：
@@ -77,7 +77,7 @@
 共享库 + `tenant_id` 行级隔离：
 
 - 所有业务表含 `tenant_id BIGINT NOT NULL`，联合索引以 tenant_id 打头
-- Java 侧 `TenantContext`（ThreadLocal，虚拟线程下用 InheritableThreadLocal 或 ScopedValue）+ MyBatis 拦截器自动注入 where 条件，**应用代码不手写 tenant_id 过滤**，杜绝越权
+- Java 侧 `TenantContext`（普通 ThreadLocal + finally 清理，D25；不使用 JDK21 preview `ScopedValue`）+ MyBatis 拦截器自动注入 where 条件，**应用代码不手写 tenant_id 过滤**，杜绝越权
 - 网关在握手鉴权后将 tenant_id 绑定到连接上下文，后续所有上行帧自动携带
 - 预留升级路径：DataSource 路由层接口先抽出来，大客户独立库时实现一个按 tenant 路由的 DataSource 即可
 
@@ -127,8 +127,9 @@ CS_SESSION 语义精确化（D23）：它是**带生命周期状态机的会话*
 
 ### 5.1 核心机制：会话级 seq + 收件箱（D7）
 
-- 每会话一个 seq：`INCR seq:{tenant}:{conv_id}`（Redis，持久化兜底：定期回写 MySQL conversation.max_seq，重启取 max(两者)+步长）
-- 消息表按 (tenant_id, conversation_id, seq) 唯一，客户端按 seq 排序展示——**全序、无空洞可检测**
+- 每会话一个 seq：MVP 采纳 D26，消息持久化事务内执行 `UPDATE conversation SET max_seq=max_seq+1 WHERE id=?`，随后读取 `conversation.max_seq` 作为本消息 seq；message/conversation/outbox 同事务提交，回滚不消耗 seq。
+- 消息表按 (tenant_id, conversation_id, seq) 唯一，客户端按 seq 排序展示；同一会话写入由 conversation 行锁串行化，保证单调递增且无空洞。
+- 热会话高吞吐场景预留 Redis INCR + 水位回写作为二阶段优化路径，启用前必须重新评审一致性语义。
 - 双 ID（D9）：client_msg_id 幂等去重（Redis SETNX，TTL 24h），server_msg_id 全局唯一（Snowflake）
 
 ### 5.2 发送时序（单聊）
@@ -139,7 +140,7 @@ client          gateway              message模块                  push模块  
   │──────────────>│ gRPC SendMsg         │                          │            │
   │               │─────────────────────>│ 1.幂等检查(cmid)           │            │
   │               │                      │ 2.风控/好友关系校验          │            │
-  │               │                      │ 3.INCR seq, 写消息表        │            │
+  │               │                      │ 3.DB事务内分配seq, 写消息表  │            │
   │               │                      │ 4.更新会话 last_msg/未读+1  │            │
   │               │  返回 seq,smid        │ 5.投 MQ(msg.saved)        │            │
   │ MsgSendAck    │<─────────────────────│ ──────────────────────── >│            │
@@ -248,7 +249,7 @@ conversation(id, tenant_id, type ENUM('C2C','GROUP','CS_SESSION','SYSTEM'),
      cs_status ENUM('OPEN','ASSIGNED','RESOLVED') NULL /*客服预留*/,
      UNIQUE(tenant_id, c2c_key))
 user_blacklist(tenant_id, user_id, blocked_user_id, created_at,
-     PRIMARY KEY(tenant_id, user_id, blocked_user_id))  /*D17: 拉黑后对方消息被静默拒收*/
+     PRIMARY KEY(tenant_id, user_id, blocked_user_id))  /*D17: 拉黑后发送返回 BLOCKED_BY_PEER*/
 friend(tenant_id, user_id, friend_user_id, remark, status, created_at)  /*二阶段,租户开关 friend_required*/
 outbox(id, tenant_id, event_type, payload, status, created_at)  /*D18: 与业务表同事务写,轮询投MQ*/
 conversation_member(conv_id, tenant_id, user_id, read_seq, unread_hint,
@@ -265,9 +266,12 @@ moderation_log(id, tenant_id, message_id, provider, category, score, action_take
      original_content /*留证,仅审计可查*/, audit_status ENUM('AUTO','REVIEWING','UPHELD','OVERTURNED'))
 ```
 
-Redis 键位规划：`seq:{t}:{conv}`、`route:{t}:{uid}:{platform}`、`online:{t}:{uid}`、
-`token_ver:{t}:{uid}:{platform}`（互踢令牌失效）、`dedup:{t}:{cmid}`、
+Redis 键位规划：`route:{t}:{uid}:{platform}`、`online:{t}:{uid}`、
+`token_ver:{t}:{uid}:{platform}`（互踢令牌失效）、`dedup:{t}:{cmid}`、`im:worker:{id}`、
 最近消息缓存 `msgs:{t}:{conv}`(ZSET by seq, 容量 100)。
+
+`outbox` 是基础设施全局轮询表，MyBatis 租户拦截器忽略该表；写入方必须显式写入 `tenant_id`，
+poller 全表扫描后按行内 `tenant_id` 写 MQ header 和 routing key，避免只投递默认租户事件。
 
 ## 8. 文件/图片/语音（D10）
 
@@ -333,7 +337,7 @@ MVP 一套 compose：mysql8 / redis7 / rabbitmq(management) / minio / im-gateway
 ## 13. 架构补遗：之前没考虑到的横切关注点（2026-06-13 排查）
 
 ### 13.1 关系链与反骚扰（D17）
-开放式单聊（同租户内可直接发起，客服访客场景刚需）+ `user_blacklist`（拉黑后静默拒收：发送方不报错、接收方不可见，避免对抗）。
+开放式单聊（同租户内可直接发起，客服访客场景刚需）+ `user_blacklist`（拉黑后发送返回 `BLOCKED_BY_PEER`，与 `error.proto` 和当前发送链路实现保持一致）。
 "需好友才能聊"= `tenant_config.friend_required` 开关，friend 表与申请流程二阶段。message 模块发送校验顺序：黑名单 → 租户好友开关 → 禁言状态。
 
 ### 13.2 落库与 MQ 的一致性：Outbox 模式（D18）
@@ -365,8 +369,8 @@ WS 握手校验 Origin(Web 端)；帧带时间戳防重放（±5min 窗口）；
 JWT 短期(2h)+refresh token；管理后台独立 RBAC；MySQL/Redis/MinIO 不暴露公网；密码 bcrypt。
 
 ### 13.9 Redis 故障半径（接受的风险，记录在案）
-seq 依赖 Redis：挂了→发消息不可用（已有 MySQL max_seq+步长兜底重启恢复）；路由表丢失→全员踢线重连（13.3 兜底）。
-万级规模接受"Redis 单点+哨兵"，不上 Cluster。
+消息 seq 主路径不依赖 Redis（D26），Redis 故障不会导致已登录用户发送链路因 seq 分配不可用；但幂等 SETNX、路由表、在线状态、token_ver 等能力会受影响。路由表丢失→全员踢线重连（13.3 兜底）。
+万级规模接受"Redis 单点+哨兵"，不上 Cluster；二阶段若把 seq 热点迁回 Redis，必须重新补充故障半径与一致性方案。
 
 ## 14. 尚未定/待讨论
 

@@ -19,15 +19,18 @@ public class MessageSendService {
 
   private final MessageIdempotencyService idempotencyService;
   private final ConversationResolver conversationResolver;
+  private final UserRelationClient relationClient;
   private final MessagePersistService persistService;
   private final MessageAssembler assembler;
 
   public MessageSendService(MessageIdempotencyService idempotencyService,
       ConversationResolver conversationResolver,
+      UserRelationClient relationClient,
       MessagePersistService persistService,
       MessageAssembler assembler) {
     this.idempotencyService = idempotencyService;
     this.conversationResolver = conversationResolver;
+    this.relationClient = relationClient;
     this.persistService = persistService;
     this.assembler = assembler;
   }
@@ -44,7 +47,13 @@ public class MessageSendService {
       return assembler.toResult(idempotencyService.waitForExisting(request.getClientMsgId()));
     }
 
+    if (request.getTargetCase() == MsgSend.TargetCase.TO_USER_ID) {
+      relationClient.ensureCanSendC2c(ctx.getUserId(), request.getToUserId());
+    }
     ConvInfo conv = conversationResolver.resolve(ctx, request);
+    if (request.getTargetCase() == MsgSend.TargetCase.CONV_ID) {
+      relationClient.ensureCanSendC2c(ctx.getUserId(), conv.getPeerUserId());
+    }
     try {
       return persistService.persist(tenantId, ctx, request, conv);
     } catch (DuplicateKeyException ex) {
