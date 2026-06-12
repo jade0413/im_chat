@@ -103,6 +103,7 @@
           </execution>
         </executions>
       </plugin>
+      <!-- PR-1 L1: bind the parent enforcer execution when im-common is built by itself. -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-enforcer-plugin</artifactId>

@@ -26,6 +26,13 @@
   审查环境无 cargo，合并前 CI 必须：`cargo test` + `cargo clippy -- -D warnings` 全绿（复审门槛原文要求）。
 - 挂账提醒：PR-1 L1（im-common 绑 enforcer）已两个 PR 未处理，下一 PR 必须带上。
 
+## 附：PR-4（bfa75c6 batch push route lookups）审查 ✅ 通过
+
+P1 整改：findAllByUsers 对目标用户去重（LinkedHashSet 保序）→ 按 用户×平台类 拼 key → 单次 MGET → 解码分组。
+500 人群聊的路由查询从 500 次 Redis 往返降到 1 次，multiGet null 防御、validateRouteOwner 校验、双层测试齐备。
+唯一备注：群上限若二阶段抬高（>1000 人 = 单次 MGET 3000+ key），需按 1000 key 分片——现在不用动，
+在 Open Questions 的"二阶段抬高群上限"条目里已有对应项。
+
 ## 整改质量评价
 
 五项整改没有一处是"为过审查打补丁"：close 信号独立成 watch channel、错误帧的镜像编码方案、

@@ -30,6 +30,7 @@ cargo run
 | `IM_GATEWAY_DISPATCH_TIMEOUT_SEC` | `10` | 上行业务帧 gRPC deadline |
 | `IM_GATEWAY_VERIFY_TIMEOUT_SEC` | `5` | 鉴权 gRPC deadline |
 | `IM_GATEWAY_OUTBOUND_QUEUE_SIZE` | `256` | 单连接下行有界队列大小，满则按慢消费者断连 |
+| `IM_GATEWAY_OUTBOUND_QUEUE_FULL_THRESHOLD` | `3` | 单连接下行队列连续满 N 次后主动断连 |
 | `IM_GATEWAY_ROUTE_RENEW_HEARTBEATS` | `3` | 每 N 次 PING 续一次路由 TTL |
 
 入口：

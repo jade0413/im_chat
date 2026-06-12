@@ -15,6 +15,7 @@ pub struct Config {
     pub verify_timeout: Duration,
     pub conn_event_timeout: Duration,
     pub outbound_queue_size: usize,
+    pub outbound_queue_full_disconnect_threshold: u64,
     pub route_renew_heartbeat_interval: u64,
     pub min_protocol_version: u32,
 }
@@ -47,6 +48,12 @@ impl Config {
             outbound_queue_size: read_env(&["IM_GATEWAY_OUTBOUND_QUEUE_SIZE"], "256")
                 .parse()
                 .context("invalid outbound queue size")?,
+            outbound_queue_full_disconnect_threshold: read_env(
+                &["IM_GATEWAY_OUTBOUND_QUEUE_FULL_THRESHOLD"],
+                "3",
+            )
+            .parse()
+            .context("invalid outbound queue full threshold")?,
             route_renew_heartbeat_interval: read_env(&["IM_GATEWAY_ROUTE_RENEW_HEARTBEATS"], "3")
                 .parse()
                 .context("invalid route renew heartbeat interval")?,
@@ -95,6 +102,7 @@ mod tests {
             verify_timeout: std::time::Duration::from_secs(5),
             conn_event_timeout: std::time::Duration::from_secs(5),
             outbound_queue_size: 256,
+            outbound_queue_full_disconnect_threshold: 3,
             route_renew_heartbeat_interval: 3,
             min_protocol_version: 1,
         };

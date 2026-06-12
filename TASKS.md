@@ -1279,6 +1279,56 @@
 
 ---
 
+### T23 — PR4 挂账收口：网关 backoff 与慢消费者
+
+状态：DONE
+
+目标：
+
+- 明确闭环 PR-1 L1：`im-common` 子模块可单独触发父 POM enforcer，防止业务模块互依赖漏检。
+- 修复 PR-3 N2：RabbitMQ push consumer 稳定运行一段时间后重置重连 backoff，避免长期运行后偶发闪断仍从高退避恢复。
+- 修复 PR-3 N1：单连接 outbound 队列连续满 N 次后主动断连，促使客户端重连后走 SYNC 自愈。
+
+涉及模块：
+
+- `im-server/im-common`
+- `im-gateway-rust`
+- `docs`
+
+需要修改的文件：
+
+- `im-server/im-common/pom.xml`
+- `im-gateway-rust/src/config.rs`
+- `im-gateway-rust/src/connection.rs`
+- `im-gateway-rust/src/push.rs`
+- `im-gateway-rust/README.md`
+- `TASKS.md`
+
+验收标准：
+
+- `im-common` POM 明确绑定 `maven-enforcer-plugin`，`mvn -q -pl im-common validate` 通过。
+- push consumer 重连 backoff 仍按 1s→30s 指数退避，但 consumer 稳定运行 60s 后下一次重连延迟复位为 1s。
+- `IM_GATEWAY_OUTBOUND_QUEUE_FULL_THRESHOLD` 可配置，默认 3；连续满队列达到阈值后关闭连接。
+- KICK 控制帧发不出去时仍立即断连，避免同类互踢失效。
+- 单测覆盖 backoff 复位和连续满队列断连阈值。
+
+测试方式：
+
+- `mvn -q -pl im-common validate`
+- `cargo fmt --check`
+- `cargo test`
+- `cargo clippy --all-targets -- -D warnings`
+
+完成记录：
+
+- `im-common/pom.xml` 已保留并标注明确的 enforcer 插件绑定，`mvn -q -pl im-common validate` 通过。
+- push consumer 重连退避增加稳定运行 60s 后复位逻辑，已补单测覆盖 1s→30s 增长和稳定后复位。
+- outbound 队列增加连续满队列计数，默认阈值 3；达到阈值主动 close，已补单测覆盖。
+- KICK 控制帧如果因队列满未发出，仍立即清本地路由并上报断连。
+- 已执行 `cargo fmt --check`、`cargo test`、`cargo clippy --all-targets -- -D warnings`，均通过。
+
+---
+
 ## 4. 后续候选任务（当前阶段不执行）
 
 这些任务进入后续阶段，不在当前 im-server MVP 优先队列：

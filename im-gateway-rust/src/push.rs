@@ -1,5 +1,5 @@
 use crate::{
-    connection::PushSendRuntime,
+    connection::{PushSendResult, PushSendRuntime},
     proto::im::{rpc::v1::PushEnvelope, ws::v1::Cmd},
     state::AppState,
 };
@@ -11,18 +11,25 @@ use lapin::{
     Connection, ConnectionProperties,
 };
 use prost::Message as _;
+use std::time::Instant;
 use tokio::time::{sleep, Duration};
 use tracing::{info, warn};
 
+const INITIAL_RECONNECT_BACKOFF: Duration = Duration::from_secs(1);
+const MAX_RECONNECT_BACKOFF: Duration = Duration::from_secs(30);
+const STABLE_CONSUMER_RESET_AFTER: Duration = Duration::from_secs(60);
+
 pub async fn run_push_consumer_forever(state: AppState) {
-    let mut backoff = Duration::from_secs(1);
+    let mut backoff = INITIAL_RECONNECT_BACKOFF;
     loop {
+        let started_at = Instant::now();
         match run_push_consumer_once(state.clone()).await {
             Ok(()) => warn!("gateway push consumer ended, reconnecting"),
             Err(err) => warn!(?err, "gateway push consumer failed, reconnecting"),
         }
-        sleep(backoff).await;
-        backoff = (backoff * 2).min(Duration::from_secs(30));
+        let (delay, next_backoff) = reconnect_backoff(backoff, started_at.elapsed());
+        sleep(delay).await;
+        backoff = next_backoff;
     }
 }
 
@@ -103,26 +110,30 @@ async fn handle_push_delivery(state: &AppState, payload: &[u8]) -> Result<()> {
         ) else {
             continue;
         };
-        if handle.send_push(
+        match handle.send_push(
             envelope.cmd,
             envelope.body.clone(),
             envelope.need_ack,
             runtime.clone(),
         ) {
-            delivered += 1;
-            state.metrics.push_delivered();
-            if is_kick {
-                handle.close();
-            }
-        } else {
-            failed += 1;
-            state.metrics.push_failed();
-            handle.close();
-            if state.registry.remove(&handle.key()).is_some() {
-                state.metrics.connection_closed(envelope.tenant_id);
-                if let Err(err) = state.rpc.on_disconnected(handle.ctx()).await {
-                    warn!(?err, "failed to report disconnected for slow consumer");
+            PushSendResult::Sent => {
+                delivered += 1;
+                state.metrics.push_delivered();
+                if is_kick {
+                    handle.close();
                 }
+            }
+            PushSendResult::Dropped => {
+                failed += 1;
+                state.metrics.push_failed();
+                if is_kick {
+                    disconnect_slow_consumer(state, &handle, envelope.tenant_id).await;
+                }
+            }
+            PushSendResult::Disconnected => {
+                failed += 1;
+                state.metrics.push_failed();
+                disconnect_slow_consumer(state, &handle, envelope.tenant_id).await;
             }
         }
     }
@@ -137,4 +148,53 @@ async fn handle_push_delivery(state: &AppState, payload: &[u8]) -> Result<()> {
         "push envelope handled"
     );
     Ok(())
+}
+
+async fn disconnect_slow_consumer(
+    state: &AppState,
+    handle: &crate::connection::ConnectionHandle,
+    tenant_id: i64,
+) {
+    handle.close();
+    if state.registry.remove(&handle.key()).is_some() {
+        state.metrics.connection_closed(tenant_id);
+        if let Err(err) = state.rpc.on_disconnected(handle.ctx()).await {
+            warn!(?err, "failed to report disconnected for slow consumer");
+        }
+    }
+}
+
+fn reconnect_backoff(current: Duration, consumer_run_duration: Duration) -> (Duration, Duration) {
+    let delay = if consumer_run_duration >= STABLE_CONSUMER_RESET_AFTER {
+        INITIAL_RECONNECT_BACKOFF
+    } else {
+        current
+    };
+    (delay, (delay * 2).min(MAX_RECONNECT_BACKOFF))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{reconnect_backoff, INITIAL_RECONNECT_BACKOFF, MAX_RECONNECT_BACKOFF};
+    use tokio::time::Duration;
+
+    #[test]
+    fn reconnect_backoff_grows_until_max_for_unstable_consumer() {
+        let (delay, next) = reconnect_backoff(Duration::from_secs(4), Duration::from_secs(10));
+
+        assert_eq!(delay, Duration::from_secs(4));
+        assert_eq!(next, Duration::from_secs(8));
+
+        let (delay, next) = reconnect_backoff(Duration::from_secs(30), Duration::from_secs(10));
+        assert_eq!(delay, MAX_RECONNECT_BACKOFF);
+        assert_eq!(next, MAX_RECONNECT_BACKOFF);
+    }
+
+    #[test]
+    fn reconnect_backoff_resets_after_stable_consumer_run() {
+        let (delay, next) = reconnect_backoff(Duration::from_secs(30), Duration::from_secs(60));
+
+        assert_eq!(delay, INITIAL_RECONNECT_BACKOFF);
+        assert_eq!(next, Duration::from_secs(2));
+    }
 }

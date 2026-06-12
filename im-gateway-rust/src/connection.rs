@@ -128,10 +128,17 @@ pub struct ConnectionHandle {
     close_tx: watch::Sender<bool>,
     next_push_req_id: Arc<AtomicU64>,
     heartbeat_count: Arc<AtomicU64>,
+    outbound_full_count: Arc<AtomicU64>,
+    outbound_full_disconnect_threshold: u64,
 }
 
 impl ConnectionHandle {
-    fn new(ctx: ConnCtx, sender: mpsc::Sender<Outbound>, close_tx: watch::Sender<bool>) -> Self {
+    fn new(
+        ctx: ConnCtx,
+        sender: mpsc::Sender<Outbound>,
+        close_tx: watch::Sender<bool>,
+        outbound_full_disconnect_threshold: u64,
+    ) -> Self {
         Self {
             key: ConnKey::from_ctx(&ctx),
             ctx,
@@ -139,6 +146,8 @@ impl ConnectionHandle {
             close_tx,
             next_push_req_id: Arc::new(AtomicU64::new(1)),
             heartbeat_count: Arc::new(AtomicU64::new(0)),
+            outbound_full_count: Arc::new(AtomicU64::new(0)),
+            outbound_full_disconnect_threshold: outbound_full_disconnect_threshold.max(1),
         }
     }
 
@@ -156,10 +165,10 @@ impl ConnectionHandle {
         body: Vec<u8>,
         need_ack: bool,
         runtime: PushSendRuntime,
-    ) -> bool {
+    ) -> PushSendResult {
         if cmd > i32::MAX as u32 {
             warn!(cmd, "skip push with invalid cmd");
-            return false;
+            return PushSendResult::Dropped;
         }
         let req_id = if need_ack {
             self.next_push_req_id.fetch_add(1, Ordering::Relaxed)
@@ -167,8 +176,10 @@ impl ConnectionHandle {
             0
         };
         let frame = frame_codec::new_frame(cmd as i32, req_id, body);
-        if !self.send_frame(frame) {
-            return false;
+        match self.send_frame(frame) {
+            FrameSendResult::Sent => {}
+            FrameSendResult::Dropped => return PushSendResult::Dropped,
+            FrameSendResult::Disconnected => return PushSendResult::Disconnected,
         }
         if need_ack {
             runtime.pending_acks.track(
@@ -180,23 +191,41 @@ impl ConnectionHandle {
                 runtime.ack_timeout,
             );
         }
-        true
+        PushSendResult::Sent
     }
 
-    fn send_frame(&self, frame: Frame) -> bool {
+    fn send_frame(&self, frame: Frame) -> FrameSendResult {
         match self.sender.try_send(Outbound::Frame(frame)) {
-            Ok(()) => true,
+            Ok(()) => {
+                self.outbound_full_count.store(0, Ordering::Relaxed);
+                FrameSendResult::Sent
+            }
             Err(mpsc::error::TrySendError::Full(_)) => {
+                let full_count = self.outbound_full_count.fetch_add(1, Ordering::Relaxed) + 1;
                 warn!(
                     tenant_id = self.ctx.tenant_id,
                     user_id = self.ctx.user_id,
                     platform = self.ctx.platform,
                     conn_id = self.ctx.conn_id,
+                    full_count,
+                    threshold = self.outbound_full_disconnect_threshold,
                     "outbound queue full"
                 );
-                false
+                if full_count >= self.outbound_full_disconnect_threshold {
+                    warn!(
+                        tenant_id = self.ctx.tenant_id,
+                        user_id = self.ctx.user_id,
+                        platform = self.ctx.platform,
+                        conn_id = self.ctx.conn_id,
+                        "outbound queue full threshold reached, close connection"
+                    );
+                    self.close();
+                    FrameSendResult::Disconnected
+                } else {
+                    FrameSendResult::Dropped
+                }
             }
-            Err(mpsc::error::TrySendError::Closed(_)) => false,
+            Err(mpsc::error::TrySendError::Closed(_)) => FrameSendResult::Disconnected,
         }
     }
 
@@ -210,6 +239,13 @@ impl ConnectionHandle {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PushSendResult {
+    Sent,
+    Dropped,
+    Disconnected,
+}
+
 #[derive(Clone)]
 pub struct PushSendRuntime {
     pub pending_acks: PendingAcks,
@@ -221,6 +257,13 @@ pub struct PushSendRuntime {
 
 enum Outbound {
     Frame(Frame),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FrameSendResult {
+    Sent,
+    Dropped,
+    Disconnected,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -377,7 +420,12 @@ async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
 
     let (outbound_tx, mut outbound_rx) = mpsc::channel(state.config.outbound_queue_size);
     let (close_tx, mut close_rx) = watch::channel(false);
-    let handle = ConnectionHandle::new(ctx.clone(), outbound_tx, close_tx);
+    let handle = ConnectionHandle::new(
+        ctx.clone(),
+        outbound_tx,
+        close_tx,
+        state.config.outbound_queue_full_disconnect_threshold,
+    );
     let key = handle.key();
     state.registry.insert(handle.clone());
 
@@ -682,8 +730,12 @@ fn unix_ts() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_heartbeat_interval, timestamp_in_window};
+    use super::{
+        frame_codec, normalize_heartbeat_interval, timestamp_in_window, ConnCtx, ConnectionHandle,
+        FrameSendResult,
+    };
     use std::time::Duration;
+    use tokio::sync::{mpsc, watch};
 
     #[test]
     fn validates_auth_timestamp_window() {
@@ -698,5 +750,44 @@ mod tests {
         assert_eq!(normalize_heartbeat_interval(0), Duration::from_secs(30));
         assert_eq!(normalize_heartbeat_interval(10), Duration::from_secs(30));
         assert_eq!(normalize_heartbeat_interval(45), Duration::from_secs(45));
+    }
+
+    #[test]
+    fn outbound_queue_full_threshold_closes_connection() {
+        let (tx, _rx) = mpsc::channel(1);
+        let (close_tx, close_rx) = watch::channel(false);
+        let handle = ConnectionHandle::new(ctx(), tx, close_tx, 3);
+
+        assert_eq!(
+            handle.send_frame(frame_codec::new_frame(1, 1, Vec::new())),
+            FrameSendResult::Sent
+        );
+        assert_eq!(
+            handle.send_frame(frame_codec::new_frame(1, 2, Vec::new())),
+            FrameSendResult::Dropped
+        );
+        assert!(!*close_rx.borrow());
+        assert_eq!(
+            handle.send_frame(frame_codec::new_frame(1, 3, Vec::new())),
+            FrameSendResult::Dropped
+        );
+        assert!(!*close_rx.borrow());
+        assert_eq!(
+            handle.send_frame(frame_codec::new_frame(1, 4, Vec::new())),
+            FrameSendResult::Disconnected
+        );
+        assert!(*close_rx.borrow());
+    }
+
+    fn ctx() -> ConnCtx {
+        ConnCtx {
+            tenant_id: 1,
+            user_id: 100,
+            platform: 1,
+            device_id: "device-a".to_string(),
+            conn_id: "conn-a".to_string(),
+            gw_instance: "gw-a".to_string(),
+            trace_id: "trace-a".to_string(),
+        }
     }
 }
