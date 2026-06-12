@@ -1,0 +1,62 @@
+// ============================================================
+// 网关 <-> Java 业务侧的全部 RPC —— 网关编译的第二个（也是最后一个）proto
+// 网关对业务的全部认知 = 本文件 + ws/frame.proto，业务 body 永远是 bytes
+// ============================================================
+syntax = "proto3";
+package im.rpc.v1;
+option java_package = "com.im.proto.rpc";
+option java_multiple_files = true;
+
+// 连接上下文：鉴权成功后网关绑定到连接，之后每次 Dispatch 都带上
+message ConnCtx {
+  int64  tenant_id = 1;
+  int64  user_id   = 2;
+  int32  platform  = 3;
+  string device_id = 4;
+  string conn_id   = 5;  // 网关实例内唯一连接 ID
+  string gw_instance = 6;
+  string trace_id  = 7;  // 全链路追踪（§13.4）
+}
+
+// ---- 网关 -> Java：鉴权（user 模块实现）----
+service GatewayAuth {
+  rpc VerifyToken (VerifyTokenReq) returns (VerifyTokenResp);
+}
+message VerifyTokenReq {
+  string token = 1; int64 tenant_id = 2; string device_id = 3;
+  int32 platform = 4; string gw_instance = 5;
+}
+message VerifyTokenResp {
+  int32 code = 1; string message = 2;
+  int64 user_id = 3;
+  bool  kick_old = 4;          // 同平台已有在线 -> 网关无需处理，Java 已走 push 通道踢旧
+  uint32 heartbeat_interval_sec = 5;
+}
+
+// ---- 网关 -> Java：业务帧统一透传（Java 侧按 cmd 路由到各模块）----
+service Uplink {
+  rpc Dispatch (UplinkReq) returns (UplinkResp);   // 同步：MSG_SEND/SYNC_REQ/READ_REPORT...
+}
+message UplinkReq  { ConnCtx ctx = 1; uint32 cmd = 2; bytes body = 3; uint64 req_id = 4; }
+message UplinkResp { uint32 cmd = 1; bytes body = 2; }  // 原样包成 Frame{req_id} 回写客户端
+
+// ---- 网关 -> Java：连接生命周期事件（push 模块在线状态用）----
+service ConnEvent {
+  rpc OnConnected    (ConnCtx) returns (Empty);
+  rpc OnDisconnected (ConnCtx) returns (Empty);
+  rpc OnPushAcked    (PushAckReq) returns (Empty);  // 客户端 MSG_RECV_ACK 转达
+}
+message PushAckReq { ConnCtx ctx = 1; bytes ack_body = 2; }
+message Empty {}
+
+// ---- Java -> 网关（经 RabbitMQ push.gw.{instance} 队列，非 gRPC）----
+// 网关消费后：查本地 ConnMap -> 包成 Frame 写 WS
+message PushEnvelope {
+  int64  tenant_id = 1;
+  repeated PushTarget targets = 2;  // 批量：同网关实例的多个接收端（§5.7 扇出优化）
+  uint32 cmd  = 3;                  // MSG_PUSH / READ_NOTIFY / REVOKE_NOTIFY / KICK ...
+  bytes  body = 4;
+  string trace_id = 5;
+  bool   need_ack = 6;              // true 则网关跟踪 MSG_RECV_ACK，超时回报 OnPushAcked 缺失
+}
+message PushTarget { int64 user_id = 1; int32 platform = 2; string conn_id = 3; }

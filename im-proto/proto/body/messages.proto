@@ -1,0 +1,129 @@
+// ============================================================
+// 业务帧 body —— Java 与客户端 SDK 编译，网关不编译（透传 bytes）
+// 与 ws/frame.proto 的 Cmd 一一对应
+// ============================================================
+syntax = "proto3";
+package im.body.v1;
+option java_package = "com.im.proto.body";
+option java_multiple_files = true;
+
+import "common/enums.proto";
+import "common/content.proto";
+
+// ---------------- 发送（Cmd=MSG_SEND / MSG_SEND_ACK）----------------
+
+message MsgSend {
+  string client_msg_id = 1;          // 客户端 UUID，幂等去重（D9）
+  oneof target {                     // 首次单聊可无 conv_id，服务端解析/建会话
+    int64  to_user_id = 2;           // C2C
+    int64  group_id   = 3;           // GROUP
+    int64  conv_id    = 4;           // 已有会话直接指定（含 CS_SESSION）
+  }
+  im.common.v1.MsgContent content = 5;
+  map<string, string> ext = 6;       // 扩展字段（二阶段消息扩展直接可用）
+}
+
+message MsgSendAck {
+  int32  code          = 1;          // 0 成功；非 0 见 ErrorCode（BLOCKED_BY_PEER 等）
+  string client_msg_id = 2;          // 回带配对
+  int64  server_msg_id = 3;          // Snowflake
+  int64  conv_id       = 4;          // 首聊时客户端由此获知会话 ID
+  int64  seq           = 5;          // ★ 会话级 seq，客户端排序/对齐的依据
+  int64  server_time   = 6;          // 以服务端时间为准展示
+}
+
+// ---------------- 推送（Cmd=MSG_PUSH / MSG_RECV_ACK）----------------
+
+message MsgPush {
+  int64  conv_id   = 1;
+  im.common.v1.ConvType conv_type = 2;
+  int64  seq       = 3;              // 若 != local_max+1，客户端触发缺口拉取（§5.3）
+  int64  server_msg_id = 4;
+  string client_msg_id = 5;          // 多端同步时识别"自己发的"
+  Sender sender    = 6;
+  int64  send_time = 7;
+  im.common.v1.MsgContent content = 8;
+  map<string, string> ext = 9;
+}
+
+message Sender {
+  int64  user_id  = 1;
+  string nickname = 2;
+  string avatar   = 3;
+  im.common.v1.VerifiedType verified_type = 4;  // 蓝 V 随消息下发（D12）
+  im.common.v1.UserType user_type = 5;          // 客服场景区分坐席/访客气泡
+}
+
+message MsgRecvAck {                  // 网关消费（need_ack 跟踪），批量确认
+  repeated AckItem items = 1;
+  message AckItem { int64 conv_id = 1; int64 seq = 2; }
+}
+
+// ---------------- 同步（Cmd=SYNC_REQ / SYNC_RESP）核心：离线消息=增量同步 ----------------
+
+message SyncReq {
+  repeated ConvVersion conv_versions = 1;  // 空 = 新设备全量
+  int64 conv_list_version = 2;             // 会话列表自身的版本（增删/置顶变更）
+  message ConvVersion { int64 conv_id = 1; int64 local_max_seq = 2; }
+}
+
+message SyncResp {
+  repeated ConvDelta deltas = 1;
+  int64 conv_list_version = 2;
+  bool  full_sync = 3;                     // 服务端判定差异过大，要求客户端清库重拉
+  message ConvDelta {
+    ConvInfo conv = 1;
+    repeated MsgPush msgs = 2;             // 复用 MsgPush 结构；最新 N 条（默认 20）
+    int64 server_max_seq = 3;
+    bool  has_more = 4;                    // 更早缺口走 REST 历史分页懒加载
+  }
+}
+
+message ConvInfo {
+  int64  conv_id = 1;
+  im.common.v1.ConvType type = 2;
+  string title  = 3;                       // 单聊=对方昵称 / 群=群名
+  string avatar = 4;
+  int64  peer_user_id = 5;                 // C2C 时有效
+  int64  group_id = 6;
+  int64  max_seq  = 7;
+  int64  read_seq = 8;                     // 未读 = max_seq - read_seq
+  bool   pinned = 9;
+  bool   muted  = 10;
+  string last_msg_abstract = 11;
+  int64  last_msg_time = 12;
+  string cs_status = 13;                   // 客服预留：open/assigned/resolved
+}
+
+// ---------------- 已读（Cmd=READ_REPORT / READ_NOTIFY）----------------
+
+message ReadReport { int64 conv_id = 1; int64 read_seq = 2; }
+
+message ReadNotify {                       // 推给：C2C 对端 + 自己其他端
+  int64 conv_id = 1;
+  int64 reader_user_id = 2;
+  int64 read_seq = 3;
+}
+
+// ---------------- 撤回与会话通知（Cmd=REVOKE_NOTIFY / CONV_NOTIFY）----------------
+
+message RevokeNotify {
+  int64 conv_id = 1;
+  int64 seq = 2;
+  int64 server_msg_id = 3;
+  im.common.v1.RevokeReason reason = 4;    // BY_MODERATION 时客户端展示"消息因违规被移除"
+  int64 operator_user_id = 5;
+}
+
+message ConvNotify {                       // 会话级变更：新会话创建/置顶/免打扰/客服状态流转
+  ConvInfo conv = 1;
+  string change_type = 2;                  // "created" / "updated" / "removed"
+}
+
+// ---------------- 错误（Cmd=ERROR）----------------
+
+message ErrorBody {
+  int32  code = 1;                         // ErrorCode
+  string message = 2;
+  uint64 req_id = 3;                       // 哪个请求出错
+}

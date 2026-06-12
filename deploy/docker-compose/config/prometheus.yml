@@ -1,0 +1,14 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: im-server          # Spring Boot Actuator
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["im-server:8081"]
+  - job_name: im-gateway         # Rust 网关自暴露 /metrics（待实现）
+    static_configs:
+      - targets: ["im-gateway:8080"]
+  - job_name: rabbitmq           # 3.13 自带 prometheus 插件端口
+    static_configs:
+      - targets: ["rabbitmq:15692"]

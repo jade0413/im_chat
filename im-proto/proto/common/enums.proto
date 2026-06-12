@@ -1,0 +1,51 @@
+// 公共枚举 —— Java/客户端编译，网关不编译（网关用裸 int 透传 platform 等）
+syntax = "proto3";
+package im.common.v1;
+option java_package = "com.im.proto.common";
+option java_multiple_files = true;
+
+enum Platform {
+  PLATFORM_UNSPECIFIED = 0;
+  IOS     = 1;   // 平台类 MOBILE
+  ANDROID = 2;   // 平台类 MOBILE
+  WINDOWS = 3;   // 平台类 DESKTOP
+  MACOS   = 4;   // 平台类 DESKTOP
+  WEB     = 5;   // 平台类 WEB
+  MINI_PROGRAM = 6;  // 平台类 WEB（客服访客端小程序）
+}
+// 平台类映射与互踢矩阵（D11）在 Java 侧 PlatformClass 工具类实现，proto 不固化
+
+enum ConvType {
+  CONV_TYPE_UNSPECIFIED = 0;
+  C2C        = 1;
+  GROUP      = 2;
+  CS_SESSION = 3;  // 客服会话（二阶段启用）
+  SYSTEM     = 4;  // 系统通知会话（每用户一个）
+}
+
+enum UserType {
+  USER_TYPE_UNSPECIFIED = 0;
+  MEMBER  = 1;
+  AGENT   = 2;
+  VISITOR = 3;
+}
+
+enum VerifiedType {  // D12 蓝 V
+  VERIFIED_NONE  = 0;
+  PERSONAL       = 1;
+  ENTERPRISE     = 2;
+  OFFICIAL_STAFF = 3;
+}
+
+enum MsgStatus {
+  MSG_STATUS_UNSPECIFIED = 0;
+  NORMAL  = 1;
+  REVOKED = 2;  // 用户撤回/审核撤回（D16）
+}
+
+enum RevokeReason {
+  REVOKE_REASON_UNSPECIFIED = 0;
+  BY_SENDER     = 1;  // 用户自己撤回（2 分钟窗口，Java 侧校验）
+  BY_MODERATION = 2;  // 内容安全自动撤回
+  BY_ADMIN      = 3;  // 租户管理员撤回
+}

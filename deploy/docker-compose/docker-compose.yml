@@ -1,0 +1,188 @@
+# ============================================================
+# im-project MVP 编排
+# 用法：
+#   仅中间件（日常开发）：docker compose up -d
+#   含应用：            docker compose --profile app up -d --build
+#   含观测栈（§13.4）：  docker compose --profile obs up -d
+# 配置见 .env（从 .env.example 复制）
+# ============================================================
+name: im-project
+
+services:
+  # ---------------- 中间件（默认启动） ----------------
+  mysql:
+    image: mysql:8.0
+    container_name: im-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: im
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --binlog_expire_logs_seconds=604800
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./init/mysql:/docker-entrypoint-initdb.d:ro   # 首次启动自动建表
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: im-redis
+    # appendonly：seq 兜底依赖持久化（架构 §13.9）
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: im-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672"   # 管理控制台
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    # exchange(im.events)/队列由 im-server 启动时声明，不在编排层做
+
+  minio:
+    image: minio/minio:latest
+    container_name: im-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio-init:   # 一次性：建私有 bucket（预签名直传用，D10）
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing local/im-media &&
+      mc anonymous set none local/im-media &&
+      echo 'bucket im-media ready'"
+    restart: "no"
+
+  # ---------------- 应用（profile: app，镜像就绪后启用） ----------------
+  im-server:
+    profiles: ["app"]
+    build: ../../im-server
+    container_name: im-server
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      MYSQL_URL: jdbc:mysql://mysql:3306/im
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+    ports:
+      - "8081:8081"    # REST
+      - "9091:9091"    # gRPC（网关 -> Uplink/GatewayAuth/ConnEvent）
+    depends_on:
+      mysql:    { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      minio:    { condition: service_healthy }
+
+  im-gateway:
+    profiles: ["app"]
+    build: ../../im-gateway-rust
+    container_name: im-gateway
+    environment:
+      GW_INSTANCE_ID: gw-1
+      GW_WS_BIND: 0.0.0.0:8080
+      UPSTREAM_GRPC: http://im-server:9091
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+    ports:
+      - "8080:8080"    # WSS 由前置 nginx/SLB 卸载 TLS，容器内明文
+    depends_on:
+      - im-server
+
+  im-web:
+    profiles: ["app"]
+    build: ../../im-web
+    container_name: im-web
+    ports:
+      - "80:80"
+    depends_on:
+      - im-gateway
+
+  # ---------------- 观测栈（profile: obs，架构 §13.4） ----------------
+  prometheus:
+    profiles: ["obs"]
+    image: prom/prometheus:latest
+    container_name: im-prometheus
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+
+  grafana:
+    profiles: ["obs"]
+    image: grafana/grafana:latest
+    container_name: im-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+
+  loki:
+    profiles: ["obs"]
+    image: grafana/loki:latest
+    container_name: im-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki-data:/loki
+
+volumes:
+  mysql-data:
+  redis-data:
+  rabbitmq-data:
+  minio-data:
+  prometheus-data:
+  grafana-data:
+  loki-data:

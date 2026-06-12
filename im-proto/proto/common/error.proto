@@ -1,0 +1,24 @@
+// 错误码分段：1xxx 认证 / 2xxx 消息 / 3xxx 会话 / 4xxx 群 / 5xxx 文件 / 6xxx 限流与风控
+syntax = "proto3";
+package im.common.v1;
+option java_package = "com.im.proto.common";
+option java_multiple_files = true;
+
+enum ErrorCode {
+  OK = 0;
+  // 1xxx 认证
+  TOKEN_INVALID = 1001; TOKEN_EXPIRED = 1002; TENANT_DISABLED = 1003;
+  USER_BANNED = 1004; REPLAY_REJECTED = 1005;
+  // 2xxx 消息
+  BLOCKED_BY_PEER = 2001;          // 被拉黑：客户端展示为发送成功但单方可见？否——明确报错（待产品定，先报错）
+  FRIEND_REQUIRED = 2002;          // 租户开启好友制且非好友
+  MUTED = 2003;                    // 被禁言
+  MSG_TOO_LARGE = 2004; REVOKE_WINDOW_EXPIRED = 2005;
+  // 3xxx 会话 / 4xxx 群
+  CONV_NOT_FOUND = 3001; NOT_CONV_MEMBER = 3002;
+  GROUP_NOT_FOUND = 4001; GROUP_FULL = 4002; NOT_GROUP_MEMBER = 4003; NO_PERMISSION = 4004;
+  // 5xxx 文件
+  FILE_TOO_LARGE = 5001; QUOTA_EXCEEDED = 5002; MIME_NOT_ALLOWED = 5003;
+  // 6xxx 限流与风控
+  RATE_LIMITED = 6001; TENANT_QUOTA_EXCEEDED = 6002; CONTENT_REJECTED = 6003;
+}

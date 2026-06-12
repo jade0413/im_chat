@@ -1,0 +1,36 @@
+// ============================================================
+// MQ 事件（RabbitMQ，经 Outbox 投递，D18）
+// header 必带：tenant_id / trace_id / event_id（幂等键）
+// exchange: im.events (topic)，routing key 见注释
+// ============================================================
+syntax = "proto3";
+package im.events.v1;
+option java_package = "com.im.proto.events";
+option java_multiple_files = true;
+
+import "body/messages.proto";
+
+// rk: msg.saved.{tenant_id}   消费方：push 扇出、moderation 审核（D16）、usage 统计（§13.6）
+message MsgSavedEvent {
+  int64 tenant_id = 1;
+  int64 conv_id = 2;
+  int64 seq = 3;
+  int64 server_msg_id = 4;
+  int64 sender_id = 5;
+  im.body.v1.MsgPush push_ready = 6;  // 预组装好的推送体，push 消费方免二次查询
+}
+
+// rk: msg.revoked.{tenant_id}  消费方：push（下发 RevokeNotify）
+message MsgRevokedEvent {
+  int64 tenant_id = 1; int64 conv_id = 2; int64 seq = 3;
+  int32 reason = 4; int64 operator_user_id = 5;
+}
+
+// rk: user.online_status.{tenant_id}  消费方：客服坐席在线看板（二阶段）、usage
+message OnlineStatusEvent {
+  int64 tenant_id = 1; int64 user_id = 2; int32 platform = 3;
+  bool online = 4; int64 at = 5; string gw_instance = 6;
+}
+
+// rk: word.reload  消费方：所有 im-server 实例热刷新词库（§9.1）
+message WordReloadEvent { int64 tenant_id = 1; }  // 0 = 平台级词库

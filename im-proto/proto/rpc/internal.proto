@@ -1,0 +1,65 @@
+// ============================================================
+// Java 模块间 RPC（模块化单体内走 in-process channel，拆分后零改动，D5）
+// 网关不编译本文件。按未来微服务边界分 service。
+// 所有调用 metadata 必带：tenant_id / trace_id / caller
+// ============================================================
+syntax = "proto3";
+package im.rpc.v1;
+option java_package = "com.im.proto.rpc";
+option java_multiple_files = true;
+
+import "common/enums.proto";
+import "body/messages.proto";
+
+// ---- user 模块 ----
+service UserRpc {
+  rpc GetUsers (GetUsersReq) returns (GetUsersResp);                 // 批量取昵称/头像/蓝V（推送组装 Sender 用）
+  rpc CheckRelation (CheckRelationReq) returns (CheckRelationResp);  // 黑名单/好友开关校验（D17）
+}
+message GetUsersReq  { repeated int64 user_ids = 1; }
+message GetUsersResp { repeated im.body.v1.Sender users = 1; }
+message CheckRelationReq  { int64 from_user_id = 1; int64 to_user_id = 2; }
+message CheckRelationResp {
+  bool blocked = 1;          // to 拉黑了 from
+  bool friend_required_unmet = 2;
+}
+
+// ---- message 模块 ----
+service MessageRpc {
+  rpc PullMsgs (PullMsgsReq) returns (PullMsgsResp);  // 按 seq 区间拉取（同步缺口/历史分页共用）
+  rpc RevokeMsg (RevokeMsgReq) returns (RevokeMsgResp);
+}
+message PullMsgsReq  { int64 conv_id = 1; int64 begin_seq = 2; int64 end_seq = 3; int32 limit = 4; }
+message PullMsgsResp { repeated im.body.v1.MsgPush msgs = 1; }
+message RevokeMsgReq {
+  int64 conv_id = 1; int64 seq = 2;
+  im.common.v1.RevokeReason reason = 3; int64 operator_user_id = 4;
+}
+message RevokeMsgResp { int32 code = 1; }
+
+// ---- conversation 模块 ----
+service ConversationRpc {
+  rpc ResolveConv (ResolveConvReq) returns (ResolveConvResp);  // 由 target 解析/创建会话（MsgSend 首聊）
+  rpc GetMembers (GetMembersReq) returns (GetMembersResp);     // 推送扇出取成员
+}
+message ResolveConvReq {
+  oneof target { int64 to_user_id = 1; int64 group_id = 2; int64 conv_id = 3; }
+  int64 from_user_id = 4;
+}
+message ResolveConvResp { int32 code = 1; im.body.v1.ConvInfo conv = 2; }
+message GetMembersReq  { int64 conv_id = 1; bool online_hint = 2; }
+message GetMembersResp { repeated int64 user_ids = 1; }
+
+// ---- push 模块 ----
+service PushRpc {
+  rpc PushToUsers (PushToUsersReq) returns (PushToUsersResp);  // 查路由表->按网关分组->投 PushEnvelope
+  rpc KickUser (KickUserReq) returns (PushToUsersResp);        // 互踢/封号（D11）
+}
+message PushToUsersReq {
+  repeated int64 user_ids = 1;
+  uint32 cmd = 2;            // ws Cmd 数值
+  bytes  body = 3;           // 已编码的 body，push 模块不关心内容
+  bool   need_ack = 4;
+}
+message PushToUsersResp { int32 online_count = 1; int32 offline_count = 2; }
+message KickUserReq { int64 user_id = 1; int32 platform = 2; int32 reason = 3; }

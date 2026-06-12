@@ -1,0 +1,72 @@
+// ============================================================
+// WS 帧协议 —— 网关唯一需要编译的"线协议"
+// 设计原则（D19）：cmd + bytes 透传式。网关只认识本文件 + rpc/gateway.proto，
+// 业务帧 body 一律不解码，原样转给 Java（Uplink.Dispatch）或原样推给客户端。
+// 传输：1 个 WebSocket Binary Message = 1 个 Frame（不另加长度前缀）
+// ============================================================
+syntax = "proto3";
+package im.ws.v1;
+option java_package = "com.im.proto.ws";
+option java_multiple_files = true;
+
+enum Cmd {
+  CMD_UNSPECIFIED = 0;
+
+  // ---- 连接层（网关亲自处理，body 定义在本文件）----
+  AUTH          = 1;   // C->S AuthReq
+  AUTH_ACK      = 2;   // S->C AuthResp
+  PING          = 3;   // C->S 空 body，30s 一次
+  PONG          = 4;   // S->C 空 body
+  KICK          = 5;   // S->C KickNotify，推完即断连
+
+  // ---- 业务层（网关透传，body 定义在 body/*.proto，Java/客户端编译）----
+  MSG_SEND      = 10;  // C->S body=MsgSend        （上行经 Dispatch 同步转发）
+  MSG_SEND_ACK  = 11;  // S->C body=MsgSendAck     （Dispatch 的同步返回）
+  MSG_PUSH      = 12;  // S->C body=MsgPush
+  MSG_RECV_ACK  = 13;  // C->S body=MsgRecvAck     （网关消费：确认推送送达）
+  SYNC_REQ      = 20;  // C->S body=SyncReq
+  SYNC_RESP     = 21;  // S->C body=SyncResp
+  READ_REPORT   = 22;  // C->S body=ReadReport
+  READ_NOTIFY   = 23;  // S->C body=ReadNotify
+  REVOKE_NOTIFY = 24;  // S->C body=RevokeNotify   （用户撤回/审核撤回共用）
+  CONV_NOTIFY   = 25;  // S->C body=ConvNotify     （会话元数据变更：置顶/免打扰/客服状态）
+  ERROR         = 99;  // S->C body=ErrorBody（body/*.proto）
+}
+
+message Frame {
+  uint32 version = 1;  // 协议版本，当前 1；低于服务端最低兼容版本 -> KICK(PROTO_TOO_OLD)
+  uint64 req_id  = 2;  // 客户端连接内递增，req/ack 配对用；服务端主动推送时为 0
+  Cmd    cmd     = 3;
+  bytes  body    = 4;  // 按 cmd 解码；PING/PONG 为空
+}
+
+// ---------------- 连接层 body ----------------
+
+message AuthReq {
+  string token       = 1;  // JWT（REST 登录接口颁发）
+  int64  tenant_id   = 2;
+  string device_id   = 3;
+  int32  platform    = 4;  // common/enums.proto Platform 的数值（避免网关 import 业务包）
+  string app_version = 5;
+  int64  timestamp   = 6;  // 防重放：|now - ts| > 5min 拒绝
+}
+
+message AuthResp {
+  int32  code      = 1;   // 0=成功；非 0 见 common/error.proto，网关回完即断连
+  string message   = 2;
+  int64  user_id   = 3;
+  int64  server_ts = 4;   // 客户端校时
+  uint32 heartbeat_interval_sec = 5;  // 服务端下发心跳间隔（默认 30）
+}
+
+message KickNotify {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    NEW_DEVICE_LOGIN   = 1;  // 同平台类新设备顶替（D11）
+    TOKEN_EXPIRED      = 2;
+    ADMIN_OFFLINE      = 3;  // 管理后台强制下线/封号
+    PROTO_TOO_OLD      = 4;  // 客户端需强制升级
+  }
+  Reason reason  = 1;
+  string message = 2;
+}

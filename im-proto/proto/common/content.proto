@@ -1,0 +1,58 @@
+// 消息内容（D20：强类型 oneof + Custom JSON 逃生口）
+// 落库存 content 的 pb bytes，另冗余 abstract 文本列供会话列表/审核摘要
+syntax = "proto3";
+package im.common.v1;
+option java_package = "com.im.proto.common";
+option java_multiple_files = true;
+
+message MsgContent {
+  oneof content {
+    TextContent         text         = 1;
+    ImageContent        image        = 2;
+    VoiceContent        voice        = 3;
+    FileContent         file         = 4;
+    NotificationContent notification = 10;  // 系统事件（学 Matrix：状态变更事件化）
+    CustomContent       custom       = 20;  // 租户自定义消息逃生口
+    // 预留 30+：未来 encrypted_payload / 名片 / 位置 / 引用回复等，只增不改
+  }
+}
+
+message TextContent {
+  string text = 1;
+  repeated int64 at_user_ids = 2;  // @提及（@全员用 -1），§13 提及单独写扩散
+}
+
+message ImageContent {
+  string object_key = 1;  // MinIO key：{tenant}/{yyyymm}/{uuid}
+  string thumb_key  = 2;  // 缩略图（客户端上传时生成）
+  uint32 width      = 3;
+  uint32 height     = 4;
+  uint64 size       = 5;
+  string mime       = 6;
+}
+
+message VoiceContent {
+  string object_key  = 1;
+  uint32 duration_ms = 2;
+  uint64 size        = 3;
+  string codec       = 4;  // aac / opus
+}
+
+message FileContent {
+  string object_key = 1;
+  string file_name  = 2;
+  uint64 size       = 3;
+  string mime       = 4;
+}
+
+// 系统事件消息：建群/进群/改群名/坐席分配/会话解决...
+// 走普通消息管道获得 seq 与多端同步，客户端按 event_type 渲染灰条
+message NotificationContent {
+  string event_type = 1;   // "group.created" / "group.member_added" / "cs.assigned" ...
+  string payload    = 2;   // JSON，事件结构 docs/protocol.md 附录登记
+}
+
+message CustomContent {
+  string custom_type = 1;  // 租户自定义类型名，建议带前缀防冲突
+  string payload     = 2;  // JSON
+}
