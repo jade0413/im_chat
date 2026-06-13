@@ -2,9 +2,12 @@ package com.im.conversation.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.im.common.conversation.UserConvEventType;
 import com.im.common.id.SnowflakeIdGenerator;
+import com.im.common.tenant.TenantContext;
 import com.im.conversation.dao.entity.ConversationEntity;
 import com.im.conversation.dao.entity.ConversationMemberEntity;
 import com.im.conversation.dao.mapper.ConversationMapper;
@@ -30,6 +33,9 @@ class ConversationCreatorTest {
   @Mock
   private SnowflakeIdGenerator idGenerator;
 
+  @Mock
+  private UserConvEventRecorder userConvEventRecorder;
+
   @Captor
   private ArgumentCaptor<ConversationEntity> conversationCaptor;
 
@@ -37,13 +43,15 @@ class ConversationCreatorTest {
   private ArgumentCaptor<ConversationMemberEntity> memberCaptor;
 
   @Test
-  void createsConversationAndBothMembers() {
+  void createsConversationAndBothMembers() throws Exception {
     when(idGenerator.nextId()).thenReturn(9001L);
     when(conversationMapper.insert(any(ConversationEntity.class))).thenReturn(1);
     when(memberMapper.insert(any(ConversationMemberEntity.class))).thenReturn(1);
 
-    ConversationCreator creator = new ConversationCreator(conversationMapper, memberMapper, idGenerator);
-    ConversationEntity created = creator.createC2c("100_200", 100L, 200L);
+    ConversationCreator creator = new ConversationCreator(
+        conversationMapper, memberMapper, idGenerator, userConvEventRecorder);
+    ConversationEntity created = TenantContext.callWithTenant(1L,
+        () -> creator.createC2c("100_200", 100L, 200L));
 
     assertThat(created.getId()).isEqualTo(9001L);
     org.mockito.Mockito.verify(conversationMapper).insert(conversationCaptor.capture());
@@ -60,5 +68,7 @@ class ConversationCreatorTest {
         .containsExactly(100L, 200L);
     assertThat(members).extracting(ConversationMemberEntity::getReadSeq)
         .containsExactly(0L, 0L);
+    verify(userConvEventRecorder).record(1L, 100L, 9001L, UserConvEventType.CREATED);
+    verify(userConvEventRecorder).record(1L, 200L, 9001L, UserConvEventType.CREATED);
   }
 }

@@ -1,21 +1,26 @@
 package com.im.conversation.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.im.common.conversation.UserConvEventType;
 import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.common.tenant.TenantContext;
 import com.im.conversation.dao.entity.ConversationEntity;
 import com.im.conversation.dao.entity.ConversationMemberEntity;
 import com.im.conversation.dao.entity.GroupInfoEntity;
+import com.im.conversation.dao.entity.UserConvEventEntity;
 import com.im.conversation.dao.mapper.ConversationGroupInfoMapper;
 import com.im.conversation.dao.mapper.ConversationMapper;
 import com.im.conversation.dao.mapper.ConversationMemberMapper;
+import com.im.conversation.dao.mapper.ConversationUserConvEventMapper;
+import com.im.conversation.dao.mapper.ConversationUserConvVersionMapper;
 import com.im.proto.body.ConvInfo;
 import com.im.proto.common.ConvType;
 import com.im.proto.rpc.ResolveConvReq;
 import java.time.ZoneOffset;
-import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
@@ -25,17 +30,23 @@ public class ConversationService {
   private final ConversationMapper conversationMapper;
   private final ConversationMemberMapper memberMapper;
   private final ConversationGroupInfoMapper groupInfoMapper;
+  private final ConversationUserConvVersionMapper userConvVersionMapper;
+  private final ConversationUserConvEventMapper userConvEventMapper;
   private final C2cKeyGenerator c2cKeyGenerator;
   private final ConversationCreator conversationCreator;
 
   public ConversationService(ConversationMapper conversationMapper,
       ConversationMemberMapper memberMapper,
       ConversationGroupInfoMapper groupInfoMapper,
+      ConversationUserConvVersionMapper userConvVersionMapper,
+      ConversationUserConvEventMapper userConvEventMapper,
       C2cKeyGenerator c2cKeyGenerator,
       ConversationCreator conversationCreator) {
     this.conversationMapper = conversationMapper;
     this.memberMapper = memberMapper;
     this.groupInfoMapper = groupInfoMapper;
+    this.userConvVersionMapper = userConvVersionMapper;
+    this.userConvEventMapper = userConvEventMapper;
     this.c2cKeyGenerator = c2cKeyGenerator;
     this.conversationCreator = conversationCreator;
   }
@@ -67,12 +78,37 @@ public class ConversationService {
         .toList();
   }
 
-  public List<ConvInfo> listMemberConvs(long userId, int limit) {
-    TenantContext.requiredTenantId();
+  public ConversationListResult listMemberConvs(long userId, int limit, long afterVersion) {
+    long tenantId = TenantContext.requiredTenantId();
     if (userId <= 0) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "user_id must be positive");
     }
     int effectiveLimit = limit <= 0 ? 100 : Math.min(limit, 100);
+    long currentVersion = currentConvListVersion(tenantId, userId);
+    if (afterVersion <= 0) {
+      return new ConversationListResult(listActiveMemberConvs(userId, effectiveLimit),
+          false, currentVersion);
+    }
+    if (afterVersion >= currentVersion) {
+      return new ConversationListResult(List.of(), false, currentVersion);
+    }
+    List<UserConvEventEntity> events = userConvEventMapper.selectAfterVersion(
+        userId, afterVersion, effectiveLimit + 1);
+    if (events.size() > effectiveLimit) {
+      return new ConversationListResult(listActiveMemberConvs(userId, effectiveLimit),
+          true, currentVersion);
+    }
+    Map<Long, UserConvEventEntity> latestByConversation = new LinkedHashMap<>();
+    for (UserConvEventEntity event : events) {
+      latestByConversation.put(event.getConvId(), event);
+    }
+    List<ConvInfo> convs = latestByConversation.values().stream()
+        .map(event -> toEventConvInfo(userId, event))
+        .toList();
+    return new ConversationListResult(convs, false, currentVersion);
+  }
+
+  private List<ConvInfo> listActiveMemberConvs(long userId, int effectiveLimit) {
     List<ConversationMemberEntity> memberships = memberMapper.selectList(
         Wrappers.lambdaQuery(ConversationMemberEntity.class)
             .eq(ConversationMemberEntity::getUserId, userId)
@@ -211,6 +247,36 @@ public class ConversationService {
     return toConvInfo(conversation, peerUserId, member);
   }
 
+  private ConvInfo toEventConvInfo(long userId, UserConvEventEntity event) {
+    if (UserConvEventType.REMOVED.value().equals(event.getEventType())) {
+      return removedConvInfo(event.getConvId());
+    }
+    ConversationMemberEntity member = findMember(event.getConvId(), userId);
+    if (member == null) {
+      return removedConvInfo(event.getConvId());
+    }
+    return toMemberConvInfo(userId, member);
+  }
+
+  private ConvInfo removedConvInfo(long conversationId) {
+    ConversationEntity conversation = conversationMapper.selectById(conversationId);
+    ConvInfo.Builder builder = ConvInfo.newBuilder()
+        .setConvId(conversationId)
+        .setDeleted(true);
+    if (conversation == null) {
+      return builder.build();
+    }
+    ConvType type = convType(conversation);
+    builder.setType(type)
+        .setGroupId(nullToZero(conversation.getGroupId()))
+        .setMaxSeq(nullToZero(conversation.getMaxSeq()))
+        .setLastMsgAbstract(nullToBlank(conversation.getLastMsgAbstract()));
+    if (conversation.getLastMsgTime() != null) {
+      builder.setLastMsgTime(conversation.getLastMsgTime().toInstant(ZoneOffset.UTC).toEpochMilli());
+    }
+    return builder.build();
+  }
+
   private ConvInfo toConvInfo(ConversationEntity conversation, long peerUserId,
       ConversationMemberEntity member) {
     ConvType type = convType(conversation);
@@ -272,5 +338,10 @@ public class ConversationService {
 
   private String nullToBlank(String value) {
     return value == null ? "" : value;
+  }
+
+  private long currentConvListVersion(long tenantId, long userId) {
+    Long version = userConvVersionMapper.selectVersion(tenantId, userId);
+    return version == null ? 0L : version;
   }
 }

@@ -53,7 +53,7 @@ message GetMembersReq  { int64 conv_id = 1; bool online_hint = 2; }
 message GetMembersResp { repeated int64 user_ids = 1; }
 message GetMemberConvReq { int64 user_id = 1; int64 conv_id = 2; }
 message GetMemberConvResp { int32 code = 1; im.body.v1.ConvInfo conv = 2; }
-message ListMemberConvsReq { int64 user_id = 1; int32 limit = 2; }
+message ListMemberConvsReq { int64 user_id = 1; int32 limit = 2; int64 conv_list_version = 3; }
 message ListMemberConvsResp {
   repeated im.body.v1.ConvInfo convs = 1;
   bool has_more = 2;

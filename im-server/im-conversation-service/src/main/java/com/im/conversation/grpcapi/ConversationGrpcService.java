@@ -2,6 +2,7 @@ package com.im.conversation.grpcapi;
 
 import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
+import com.im.conversation.service.ConversationListResult;
 import com.im.conversation.service.ConversationService;
 import com.im.proto.body.ConvInfo;
 import com.im.proto.rpc.ConversationRpcGrpc;
@@ -90,8 +91,12 @@ public class ConversationGrpcService extends ConversationRpcGrpc.ConversationRpc
       StreamObserver<ListMemberConvsResp> responseObserver) {
     ListMemberConvsResp response;
     try {
+      ConversationListResult result = conversationService.listMemberConvs(
+          request.getUserId(), request.getLimit(), request.getConvListVersion());
       response = ListMemberConvsResp.newBuilder()
-          .addAllConvs(conversationService.listMemberConvs(request.getUserId(), request.getLimit()))
+          .addAllConvs(result.convs())
+          .setHasMore(result.hasMore())
+          .setConvListVersion(result.convListVersion())
           .build();
     } catch (Exception ex) {
       response = ListMemberConvsResp.getDefaultInstance();

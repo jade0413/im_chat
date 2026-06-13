@@ -3,6 +3,7 @@ package com.im.group.service;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.im.common.conversation.UserConvEventType;
 import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.common.id.SnowflakeIdGenerator;
@@ -64,6 +65,7 @@ public class GroupService {
   private final GroupMessageMapper messageMapper;
   private final SnowflakeIdGenerator idGenerator;
   private final OutboxWriter outboxWriter;
+  private final GroupUserConvEventRecorder userConvEventRecorder;
   private final ObjectMapper objectMapper;
   private final Clock clock;
 
@@ -76,9 +78,10 @@ public class GroupService {
       GroupMessageMapper messageMapper,
       SnowflakeIdGenerator idGenerator,
       OutboxWriter outboxWriter,
+      GroupUserConvEventRecorder userConvEventRecorder,
       ObjectMapper objectMapper) {
     this(groupInfoMapper, groupMemberMapper, tenantConfigMapper, conversationMapper,
-        conversationMemberMapper, messageMapper, idGenerator, outboxWriter, objectMapper,
+        conversationMemberMapper, messageMapper, idGenerator, outboxWriter, userConvEventRecorder, objectMapper,
         Clock.systemUTC());
   }
 
@@ -90,6 +93,7 @@ public class GroupService {
       GroupMessageMapper messageMapper,
       SnowflakeIdGenerator idGenerator,
       OutboxWriter outboxWriter,
+      GroupUserConvEventRecorder userConvEventRecorder,
       ObjectMapper objectMapper,
       Clock clock) {
     this.groupInfoMapper = groupInfoMapper;
@@ -100,6 +104,7 @@ public class GroupService {
     this.messageMapper = messageMapper;
     this.idGenerator = idGenerator;
     this.outboxWriter = outboxWriter;
+    this.userConvEventRecorder = userConvEventRecorder;
     this.objectMapper = objectMapper;
     this.clock = clock;
   }
@@ -126,6 +131,7 @@ public class GroupService {
     conversationMapper.insert(conversation);
     for (long userId : memberIds) {
       conversationMemberMapper.insert(conversationMember(tenantId, conversationId, userId, 0L));
+      userConvEventRecorder.record(tenantId, userId, conversationId, UserConvEventType.CREATED);
     }
 
     appendNotification(tenantId, conversationId, groupId, operatorUserId, "group.created",
@@ -157,6 +163,7 @@ public class GroupService {
     for (long userId : toAdd) {
       groupMemberMapper.insert(groupMember(tenantId, groupId, userId, ROLE_MEMBER));
       upsertConversationMember(tenantId, context.conversationId(), userId, readSeq);
+      userConvEventRecorder.record(tenantId, userId, context.conversationId(), UserConvEventType.CREATED);
     }
     context.group().setMemberCount(nextCount);
     groupInfoMapper.updateById(context.group());
@@ -189,6 +196,7 @@ public class GroupService {
     conversationMemberMapper.update(patch, Wrappers.lambdaUpdate(GroupConversationMemberEntity.class)
         .eq(GroupConversationMemberEntity::getConvId, context.conversationId())
         .eq(GroupConversationMemberEntity::getUserId, userId));
+    userConvEventRecorder.record(tenantId, userId, context.conversationId(), UserConvEventType.REMOVED);
 
     int nextCount = Math.max(context.group().getMemberCount() - 1, 0);
     context.group().setMemberCount(nextCount);
@@ -212,6 +220,7 @@ public class GroupService {
     }
     context.group().setName(newName);
     groupInfoMapper.updateById(context.group());
+    recordGroupMemberEvents(tenantId, groupId, context.conversationId(), UserConvEventType.UPDATED);
     appendNotification(tenantId, context.conversationId(), groupId, operatorUserId,
         "group.name_changed",
         payload("group_id", groupId, "operator", operatorUserId, "old", oldName, "new", newName),
@@ -391,6 +400,16 @@ public class GroupService {
     Set<Long> result = new LinkedHashSet<>();
     existing.forEach(member -> result.add(member.getUserId()));
     return result;
+  }
+
+  private void recordGroupMemberEvents(long tenantId, long groupId, long conversationId,
+      UserConvEventType eventType) {
+    List<GroupMemberEntity> members = groupMemberMapper.selectList(Wrappers
+        .lambdaQuery(GroupMemberEntity.class)
+        .eq(GroupMemberEntity::getGroupId, groupId));
+    for (GroupMemberEntity member : members) {
+      userConvEventRecorder.record(tenantId, member.getUserId(), conversationId, eventType);
+    }
   }
 
   private boolean canManage(GroupMemberEntity operatorMember) {

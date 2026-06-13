@@ -55,6 +55,8 @@ class MessageQueryServiceTest {
   void syncReturnsGapMessagesAndHasMore() {
     MessageEntity first = message(2L);
     MessageEntity second = message(3L);
+    when(memberClient.listMemberConvs(100L, 10L))
+        .thenReturn(new ConversationListPage(List.of(), false, 10L));
     when(memberClient.getMemberConv(100L, 501L)).thenReturn(ConvInfo.newBuilder()
         .setConvId(501L)
         .setType(ConvType.C2C)
@@ -67,6 +69,7 @@ class MessageQueryServiceTest {
     when(assembler.toPush(second)).thenReturn(push(3L));
 
     SyncResp response = syncWithTenant(100L, SyncReq.newBuilder()
+        .setConvListVersion(10L)
         .addConvVersions(SyncReq.ConvVersion.newBuilder()
             .setConvId(501L)
             .setLocalMaxSeq(1L))
@@ -84,13 +87,13 @@ class MessageQueryServiceTest {
   void syncEmptyConvVersionsReturnsMemberConversations() {
     MessageEntity first = message(1L);
     MessageEntity second = message(2L);
-    when(memberClient.listMemberConvs(100L)).thenReturn(List.of(ConvInfo.newBuilder()
+    when(memberClient.listMemberConvs(100L, 0L)).thenReturn(new ConversationListPage(List.of(ConvInfo.newBuilder()
         .setConvId(501L)
         .setType(ConvType.C2C)
         .setPeerUserId(200L)
         .setMaxSeq(2L)
         .setReadSeq(1L)
-        .build()));
+        .build()), false, 7L));
     when(messageMapper.selectList(anyWrapper())).thenReturn(List.of(first, second));
     when(assembler.toPush(first)).thenReturn(push(1L));
     when(assembler.toPush(second)).thenReturn(push(2L));
@@ -103,6 +106,67 @@ class MessageQueryServiceTest {
     assertThat(response.getDeltas(0).getServerMaxSeq()).isEqualTo(2L);
     assertThat(response.getDeltas(0).getMsgsList()).extracting(MsgPush::getSeq)
         .containsExactly(1L, 2L);
+    assertThat(response.getConvListVersion()).isEqualTo(7L);
+  }
+
+  @Test
+  void syncReturnsConversationListDiffWithoutMessageGap() {
+    when(memberClient.listMemberConvs(100L, 3L)).thenReturn(new ConversationListPage(List.of(
+        ConvInfo.newBuilder()
+            .setConvId(501L)
+            .setType(ConvType.C2C)
+            .setMaxSeq(5L)
+            .setReadSeq(4L)
+            .setPinned(true)
+            .build()), false, 4L));
+
+    SyncResp response = syncWithTenant(100L, SyncReq.newBuilder()
+        .setConvListVersion(3L)
+        .addConvVersions(SyncReq.ConvVersion.newBuilder()
+            .setConvId(501L)
+            .setLocalMaxSeq(5L))
+        .build());
+
+    assertThat(response.getConvListVersion()).isEqualTo(4L);
+    assertThat(response.getDeltasList()).hasSize(1);
+    assertThat(response.getDeltas(0).getConv().getPinned()).isTrue();
+    assertThat(response.getDeltas(0).getMsgsList()).isEmpty();
+    assertThat(response.getDeltas(0).getServerMaxSeq()).isEqualTo(5L);
+  }
+
+  @Test
+  void syncReturnsDeletedConversationDiff() {
+    when(memberClient.listMemberConvs(100L, 3L)).thenReturn(new ConversationListPage(List.of(
+        ConvInfo.newBuilder()
+            .setConvId(501L)
+            .setType(ConvType.C2C)
+            .setDeleted(true)
+            .build()), false, 4L));
+
+    SyncResp response = syncWithTenant(100L, SyncReq.newBuilder()
+        .setConvListVersion(3L)
+        .addConvVersions(SyncReq.ConvVersion.newBuilder()
+            .setConvId(501L)
+            .setLocalMaxSeq(5L))
+        .build());
+
+    assertThat(response.getConvListVersion()).isEqualTo(4L);
+    assertThat(response.getDeltasList()).hasSize(1);
+    assertThat(response.getDeltas(0).getConv().getDeleted()).isTrue();
+    assertThat(response.getDeltas(0).getMsgsList()).isEmpty();
+  }
+
+  @Test
+  void syncRequestsFullSyncWhenConversationEventDiffIsTooLarge() {
+    when(memberClient.listMemberConvs(100L, 3L))
+        .thenReturn(new ConversationListPage(List.of(), true, 9L));
+
+    SyncResp response = syncWithTenant(100L, SyncReq.newBuilder()
+        .setConvListVersion(3L)
+        .build());
+
+    assertThat(response.getFullSync()).isTrue();
+    assertThat(response.getConvListVersion()).isEqualTo(9L);
   }
 
   @Test

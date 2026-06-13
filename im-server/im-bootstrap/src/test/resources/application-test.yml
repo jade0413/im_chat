@@ -10,6 +10,8 @@ spring:
     listener:
       simple:
         auto-startup: false
+  flyway:
+    enabled: false
 
 management:
   health:

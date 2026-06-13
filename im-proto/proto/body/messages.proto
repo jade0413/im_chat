@@ -93,6 +93,7 @@ message ConvInfo {
   string last_msg_abstract = 11;
   int64  last_msg_time = 12;
   string cs_status = 13;                   // 客服预留：open/assigned/resolved
+  bool   deleted = 14;                     // 会话列表 diff 删除标记；true 时客户端移除本地会话
 }
 
 // ---------------- 已读（Cmd=READ_REPORT / READ_NOTIFY）----------------

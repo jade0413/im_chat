@@ -9,5 +9,5 @@ public interface ConversationMemberClient {
 
   ConvInfo getMemberConv(long userId, long conversationId);
 
-  List<ConvInfo> listMemberConvs(long userId);
+  ConversationListPage listMemberConvs(long userId, long convListVersion);
 }

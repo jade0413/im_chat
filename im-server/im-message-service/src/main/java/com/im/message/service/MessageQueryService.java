@@ -11,7 +11,11 @@ import com.im.proto.body.SyncReq;
 import com.im.proto.body.SyncResp;
 import com.im.proto.common.ConvType;
 import com.im.proto.rpc.PullMsgsReq;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -37,21 +41,43 @@ public class MessageQueryService {
 
   public SyncResp sync(long userId, SyncReq request) {
     TenantContext.requiredTenantId();
+    ConversationListPage convList = memberClient.listMemberConvs(userId, request.getConvListVersion());
     SyncResp.Builder response = SyncResp.newBuilder()
-        .setFullSync(false)
-        .setConvListVersion(request.getConvListVersion());
-    if (request.getConvVersionsCount() == 0) {
-      for (ConvInfo conv : memberClient.listMemberConvs(userId)) {
-        addDelta(response, conv, 1L, conv.getMaxSeq());
-      }
-      return response.build();
-    }
+        .setFullSync(convList.hasMore())
+        .setConvListVersion(convList.convListVersion());
+
+    Map<Long, Long> localMaxSeqByConv = new HashMap<>();
     for (SyncReq.ConvVersion version : request.getConvVersionsList()) {
-      long conversationId = version.getConvId();
-      ConvInfo conv = memberClient.getMemberConv(userId, conversationId);
-      long serverMaxSeq = conv.getMaxSeq();
-      long beginSeq = version.getLocalMaxSeq() + 1;
-      addDelta(response, conv, beginSeq, serverMaxSeq);
+      localMaxSeqByConv.put(version.getConvId(), version.getLocalMaxSeq());
+    }
+    Set<Long> changedConvIds = new HashSet<>();
+    for (ConvInfo conv : convList.convs()) {
+      changedConvIds.add(conv.getConvId());
+    }
+
+    if (request.getConvVersionsCount() > 0) {
+      for (SyncReq.ConvVersion version : request.getConvVersionsList()) {
+        if (changedConvIds.contains(version.getConvId())) {
+          continue;
+        }
+        ConvInfo conv = memberClient.getMemberConv(userId, version.getConvId());
+        long serverMaxSeq = conv.getMaxSeq();
+        long beginSeq = version.getLocalMaxSeq() + 1;
+        addDelta(response, conv, beginSeq, serverMaxSeq, false);
+      }
+    }
+
+    for (ConvInfo conv : convList.convs()) {
+      if (conv.getDeleted()) {
+        addDeletedDelta(response, conv);
+        continue;
+      }
+      long beginSeq = localMaxSeqByConv.getOrDefault(conv.getConvId(), 0L) + 1;
+      addDelta(response, conv, beginSeq, conv.getMaxSeq(), true);
+    }
+
+    if (request.getConvVersionsCount() == 0 && convList.convs().isEmpty()) {
+      return response.build();
     }
     return response.build();
   }
@@ -105,15 +131,24 @@ public class MessageQueryService {
         .toList(), hasMore, 0L);
   }
 
-  private void addDelta(SyncResp.Builder response, ConvInfo conv, long beginSeq, long serverMaxSeq) {
+  private void addDelta(SyncResp.Builder response, ConvInfo conv, long beginSeq, long serverMaxSeq,
+      boolean includeWhenNoMessages) {
     if (serverMaxSeq <= 0) {
-      response.addDeltas(SyncResp.ConvDelta.newBuilder()
-          .setConv(conv.toBuilder().setMaxSeq(0L))
-          .setServerMaxSeq(0L)
-          .setHasMore(false));
+      if (includeWhenNoMessages) {
+        response.addDeltas(SyncResp.ConvDelta.newBuilder()
+            .setConv(conv.toBuilder().setMaxSeq(0L))
+            .setServerMaxSeq(0L)
+            .setHasMore(false));
+      }
       return;
     }
     if (serverMaxSeq < beginSeq) {
+      if (includeWhenNoMessages) {
+        response.addDeltas(SyncResp.ConvDelta.newBuilder()
+            .setConv(conv.toBuilder().setMaxSeq(serverMaxSeq))
+            .setServerMaxSeq(serverMaxSeq)
+            .setHasMore(false));
+      }
       return;
     }
     MessagePage page = range(conv.getConvId(), beginSeq, serverMaxSeq, DEFAULT_LIMIT, conv.getType());
@@ -122,6 +157,13 @@ public class MessageQueryService {
         .addAllMsgs(page.messages())
         .setServerMaxSeq(serverMaxSeq)
         .setHasMore(page.hasMore()));
+  }
+
+  private void addDeletedDelta(SyncResp.Builder response, ConvInfo conv) {
+    response.addDeltas(SyncResp.ConvDelta.newBuilder()
+        .setConv(conv)
+        .setServerMaxSeq(conv.getMaxSeq())
+        .setHasMore(false));
   }
 
   private int normalizeLimit(int limit) {

@@ -255,6 +255,10 @@ friend(tenant_id, user_id, friend_user_id, remark, status, created_at)  /*二阶
 outbox(id, tenant_id, event_type, payload, status, created_at)  /*D18: 与业务表同事务写,轮询投MQ*/
 conversation_member(conv_id, tenant_id, user_id, read_seq, unread_hint,
      mute, pinned, deleted_at, PRIMARY KEY(conv_id, user_id))
+user_conv_version(tenant_id, user_id, conv_list_version,
+     PRIMARY KEY(tenant_id, user_id))  /*每用户会话列表版本水位*/
+user_conv_event(id, tenant_id, user_id, conv_id, event_version, event_type,
+     created_at, UNIQUE(tenant_id, user_id, event_version))  /*E1: 会话列表 diff 流水*/
 message(id /*snowflake*/, tenant_id, conversation_id, seq, sender_id,
      client_msg_id, msg_type, content /*pb bytes 或 json*/, ext JSON,
      status ENUM('NORMAL','REVOKED'), created_at,
@@ -273,6 +277,10 @@ Redis 键位规划：`route:{t}:{uid}:{platform_class}`、`online:{t}:{uid}`、
 
 `outbox` 是基础设施全局轮询表，MyBatis 租户拦截器忽略该表；写入方必须显式写入 `tenant_id`，
 poller 全表扫描后按行内 `tenant_id` 写 MQ header 和 routing key，避免只投递默认租户事件。
+
+`user_conv_version` 使用 `(tenant_id,user_id)` 行锁为单个用户的会话列表变更分配单调版本；
+`user_conv_event` 在同一业务事务中记录 `created/updated/removed` 事件。客户端 `SYNC_REQ.conv_list_version`
+小于服务端版本时，服务端返回该版本之后发生变化的 `ConvInfo`；删除会话用 `ConvInfo.deleted=true` 表达。
 
 ## 8. 文件/图片/语音（D10）
 

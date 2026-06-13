@@ -116,6 +116,7 @@ abstract class AbstractImServerMvpSmokeTest {
     assertThat(firstAck.getSeq()).isEqualTo(1L);
 
     SyncResp syncResp = sync(uplink, userB, firstAck.getConvId(), 0L, "device-b", 2L);
+    assertThat(syncResp.getConvListVersion()).isPositive();
     assertThat(syncResp.getDeltasList()).hasSize(1);
     SyncResp.ConvDelta delta = syncResp.getDeltas(0);
     assertThat(delta.getConv().getConvId()).isEqualTo(firstAck.getConvId());
@@ -180,7 +181,8 @@ abstract class AbstractImServerMvpSmokeTest {
     assertThat(groupAck.getSeq()).isEqualTo(2L);
 
     SyncResp groupSync = sync(reconnectedUplink, userB, groupConvId, 0L,
-        "device-b", 7L);
+        syncResp.getConvListVersion(), "device-b", 7L);
+    assertThat(groupSync.getConvListVersion()).isGreaterThan(syncResp.getConvListVersion());
     assertThat(groupSync.getDeltasList()).hasSize(1);
     SyncResp.ConvDelta groupDelta = groupSync.getDeltas(0);
     assertThat(groupDelta.getConv().getType()).isEqualTo(ConvType.GROUP);
@@ -305,10 +307,22 @@ abstract class AbstractImServerMvpSmokeTest {
       String deviceId,
       long reqId)
       throws Exception {
+    return sync(uplink, userId, convId, localMaxSeq, 0L, deviceId, reqId);
+  }
+
+  private SyncResp sync(UplinkGrpc.UplinkBlockingStub uplink,
+      long userId,
+      long convId,
+      long localMaxSeq,
+      long convListVersion,
+      String deviceId,
+      long reqId)
+      throws Exception {
     SyncReq request = SyncReq.newBuilder()
         .addConvVersions(SyncReq.ConvVersion.newBuilder()
             .setConvId(convId)
             .setLocalMaxSeq(localMaxSeq))
+        .setConvListVersion(convListVersion)
         .build();
 
     UplinkResp response = uplink.dispatch(UplinkReq.newBuilder()

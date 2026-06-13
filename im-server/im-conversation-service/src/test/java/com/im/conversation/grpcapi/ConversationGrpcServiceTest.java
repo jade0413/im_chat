@@ -5,6 +5,7 @@ import static org.mockito.Mockito.when;
 
 import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
+import com.im.conversation.service.ConversationListResult;
 import com.im.conversation.service.ConversationService;
 import com.im.proto.body.ConvInfo;
 import com.im.proto.common.ConvType;
@@ -86,14 +87,20 @@ class ConversationGrpcServiceTest {
         .setMaxSeq(3L)
         .setReadSeq(1L)
         .build();
-    when(conversationService.listMemberConvs(100L, 100)).thenReturn(List.of(conv));
+    when(conversationService.listMemberConvs(100L, 100, 7L))
+        .thenReturn(new ConversationListResult(List.of(conv), false, 9L));
 
     CapturingObserver<ListMemberConvsResp> observer = new CapturingObserver<>();
     new ConversationGrpcService(conversationService)
-        .listMemberConvs(ListMemberConvsReq.newBuilder().setUserId(100L).setLimit(100).build(), observer);
+        .listMemberConvs(ListMemberConvsReq.newBuilder()
+            .setUserId(100L)
+            .setLimit(100)
+            .setConvListVersion(7L)
+            .build(), observer);
 
     assertThat(observer.value.getConvsList()).hasSize(1);
     assertThat(observer.value.getConvs(0).getReadSeq()).isEqualTo(1L);
+    assertThat(observer.value.getConvListVersion()).isEqualTo(9L);
     assertThat(observer.completed).isTrue();
   }
 

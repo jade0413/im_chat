@@ -1499,7 +1499,65 @@
 
 ---
 
-### T27 — 文件上传 MVP
+### T27 — conv_list_version 语义补全
+
+状态：DONE
+
+> **前提约束（2026-06-13 确认）**：项目 Flyway 已上线且当前处于 **V1** 版本，
+> `V2__user_conv_event.sql` 可直接新增，无需处理 baseline 兼容问题；本任务**不考虑 schema 版本迁移兼容性**。
+
+目标：
+
+- 实现 `SyncReq.conv_list_version` 的真实会话列表同步语义。
+- 为每个用户维护会话列表变更版本和事件流水，支持新会话、更新、删除等会话列表变更可通过 SYNC 对齐。
+
+涉及模块：
+
+- `im-proto`
+- `im-server/im-conversation-service`
+- `im-server/im-group-service`
+- `im-server/im-message-service`
+- `im-server/im-bootstrap`
+- `docs`
+
+需要修改的文件：
+
+- `im-proto/proto/body/messages.proto`
+- `im-proto/proto/rpc/internal.proto`
+- `im-server/im-conversation-service/src/main/java/com/im/conversation/**`
+- `im-server/im-group-service/src/main/java/com/im/group/**`
+- `im-server/im-message-service/src/main/java/com/im/message/**`
+- `im-server/im-bootstrap/src/main/resources/db/migration/V2__user_conv_event.sql`
+- `docs/architecture.md`
+- `TASKS.md`
+
+验收标准：
+
+- 新增 `user_conv_version` 和 `user_conv_event`，会话列表事件在业务事务内落库。
+- C2C 新会话、GROUP 建群/加人/踢人会写入对应用户的会话列表事件。
+- `ListMemberConvsResp.conv_list_version` 返回当前用户有效版本；`ListMemberConvsReq.conv_list_version` 可返回变更会话 diff。
+- `SYNC_REQ.conv_list_version` 生效：服务端将会话列表 diff 合并进 `SyncResp.deltas`，删除会话以 `ConvInfo.deleted=true` 表达。
+- 新设备 `conv_versions` 为空时仍返回当前用户全量会话，并带有有意义的初始 `conv_list_version`。
+
+测试方式：
+
+- `mvn -q -pl im-conversation-service,im-group-service,im-message-service -am test`
+- `mvn -q -pl im-bootstrap -am test`
+
+完成记录：
+
+- 新增 `user_conv_version` / `user_conv_event` Flyway V2 迁移，按用户维护会话列表版本和事件流水。
+- C2C 建会话、GROUP 建群/加人/踢人/改名会在业务事务内写入用户会话事件。
+- `ListMemberConvsReq.conv_list_version` 已生效：`0` 返回全量会话；大于 `0` 返回事件 diff，删除会话用 `ConvInfo.deleted=true` 表达。
+- `SYNC_REQ.conv_list_version` 已接入 message 查询链路，`SyncResp.conv_list_version` 返回当前有效版本，diff 过大时标记 `full_sync=true`。
+- Bootstrap 冒烟覆盖双人互发、重连增量同步和群聊新增会话 diff。
+- 已执行 `mvn -q -pl im-conversation-service,im-group-service,im-message-service -am test`，通过。
+- 已执行 `mvn -q -pl im-bootstrap -am test`，通过。
+- 已执行外部冒烟 `ImServerMvpExternalSmokeTest`，使用本地 MySQL/Redis 与远端 RabbitMQ，命令退出码 0，通过。
+
+---
+
+### T28 — 文件上传 MVP
 
 状态：PENDING
 

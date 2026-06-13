@@ -1,17 +1,11 @@
 package com.im.bootstrap.e2e;
 
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.core.io.support.EncodedResource;
-import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -32,11 +26,7 @@ class ImServerMvpExternalSmokeTest extends AbstractImServerMvpSmokeTest {
   static void initializeExternalSchema() throws Exception {
     try (Connection connection = DriverManager.getConnection(MYSQL_ADMIN_URL, MYSQL_USERNAME, MYSQL_PASSWORD)) {
       connection.createStatement().executeUpdate("CREATE DATABASE IF NOT EXISTS `" + DATABASE + "`");
-      String schema = Files.readString(findSchemaPath(), StandardCharsets.UTF_8)
-          .replace("USE im;", "USE `" + DATABASE + "`;");
-      ScriptUtils.executeSqlScript(
-          connection,
-          new EncodedResource(new ByteArrayResource(schema.getBytes(StandardCharsets.UTF_8)), StandardCharsets.UTF_8));
+      SchemaScripts.applyInitialSchema(connection, DATABASE);
     }
   }
 
@@ -80,15 +70,4 @@ class ImServerMvpExternalSmokeTest extends AbstractImServerMvpSmokeTest {
     return defaultValue;
   }
 
-  private static Path findSchemaPath() {
-    Path directory = Path.of(System.getProperty("user.dir")).toAbsolutePath();
-    while (directory != null) {
-      Path candidate = directory.resolve("deploy/docker-compose/init/mysql/01-schema.sql");
-      if (Files.exists(candidate)) {
-        return candidate;
-      }
-      directory = directory.getParent();
-    }
-    throw new IllegalStateException("Cannot find deploy/docker-compose/init/mysql/01-schema.sql");
-  }
 }

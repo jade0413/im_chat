@@ -11,6 +11,7 @@ import com.im.proto.rpc.GetMemberConvReq;
 import com.im.proto.rpc.GetMemberConvResp;
 import com.im.proto.rpc.GetMembersReq;
 import com.im.proto.rpc.ListMemberConvsReq;
+import com.im.proto.rpc.ListMemberConvsResp;
 import io.grpc.Metadata;
 import io.grpc.stub.MetadataUtils;
 import java.util.List;
@@ -51,14 +52,18 @@ public class GrpcConversationMemberClient implements ConversationMemberClient {
   }
 
   @Override
-  public List<ConvInfo> listMemberConvs(long userId) {
-    return conversationStub
+  public ConversationListPage listMemberConvs(long userId, long convListVersion) {
+    ListMemberConvsResp response = conversationStub
         .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(metadata()))
         .listMemberConvs(ListMemberConvsReq.newBuilder()
             .setUserId(userId)
             .setLimit(100)
-            .build())
-        .getConvsList();
+            .setConvListVersion(convListVersion)
+            .build());
+    return new ConversationListPage(
+        response.getConvsList(),
+        response.getHasMore(),
+        response.getConvListVersion());
   }
 
   private Metadata metadata() {

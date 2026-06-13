@@ -14,9 +14,12 @@ import com.im.common.tenant.TenantContext;
 import com.im.conversation.dao.entity.ConversationEntity;
 import com.im.conversation.dao.entity.ConversationMemberEntity;
 import com.im.conversation.dao.entity.GroupInfoEntity;
+import com.im.conversation.dao.entity.UserConvEventEntity;
 import com.im.conversation.dao.mapper.ConversationGroupInfoMapper;
 import com.im.conversation.dao.mapper.ConversationMapper;
 import com.im.conversation.dao.mapper.ConversationMemberMapper;
+import com.im.conversation.dao.mapper.ConversationUserConvEventMapper;
+import com.im.conversation.dao.mapper.ConversationUserConvVersionMapper;
 import com.im.proto.body.ConvInfo;
 import com.im.proto.common.ConvType;
 import com.im.proto.rpc.ResolveConvReq;
@@ -42,6 +45,12 @@ class ConversationServiceTest {
   private ConversationGroupInfoMapper groupInfoMapper;
 
   @Mock
+  private ConversationUserConvVersionMapper userConvVersionMapper;
+
+  @Mock
+  private ConversationUserConvEventMapper userConvEventMapper;
+
+  @Mock
   private ConversationCreator conversationCreator;
 
   private ConversationService service;
@@ -52,6 +61,8 @@ class ConversationServiceTest {
         conversationMapper,
         memberMapper,
         groupInfoMapper,
+        userConvVersionMapper,
+        userConvEventMapper,
         new C2cKeyGenerator(),
         conversationCreator);
   }
@@ -171,22 +182,63 @@ class ConversationServiceTest {
   }
 
   @Test
-  void listsMemberConversationsForFullSync() {
+  void listsMemberConversationsForFullSyncWithCurrentVersion() {
     ConversationEntity existing = conversation(501L, "100_200");
     existing.setMaxSeq(3L);
+    when(userConvVersionMapper.selectVersion(1L, 100L)).thenReturn(9L);
     when(memberMapper.selectList(anyWrapper()))
         .thenReturn(List.of(member(501L, 100L)), List.of(member(501L, 100L), member(501L, 200L)));
     when(conversationMapper.selectById(501L)).thenReturn(existing);
 
-    AtomicReference<List<ConvInfo>> result = new AtomicReference<>();
-    TenantContext.runWithTenant(1L, () -> result.set(service.listMemberConvs(100L, 100)));
+    AtomicReference<ConversationListResult> result = new AtomicReference<>();
+    TenantContext.runWithTenant(1L, () -> result.set(service.listMemberConvs(100L, 100, 0L)));
 
-    assertThat(result.get()).hasSize(1);
-    assertThat(result.get().getFirst().getConvId()).isEqualTo(501L);
-    assertThat(result.get().getFirst().getType()).isEqualTo(ConvType.C2C);
-    assertThat(result.get().getFirst().getTitle()).isEqualTo("200");
-    assertThat(result.get().getFirst().getPeerUserId()).isEqualTo(200L);
-    assertThat(result.get().getFirst().getMaxSeq()).isEqualTo(3L);
+    assertThat(result.get().convListVersion()).isEqualTo(9L);
+    assertThat(result.get().hasMore()).isFalse();
+    assertThat(result.get().convs()).hasSize(1);
+    assertThat(result.get().convs().getFirst().getConvId()).isEqualTo(501L);
+    assertThat(result.get().convs().getFirst().getType()).isEqualTo(ConvType.C2C);
+    assertThat(result.get().convs().getFirst().getTitle()).isEqualTo("200");
+    assertThat(result.get().convs().getFirst().getPeerUserId()).isEqualTo(200L);
+    assertThat(result.get().convs().getFirst().getMaxSeq()).isEqualTo(3L);
+  }
+
+  @Test
+  void listsChangedConversationsAfterVersion() {
+    ConversationEntity existing = conversation(501L, "100_200");
+    existing.setMaxSeq(3L);
+    when(userConvVersionMapper.selectVersion(1L, 100L)).thenReturn(9L);
+    when(userConvEventMapper.selectAfterVersion(100L, 7L, 101))
+        .thenReturn(List.of(event(501L, 8L, "created")));
+    when(memberMapper.selectOne(anyWrapper())).thenReturn(member(501L, 100L));
+    when(conversationMapper.selectById(501L)).thenReturn(existing);
+    when(memberMapper.selectList(anyWrapper())).thenReturn(List.of(member(501L, 100L), member(501L, 200L)));
+
+    AtomicReference<ConversationListResult> result = new AtomicReference<>();
+    TenantContext.runWithTenant(1L, () -> result.set(service.listMemberConvs(100L, 100, 7L)));
+
+    assertThat(result.get().convListVersion()).isEqualTo(9L);
+    assertThat(result.get().convs()).hasSize(1);
+    assertThat(result.get().convs().getFirst().getDeleted()).isFalse();
+    assertThat(result.get().convs().getFirst().getConvId()).isEqualTo(501L);
+  }
+
+  @Test
+  void listsRemovedConversationAfterVersion() {
+    ConversationEntity existing = conversation(501L, "100_200");
+    existing.setMaxSeq(3L);
+    when(userConvVersionMapper.selectVersion(1L, 100L)).thenReturn(9L);
+    when(userConvEventMapper.selectAfterVersion(100L, 7L, 101))
+        .thenReturn(List.of(event(501L, 8L, "removed")));
+    when(conversationMapper.selectById(501L)).thenReturn(existing);
+
+    AtomicReference<ConversationListResult> result = new AtomicReference<>();
+    TenantContext.runWithTenant(1L, () -> result.set(service.listMemberConvs(100L, 100, 7L)));
+
+    assertThat(result.get().convListVersion()).isEqualTo(9L);
+    assertThat(result.get().convs()).hasSize(1);
+    assertThat(result.get().convs().getFirst().getDeleted()).isTrue();
+    assertThat(result.get().convs().getFirst().getConvId()).isEqualTo(501L);
   }
 
   @Test
@@ -245,6 +297,14 @@ class ConversationServiceTest {
     group.setName(name);
     group.setAvatar("");
     return group;
+  }
+
+  private UserConvEventEntity event(long conversationId, long eventVersion, String eventType) {
+    UserConvEventEntity event = new UserConvEventEntity();
+    event.setConvId(conversationId);
+    event.setEventVersion(eventVersion);
+    event.setEventType(eventType);
+    return event;
   }
 
   private ConversationMemberEntity member(long conversationId, long userId) {

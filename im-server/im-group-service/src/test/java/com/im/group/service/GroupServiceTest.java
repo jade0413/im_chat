@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.im.common.conversation.UserConvEventType;
 import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.common.id.SnowflakeIdGenerator;
@@ -75,6 +76,9 @@ class GroupServiceTest {
   @Mock
   private OutboxWriter outboxWriter;
 
+  @Mock
+  private GroupUserConvEventRecorder userConvEventRecorder;
+
   @Captor
   private ArgumentCaptor<GroupInfoEntity> groupCaptor;
 
@@ -106,6 +110,7 @@ class GroupServiceTest {
         messageMapper,
         idGenerator,
         outboxWriter,
+        userConvEventRecorder,
         new ObjectMapper(),
         Clock.fixed(Instant.parse("2026-06-13T00:00:00Z"), ZoneOffset.UTC));
   }
@@ -144,6 +149,9 @@ class GroupServiceTest {
         conversationMemberCaptor.capture());
     assertThat(conversationMemberCaptor.getAllValues()).extracting(GroupConversationMemberEntity::getConvId)
         .containsExactly(20L, 20L, 20L);
+    verify(userConvEventRecorder).record(1L, 100L, 20L, UserConvEventType.CREATED);
+    verify(userConvEventRecorder).record(1L, 200L, 20L, UserConvEventType.CREATED);
+    verify(userConvEventRecorder).record(1L, 300L, 20L, UserConvEventType.CREATED);
 
     verify(messageMapper).insert(messageCaptor.capture());
     MsgContent content = MsgContent.parseFrom(messageCaptor.getValue().getContent());
@@ -195,6 +203,7 @@ class GroupServiceTest {
     assertThat(groupMemberCaptor.getValue().getUserId()).isEqualTo(300L);
     verify(conversationMemberMapper).insert(conversationMemberCaptor.capture());
     assertThat(conversationMemberCaptor.getValue().getReadSeq()).isEqualTo(5L);
+    verify(userConvEventRecorder).record(1L, 300L, 20L, UserConvEventType.CREATED);
     verify(messageMapper).insert(messageCaptor.capture());
     MsgContent content = MsgContent.parseFrom(messageCaptor.getValue().getContent());
     assertThat(content.getNotification().getEventType()).isEqualTo("group.member_added");
@@ -232,6 +241,7 @@ class GroupServiceTest {
     verify(groupMemberMapper).delete(anyWrapper());
     verify(conversationMemberMapper).update(conversationMemberCaptor.capture(), anyWrapper());
     assertThat(conversationMemberCaptor.getValue().getDeletedAt()).isNotNull();
+    verify(userConvEventRecorder).record(1L, 200L, 20L, UserConvEventType.REMOVED);
     verify(groupInfoMapper).updateById(groupCaptor.capture());
     assertThat(groupCaptor.getValue().getMemberCount()).isEqualTo(2);
     verify(messageMapper).insert(messageCaptor.capture());

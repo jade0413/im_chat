@@ -1,6 +1,8 @@
 package com.im.conversation.service;
 
+import com.im.common.conversation.UserConvEventType;
 import com.im.common.id.SnowflakeIdGenerator;
+import com.im.common.tenant.TenantContext;
 import com.im.conversation.dao.entity.ConversationEntity;
 import com.im.conversation.dao.entity.ConversationMemberEntity;
 import com.im.conversation.dao.mapper.ConversationMapper;
@@ -15,17 +17,21 @@ public class ConversationCreator {
   private final ConversationMapper conversationMapper;
   private final ConversationMemberMapper memberMapper;
   private final SnowflakeIdGenerator idGenerator;
+  private final UserConvEventRecorder userConvEventRecorder;
 
   public ConversationCreator(ConversationMapper conversationMapper,
       ConversationMemberMapper memberMapper,
-      SnowflakeIdGenerator idGenerator) {
+      SnowflakeIdGenerator idGenerator,
+      UserConvEventRecorder userConvEventRecorder) {
     this.conversationMapper = conversationMapper;
     this.memberMapper = memberMapper;
     this.idGenerator = idGenerator;
+    this.userConvEventRecorder = userConvEventRecorder;
   }
 
   @Transactional
   public ConversationEntity createC2c(String c2cKey, long fromUserId, long toUserId) {
+    long tenantId = TenantContext.requiredTenantId();
     ConversationEntity conversation = new ConversationEntity();
     conversation.setId(idGenerator.nextId());
     conversation.setType(ConvType.C2C.getNumber());
@@ -36,6 +42,8 @@ public class ConversationCreator {
 
     memberMapper.insert(member(conversation.getId(), fromUserId));
     memberMapper.insert(member(conversation.getId(), toUserId));
+    userConvEventRecorder.record(tenantId, fromUserId, conversation.getId(), UserConvEventType.CREATED);
+    userConvEventRecorder.record(tenantId, toUserId, conversation.getId(), UserConvEventType.CREATED);
     return conversation;
   }
 

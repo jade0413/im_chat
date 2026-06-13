@@ -33,6 +33,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
     TenantLineHandlerConfig.class,
     SnowflakeIdGenerator.class,
     C2cKeyGenerator.class,
+    UserConvEventRecorder.class,
     ConversationCreator.class,
     ConversationService.class
 })

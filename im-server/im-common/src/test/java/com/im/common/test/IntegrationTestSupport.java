@@ -6,7 +6,9 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.Comparator;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeAll;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.support.EncodedResource;
@@ -49,6 +51,7 @@ public abstract class IntegrationTestSupport {
       ScriptUtils.executeSqlScript(
           connection,
           new EncodedResource(new FileSystemResource(findSchemaPath()), StandardCharsets.UTF_8));
+      applyMigrations(connection);
     }
   }
 
@@ -62,5 +65,39 @@ public abstract class IntegrationTestSupport {
       directory = directory.getParent();
     }
     throw new IllegalStateException("Cannot find deploy/docker-compose/init/mysql/01-schema.sql");
+  }
+
+  private static void applyMigrations(Connection connection) {
+    Path migrationDirectory = findMigrationDirectory();
+    try (Stream<Path> migrations = Files.list(migrationDirectory)) {
+      migrations
+          .filter(path -> path.getFileName().toString().matches("V\\d+__.*\\.sql"))
+          .sorted(Comparator.comparing(path -> path.getFileName().toString()))
+          .forEach(path -> executeMigration(connection, path));
+    } catch (Exception ex) {
+      throw new IllegalStateException("Failed to apply test migrations", ex);
+    }
+  }
+
+  private static void executeMigration(Connection connection, Path path) {
+    try {
+      ScriptUtils.executeSqlScript(
+          connection,
+          new EncodedResource(new FileSystemResource(path), StandardCharsets.UTF_8));
+    } catch (Exception ex) {
+      throw new IllegalStateException("Failed to apply migration " + path.getFileName(), ex);
+    }
+  }
+
+  private static Path findMigrationDirectory() {
+    Path directory = Path.of(System.getProperty("user.dir")).toAbsolutePath();
+    while (directory != null) {
+      Path candidate = directory.resolve("im-server/im-bootstrap/src/main/resources/db/migration");
+      if (Files.isDirectory(candidate)) {
+        return candidate;
+      }
+      directory = directory.getParent();
+    }
+    throw new IllegalStateException("Cannot find im-server/im-bootstrap/src/main/resources/db/migration");
   }
 }
