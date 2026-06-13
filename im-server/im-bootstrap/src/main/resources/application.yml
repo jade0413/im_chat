@@ -74,6 +74,7 @@ im:
     interval: ${IM_OUTBOX_INTERVAL:100ms}
     max-retries: ${IM_OUTBOX_MAX_RETRIES:16}
     confirm-timeout: ${IM_OUTBOX_CONFIRM_TIMEOUT:5s}
+    claim-ttl: ${IM_OUTBOX_CLAIM_TTL:30s}
   push:
     route-ttl: ${IM_PUSH_ROUTE_TTL:90s}
     event-dedup-ttl: ${IM_PUSH_EVENT_DEDUP_TTL:24h}

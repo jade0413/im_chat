@@ -1,5 +1,6 @@
 package com.im.message.moderation;
 
+import java.time.Clock;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.Queue;
@@ -38,5 +39,10 @@ public class ModerationRabbitConfig {
     return BindingBuilder.bind(moderationWordReloadQueue)
         .to(imEventsExchange)
         .with("word.reload");
+  }
+
+  @Bean
+  public Clock moderationClock() {
+    return Clock.systemUTC();
   }
 }

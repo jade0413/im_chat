@@ -11,7 +11,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,20 +27,11 @@ public class ModerationService {
   private final ModerationProperties properties;
   private final Clock clock;
 
-  @Autowired
   public ModerationService(SensitiveWordService sensitiveWordService,
       ModerationLogMapper moderationLogMapper,
       MessageRevokeService messageRevokeService,
-      ModerationProperties properties) {
-    this(sensitiveWordService, moderationLogMapper, messageRevokeService, properties,
-        Clock.systemUTC());
-  }
-
-  ModerationService(SensitiveWordService sensitiveWordService,
-      ModerationLogMapper moderationLogMapper,
-      MessageRevokeService messageRevokeService,
       ModerationProperties properties,
-      Clock clock) {
+      @Qualifier("moderationClock") Clock clock) {
     this.sensitiveWordService = sensitiveWordService;
     this.moderationLogMapper = moderationLogMapper;
     this.messageRevokeService = messageRevokeService;

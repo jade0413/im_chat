@@ -40,6 +40,13 @@ public final class RedisKeys {
     return "moderation:event:" + tenantId + ":" + eventId;
   }
 
+  public static String consumerDedup(String namespace, long tenantId, String key) {
+    validateNamespace(namespace);
+    validatePositive("tenantId", tenantId);
+    validateText("key", key);
+    return "consumer:dedup:" + namespace + ":" + tenantId + ":" + key;
+  }
+
   public static String messageDedup(long tenantId, String clientMsgId) {
     validatePositive("tenantId", tenantId);
     if (clientMsgId == null || clientMsgId.isBlank()) {
@@ -64,6 +71,13 @@ public final class RedisKeys {
   private static void validateText(String name, String value) {
     if (value == null || value.isBlank()) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, name + " is required");
+    }
+  }
+
+  private static void validateNamespace(String namespace) {
+    validateText("namespace", namespace);
+    if (!namespace.matches("[a-zA-Z0-9_.-]{1,64}")) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "namespace is invalid");
     }
   }
 }

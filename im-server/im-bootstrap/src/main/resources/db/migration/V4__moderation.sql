@@ -24,19 +24,3 @@ CREATE TABLE IF NOT EXISTS moderation_log (
   KEY idx_tenant_msg (tenant_id, message_id),
   UNIQUE KEY uk_tenant_msg_provider (tenant_id, message_id, provider)
 ) ENGINE=InnoDB COMMENT='审核日志';
-
-SET @moderation_log_unique_exists := (
-  SELECT COUNT(1)
-  FROM information_schema.statistics
-  WHERE table_schema = DATABASE()
-    AND table_name = 'moderation_log'
-    AND index_name = 'uk_tenant_msg_provider'
-);
-SET @moderation_log_unique_sql := IF(
-  @moderation_log_unique_exists = 0,
-  'ALTER TABLE moderation_log ADD UNIQUE KEY uk_tenant_msg_provider (tenant_id, message_id, provider)',
-  'SELECT 1'
-);
-PREPARE moderation_log_unique_stmt FROM @moderation_log_unique_sql;
-EXECUTE moderation_log_unique_stmt;
-DEALLOCATE PREPARE moderation_log_unique_stmt;

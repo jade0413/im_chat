@@ -11,6 +11,7 @@ public class OutboxProperties {
   private Duration interval = Duration.ofMillis(100);
   private int maxRetries = 16;
   private Duration confirmTimeout = Duration.ofSeconds(5);
+  private Duration claimTtl = Duration.ofSeconds(30);
 
   public boolean isEnabled() {
     return enabled;
@@ -52,6 +53,14 @@ public class OutboxProperties {
     this.confirmTimeout = confirmTimeout;
   }
 
+  public Duration getClaimTtl() {
+    return claimTtl;
+  }
+
+  public void setClaimTtl(Duration claimTtl) {
+    this.claimTtl = claimTtl;
+  }
+
   public int normalizedBatchSize() {
     return Math.max(1, batchSize);
   }
@@ -70,5 +79,11 @@ public class OutboxProperties {
     return confirmTimeout == null || confirmTimeout.isNegative() || confirmTimeout.isZero()
         ? Duration.ofSeconds(5)
         : confirmTimeout;
+  }
+
+  public Duration normalizedClaimTtl() {
+    return claimTtl == null || claimTtl.isNegative() || claimTtl.isZero()
+        ? Duration.ofSeconds(30)
+        : claimTtl;
   }
 }

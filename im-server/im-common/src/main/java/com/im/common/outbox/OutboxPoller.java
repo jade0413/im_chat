@@ -1,16 +1,21 @@
 package com.im.common.outbox;
 
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.im.common.mq.RabbitMqEvent;
 import com.im.common.mq.RabbitMqPublisher;
 import com.im.common.outbox.dao.entity.OutboxEntity;
 import com.im.common.outbox.dao.mapper.CommonOutboxMapper;
+import java.lang.management.ManagementFactory;
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Service;
 
@@ -22,15 +27,28 @@ public class OutboxPoller implements SmartLifecycle {
   private final CommonOutboxMapper outboxMapper;
   private final RabbitMqPublisher publisher;
   private final OutboxProperties properties;
+  private final Clock clock;
+  private final String claimOwner;
   private final AtomicBoolean running = new AtomicBoolean(false);
   private ExecutorService executor;
 
+  @Autowired
   public OutboxPoller(CommonOutboxMapper outboxMapper,
       RabbitMqPublisher publisher,
       OutboxProperties properties) {
+    this(outboxMapper, publisher, properties, Clock.systemUTC(), defaultClaimOwner());
+  }
+
+  OutboxPoller(CommonOutboxMapper outboxMapper,
+      RabbitMqPublisher publisher,
+      OutboxProperties properties,
+      Clock clock,
+      String claimOwner) {
     this.outboxMapper = outboxMapper;
     this.publisher = publisher;
     this.properties = properties;
+    this.clock = clock;
+    this.claimOwner = claimOwner;
   }
 
   @Override
@@ -89,14 +107,17 @@ public class OutboxPoller implements SmartLifecycle {
   }
 
   private int pollOnceBatch() {
-    List<OutboxEntity> events = outboxMapper.selectList(Wrappers.<OutboxEntity>query()
-        .in("status", OutboxWriter.STATUS_PENDING, OutboxWriter.STATUS_FAILED)
-        .lt("retry_count", properties.normalizedMaxRetries())
-        .orderByAsc("created_at")
-        .last("LIMIT " + properties.normalizedBatchSize()));
+    LocalDateTime now = now();
+    List<OutboxEntity> events = outboxMapper.selectClaimCandidates(
+        now,
+        properties.normalizedMaxRetries(),
+        properties.normalizedBatchSize());
 
     int published = 0;
     for (OutboxEntity event : events) {
+      if (!claim(event, now)) {
+        continue;
+      }
       if (publishOne(event)) {
         published++;
       }
@@ -107,7 +128,8 @@ public class OutboxPoller implements SmartLifecycle {
   private boolean publishOne(OutboxEntity event) {
     try {
       publisher.publish(toRabbitMqEvent(event));
-      int deleted = outboxMapper.deleteById(event.getId());
+      int deleted = outboxMapper.deleteClaimed(
+          event.getId(), claimOwner, OutboxWriter.STATUS_PROCESSING);
       if (deleted == 0) {
         log.warn("outbox event published but delete returned 0, event_id={}", event.getId());
       }
@@ -132,10 +154,16 @@ public class OutboxPoller implements SmartLifecycle {
     int nextStatus = nextRetryCount >= properties.normalizedMaxRetries()
         ? OutboxWriter.STATUS_DEAD
         : OutboxWriter.STATUS_FAILED;
-    outboxMapper.update(null, Wrappers.<OutboxEntity>update()
-        .eq("id", event.getId())
-        .set("status", nextStatus)
-        .set("retry_count", nextRetryCount));
+    int released = outboxMapper.releaseClaim(
+        event.getId(),
+        claimOwner,
+        nextStatus,
+        nextRetryCount,
+        OutboxWriter.STATUS_PROCESSING);
+    if (released == 0) {
+      log.warn("outbox event publish failed but claim was lost, event_id={}", event.getId(), ex);
+      return;
+    }
 
     if (nextRetryCount >= properties.normalizedMaxRetries()) {
       log.error("outbox event reached max retries, event_id={}, retry_count={}",
@@ -148,5 +176,27 @@ public class OutboxPoller implements SmartLifecycle {
 
   private int safeRetryCount(OutboxEntity event) {
     return event.getRetryCount() == null ? 0 : event.getRetryCount();
+  }
+
+  private boolean claim(OutboxEntity event, LocalDateTime now) {
+    LocalDateTime claimUntil = now.plus(properties.normalizedClaimTtl());
+    int claimed = outboxMapper.claim(
+        event.getId(),
+        claimOwner,
+        claimUntil,
+        now,
+        properties.normalizedMaxRetries(),
+        OutboxWriter.STATUS_PENDING,
+        OutboxWriter.STATUS_FAILED,
+        OutboxWriter.STATUS_PROCESSING);
+    return claimed == 1;
+  }
+
+  private LocalDateTime now() {
+    return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+  }
+
+  private static String defaultClaimOwner() {
+    return ManagementFactory.getRuntimeMXBean().getName() + "-" + UUID.randomUUID();
   }
 }

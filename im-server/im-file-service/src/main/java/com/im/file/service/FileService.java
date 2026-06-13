@@ -20,6 +20,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -41,7 +42,7 @@ public class FileService {
       SnowflakeIdGenerator idGenerator,
       FileProperties properties,
       TransactionTemplate transactionTemplate,
-      Clock clock) {
+      @Qualifier("fileClock") Clock clock) {
     this.fileMetaMapper = fileMetaMapper;
     this.storageClient = storageClient;
     this.idGenerator = idGenerator;

@@ -872,7 +872,7 @@
 
 ### T15 — 修复 Outbox/MQ 投递语义与消费幂等基础
 
-状态：PENDING（PR1 已完成 mandatory return 与 DEAD 状态；多实例 claim/lock 和消费幂等模板仍待后续任务）
+状态：DONE
 
 目标：
 
@@ -910,7 +910,13 @@
 - PR1 复审修复已把 `outbox` 加入租户拦截忽略表，`OutboxPoller` 改为全租户扫描并使用事件行内 `tenant_id` 投 MQ。
 - `RabbitTemplate` 已启用 mandatory publish；exchange ack 但消息被 broker return 时不会删除 outbox。
 - 超过最大重试次数后 outbox 状态进入 `DEAD(2)`，避免无限重试掩盖问题。
-- 多实例 claim/lock 与消费侧幂等模板仍保留在本任务后续范围。
+- 新增 `V5__outbox_claim.sql`，为 `outbox` 增加 `claim_owner`、`claim_until` 与 claim 扫描索引。
+- `OutboxPoller` 改为先 claim 后 publish：只有抢占成功的实例会投递，成功后按 `claim_owner` 删除，失败后按 `claim_owner` 释放为 `FAILED/DEAD`，过期 claim 可被后续轮询接管。
+- 新增 `im.outbox.claim-ttl` 配置，默认 30s。
+- 新增 `RedisConsumerIdempotency`，提供按 `event_id` 或业务键的 Redis `SET NX` 消费幂等模板；新增 `RedisKeys.consumerDedup` 统一 key 命名。
+- 已补充 `OutboxPollerTest` 覆盖 claim 成功/失败、投递失败释放、DEAD 状态；补充 `RedisConsumerIdempotencyTest` 覆盖事件 key 和非法入参。
+- 已执行 `mvn -q -pl im-common -am test`，通过。
+- 已执行 `mvn -q -pl im-bootstrap -am test`，通过。
 
 ---
 
@@ -1671,6 +1677,7 @@
 - `MessageRevokeService` 保留原 REST/gRPC `revoke` 入口，并新增返回 boolean 的 `revokeIfNeeded` 供审核链路判断是否真的撤回。
 - 已执行 `mvn -q -pl im-message-service -am test`，通过。
 - 已执行 `mvn -q -pl im-bootstrap -am test`，通过。
+- PR14 复审建议已处理：删除 `ModerationService` 冗余 `@Autowired`，并移除 `V4__moderation.sql` 末尾重复添加唯一键的动态 SQL；为避免两个 `Clock` Bean 装配歧义，`FileService` 显式注入 `fileClock`，审核链路显式注入 `moderationClock`。
 
 ---
 

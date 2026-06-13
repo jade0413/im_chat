@@ -34,6 +34,12 @@ public class OutboxEntity {
   @TableField("retry_count")
   private Integer retryCount;
 
+  @TableField("claim_owner")
+  private String claimOwner;
+
+  @TableField("claim_until")
+  private LocalDateTime claimUntil;
+
   @TableField("created_at")
   private LocalDateTime createdAt;
 }
