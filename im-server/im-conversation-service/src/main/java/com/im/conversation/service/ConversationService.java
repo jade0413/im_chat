@@ -93,7 +93,7 @@ public class ConversationService {
       return new ConversationListResult(List.of(), false, currentVersion);
     }
     List<UserConvEventEntity> events = userConvEventMapper.selectAfterVersion(
-        userId, afterVersion, effectiveLimit + 1);
+        tenantId, userId, afterVersion, effectiveLimit + 1);
     if (events.size() > effectiveLimit) {
       return new ConversationListResult(listActiveMemberConvs(userId, effectiveLimit),
           true, currentVersion);

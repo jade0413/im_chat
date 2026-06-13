@@ -13,12 +13,14 @@ public interface ConversationUserConvEventMapper extends BaseMapper<UserConvEven
   @Select("""
       SELECT *
       FROM user_conv_event
-      WHERE user_id = #{userId}
+      WHERE tenant_id = #{tenantId}
+        AND user_id = #{userId}
         AND event_version > #{afterVersion}
       ORDER BY event_version ASC
       LIMIT #{limit}
       """)
-  List<UserConvEventEntity> selectAfterVersion(@Param("userId") long userId,
+  List<UserConvEventEntity> selectAfterVersion(@Param("tenantId") long tenantId,
+      @Param("userId") long userId,
       @Param("afterVersion") long afterVersion,
       @Param("limit") int limit);
 }

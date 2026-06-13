@@ -208,7 +208,7 @@ class ConversationServiceTest {
     ConversationEntity existing = conversation(501L, "100_200");
     existing.setMaxSeq(3L);
     when(userConvVersionMapper.selectVersion(1L, 100L)).thenReturn(9L);
-    when(userConvEventMapper.selectAfterVersion(100L, 7L, 101))
+    when(userConvEventMapper.selectAfterVersion(1L, 100L, 7L, 101))
         .thenReturn(List.of(event(501L, 8L, "created")));
     when(memberMapper.selectOne(anyWrapper())).thenReturn(member(501L, 100L));
     when(conversationMapper.selectById(501L)).thenReturn(existing);
@@ -228,7 +228,7 @@ class ConversationServiceTest {
     ConversationEntity existing = conversation(501L, "100_200");
     existing.setMaxSeq(3L);
     when(userConvVersionMapper.selectVersion(1L, 100L)).thenReturn(9L);
-    when(userConvEventMapper.selectAfterVersion(100L, 7L, 101))
+    when(userConvEventMapper.selectAfterVersion(1L, 100L, 7L, 101))
         .thenReturn(List.of(event(501L, 8L, "removed")));
     when(conversationMapper.selectById(501L)).thenReturn(existing);
 
