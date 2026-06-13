@@ -8,7 +8,8 @@ public record PushProperties(
     Duration routeTtl,
     Duration eventDedupTtl,
     String gatewayQueuePrefix,
-    String msgSavedQueue
+    String msgSavedQueue,
+    String msgRevokedQueue
 ) {
 
   public PushProperties {
@@ -16,6 +17,7 @@ public record PushProperties(
     eventDedupTtl = normalize(eventDedupTtl, Duration.ofHours(24));
     gatewayQueuePrefix = textOrDefault(gatewayQueuePrefix, "push.gw.");
     msgSavedQueue = textOrDefault(msgSavedQueue, "im.push.msg.saved");
+    msgRevokedQueue = textOrDefault(msgRevokedQueue, "im.push.msg.revoked");
   }
 
   private static Duration normalize(Duration value, Duration fallback) {

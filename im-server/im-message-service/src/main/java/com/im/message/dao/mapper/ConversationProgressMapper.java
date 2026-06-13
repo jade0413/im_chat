@@ -41,4 +41,14 @@ public interface ConversationProgressMapper {
       @Param("seq") long seq,
       @Param("lastMsgAbstract") String lastMsgAbstract,
       @Param("lastMsgTime") LocalDateTime lastMsgTime);
+
+  @Update("""
+      UPDATE conversation
+      SET last_msg_abstract = #{lastMsgAbstract}
+      WHERE id = #{conversationId}
+        AND max_seq = #{seq}
+      """)
+  int updateLastMessageAbstractIfLatest(@Param("conversationId") long conversationId,
+      @Param("seq") long seq,
+      @Param("lastMsgAbstract") String lastMsgAbstract);
 }

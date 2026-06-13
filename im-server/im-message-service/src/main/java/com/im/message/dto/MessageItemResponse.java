@@ -8,5 +8,7 @@ public record MessageItemResponse(
     long senderId,
     long sendTime,
     int msgType,
+    int status,
+    int revokeReason,
     String text) {
 }

@@ -20,9 +20,21 @@ public class PushRabbitConfig {
   }
 
   @Bean
+  public Queue pushMsgRevokedQueue(PushProperties properties) {
+    return new Queue(properties.msgRevokedQueue(), true);
+  }
+
+  @Bean
   public Binding pushMsgSavedBinding(Queue pushMsgSavedQueue, TopicExchange imEventsExchange) {
     return BindingBuilder.bind(pushMsgSavedQueue)
         .to(imEventsExchange)
         .with("msg.saved.*");
+  }
+
+  @Bean
+  public Binding pushMsgRevokedBinding(Queue pushMsgRevokedQueue, TopicExchange imEventsExchange) {
+    return BindingBuilder.bind(pushMsgRevokedQueue)
+        .to(imEventsExchange)
+        .with("msg.revoked.*");
   }
 }

@@ -958,7 +958,7 @@
 
 ### T17 — 撤回最小闭环
 
-状态：PENDING
+状态：DONE
 
 目标：
 
@@ -967,14 +967,20 @@
 涉及模块：
 
 - `im-server/im-message-service`
+- `im-server/im-push-service`
 - `im-server/im-common`
+- `im-proto`
 - `im-server/im-proto-java`
 
 需要修改的文件：
 
 - `im-server/im-message-service/src/main/java/com/im/message/grpcapi/MessageGrpcService.java`
 - `im-server/im-message-service/src/main/java/com/im/message/service/**`
+- `im-server/im-message-service/src/main/java/com/im/message/rest/MessageHistoryController.java`
+- `im-server/im-push-service/src/main/java/com/im/push/**`
+- `im-proto/proto/events/events.proto`
 - `im-server/im-message-service/src/test/java/com/im/message/**`
+- `im-server/im-push-service/src/test/java/com/im/push/**`
 
 验收标准：
 
@@ -985,7 +991,18 @@
 
 测试方式：
 
-- `mvn -q -pl im-message-service -am test`
+- `mvn -q -pl im-message-service,im-push-service -am test`
+
+完成记录：
+
+- 已实现 `MessageRevokeService`：按 `(tenant_id, conv_id, seq)` 定位消息，`BY_SENDER` 校验发送者本人、成员身份和 2 分钟撤回窗口，`BY_ADMIN/BY_MODERATION` 作为内部可信原因直接撤回。
+- 撤回在同一事务内更新 `message.status=REVOKED`、`message.revoke_reason`，并写入 `msg.revoked.{tenant_id}` outbox；重复撤回幂等返回，不重复写 outbox。
+- 撤回最新消息时会条件更新 `conversation.last_msg_abstract=message revoked`，避免会话列表继续展示原文摘要。
+- `MsgRevokedEvent` 兼容新增 `server_msg_id` 字段，push 模块新增 `msg.revoked.*` 队列绑定和消费者，下发 `REVOKE_NOTIFY`。
+- SYNC、RPC pull 和 REST history 复用 `MessageAssembler` 返回 revoked 状态；已撤回消息不再返回原始 content，状态通过 `MsgPush.ext.status/revoke_reason` 和 REST DTO 字段暴露。
+- 新增 REST `POST /api/v1/convs/{convId}/messages/{seq}/revoke`，用户侧按 `BY_SENDER` 撤回。
+- 已执行 `mvn -q -pl im-message-service,im-push-service -am test`，通过。
+- 已执行 `mvn -q -pl im-bootstrap -am test`，通过；本机无 Docker socket，Testcontainers 用例按既有配置跳过。
 
 ---
 

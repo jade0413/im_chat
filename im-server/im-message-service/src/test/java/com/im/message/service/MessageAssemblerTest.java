@@ -11,6 +11,7 @@ import com.im.proto.body.MsgPush;
 import com.im.proto.body.MsgSend;
 import com.im.proto.common.ConvType;
 import com.im.proto.common.MsgContent;
+import com.im.proto.common.RevokeReason;
 import com.im.proto.common.TextContent;
 import com.im.proto.events.MsgSavedEvent;
 import com.im.proto.rpc.ConnCtx;
@@ -51,6 +52,7 @@ class MessageAssemblerTest {
     assertThat(push.getSeq()).isEqualTo(7L);
     assertThat(push.getSender().getUserId()).isEqualTo(100L);
     assertThat(push.getContent().getText().getText()).isEqualTo("hello");
+    assertThat(push.getExtOrThrow("status")).isEqualTo("1");
 
     OutboxEntity outbox = assembler.msgSavedOutbox(1L, push);
     assertThat(outbox.getEventType()).isEqualTo("msg.saved");
@@ -68,6 +70,23 @@ class MessageAssemblerTest {
 
     assertThat(assembler.abstractText(text)).hasSize(255);
     assertThat(assembler.abstractText("  hello   world  ")).isEqualTo("hello world");
+  }
+
+  @Test
+  void revokedStoredMessageHidesContentAndCarriesStatus() {
+    MessageAssembler assembler = new MessageAssembler(
+        idGenerator,
+        Clock.fixed(Instant.parse("2026-06-13T00:00:00Z"), ZoneOffset.UTC));
+    MessageEntity message = assembler.newTextMessage(ctx(), msgSend("client-1", "secret"),
+        conv(), 7L);
+    message.setStatus(MessageAssembler.STATUS_REVOKED);
+    message.setRevokeReason(RevokeReason.BY_SENDER.getNumber());
+
+    MsgPush push = assembler.toPush(message);
+
+    assertThat(push.hasContent()).isFalse();
+    assertThat(push.getExtOrThrow("status")).isEqualTo("2");
+    assertThat(push.getExtOrThrow("revoke_reason")).isEqualTo("1");
   }
 
   private ConnCtx ctx() {

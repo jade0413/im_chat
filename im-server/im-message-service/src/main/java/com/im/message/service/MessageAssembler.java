@@ -8,6 +8,7 @@ import com.im.proto.body.MsgPush;
 import com.im.proto.body.MsgSend;
 import com.im.proto.body.Sender;
 import com.im.proto.common.MsgContent;
+import com.im.proto.common.MsgStatus;
 import com.im.proto.rpc.ConnCtx;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.im.common.error.ErrorCode;
@@ -24,8 +25,12 @@ public class MessageAssembler {
   public static final int MSG_TYPE_TEXT = 1;
   public static final int MSG_TYPE_NOTIFICATION = 10;
   public static final int STATUS_NORMAL = 1;
+  public static final int STATUS_REVOKED = 2;
   public static final int OUTBOX_PENDING = 0;
   public static final String EVENT_MSG_SAVED = MsgSavedEventFactory.EVENT_TYPE;
+
+  private static final String EXT_STATUS = "status";
+  private static final String EXT_REVOKE_REASON = "revoke_reason";
 
   private static final int ABSTRACT_LIMIT = 255;
 
@@ -71,6 +76,7 @@ public class MessageAssembler {
         .setSendTime(toEpochMillis(message.getCreatedAt()))
         .setContent(request.getContent())
         .putAllExt(request.getExtMap())
+        .putExt(EXT_STATUS, Integer.toString(STATUS_NORMAL))
         .build();
   }
 
@@ -79,7 +85,7 @@ public class MessageAssembler {
   }
 
   public MsgPush toPush(MessageEntity message, com.im.proto.common.ConvType convType) {
-    return MsgPush.newBuilder()
+    MsgPush.Builder builder = MsgPush.newBuilder()
         .setConvId(message.getConversationId())
         .setConvType(convType == null ? com.im.proto.common.ConvType.CONV_TYPE_UNSPECIFIED : convType)
         .setSeq(message.getSeq())
@@ -87,8 +93,12 @@ public class MessageAssembler {
         .setClientMsgId(nullToBlank(message.getClientMsgId()))
         .setSender(Sender.newBuilder().setUserId(message.getSenderId()).build())
         .setSendTime(toEpochMillis(message.getCreatedAt()))
-        .setContent(parseContent(message.getContent()))
-        .build();
+        .putExt(EXT_STATUS, Integer.toString(status(message)));
+    if (isRevoked(message)) {
+      builder.putExt(EXT_REVOKE_REASON, Integer.toString(revokeReason(message)));
+      return builder.build();
+    }
+    return builder.setContent(parseContent(message.getContent())).build();
   }
 
   public OutboxEntity msgSavedOutbox(long tenantId, MsgPush push) {
@@ -134,6 +144,22 @@ public class MessageAssembler {
     } catch (InvalidProtocolBufferException ex) {
       throw new ImException(ErrorCode.INTERNAL_ERROR, "stored message content is invalid", ex);
     }
+  }
+
+  private boolean isRevoked(MessageEntity message) {
+    return status(message) == STATUS_REVOKED;
+  }
+
+  private int status(MessageEntity message) {
+    Integer status = message.getStatus();
+    if (status == null || status == MsgStatus.MSG_STATUS_UNSPECIFIED.getNumber()) {
+      return STATUS_NORMAL;
+    }
+    return status;
+  }
+
+  private int revokeReason(MessageEntity message) {
+    return message.getRevokeReason() == null ? 0 : message.getRevokeReason();
   }
 
   private String nullToBlank(String value) {
