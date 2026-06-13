@@ -1392,6 +1392,11 @@
 - 网关 `/ws` 已在 upgrade 前加入实例级 token bucket 握手限流和 Origin 白名单校验；无 Origin 的原生客户端连接允许通过。
 - 已执行 `mvn -q -pl im-bootstrap -am test`、`cargo fmt --check`、`cargo test`、`cargo clippy --all-targets -- -D warnings`，均通过。
 - 当前环境没有 Docker CLI，无法执行 `docker compose --profile app config`；已用 Ruby YAML 解析兜底校验 app build context 和 dockerfile 字段。
+- 端到端冒烟补测（2026-06-13）：已将冒烟流程固化为“两个客户端注册/登录 → A 发 B → B 从 `local_max_seq=0` 同步 seq=1 → B 回复同会话 seq=2 → 关闭 gRPC channel 模拟断线 → A 重新 `VerifyToken` → A 从 `local_max_seq=1` 增量同步且只收到 seq=2”。
+- Docker/Testcontainers 版本命令：`mvn -q -pl im-bootstrap -am -Dtest=com.im.bootstrap.e2e.ImServerMvpE2eTest -Dsurefire.failIfNoSpecifiedTests=false test`；本机无 `docker` CLI 和 `/var/run/docker.sock`，该版本被 Testcontainers 跳过，Surefire 显示 `Tests run: 1, Failures: 0, Errors: 0, Skipped: 1`。
+- 外部中间件版本已实跑通过：本地 MySQL `127.0.0.1:3306`（临时库 `im_smoke_*`，测试后删除）、本地 Redis `127.0.0.1:6379`；RabbitMQ 配置指向 `103.45.65.84:5672`，但本冒烟保持 `im.outbox.enabled=false`，不验证 MQ 投递。
+- 外部冒烟执行命令：`mvn -q -pl im-bootstrap -am -Dtest=com.im.bootstrap.e2e.ImServerMvpExternalSmokeTest -Dsurefire.failIfNoSpecifiedTests=false -Dim.e2e.external=true -Dim.e2e.mysql.username=root -Dim.e2e.mysql.password=****** -Dim.e2e.redis.host=127.0.0.1 -Dim.e2e.redis.port=6379 -Dim.e2e.rabbitmq.host=103.45.65.84 -Dim.e2e.rabbitmq.port=5672 test`。
+- 外部冒烟结果：Surefire 显示 `Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`，用例 `mvpFlowThroughRestGatewayAuthUplinkSyncAndHistory` 通过；补充执行 `mvn -q -pl im-bootstrap -am test` 也通过。
 
 ---
 
