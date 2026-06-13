@@ -74,7 +74,7 @@ class MessageRevokeServiceTest {
     verify(outboxWriter).write(org.mockito.Mockito.eq(1L), org.mockito.Mockito.eq("msg.revoked"),
         org.mockito.Mockito.eq("msg.revoked.1"), payloadCaptor.capture());
     verify(conversationProgressMapper).updateLastMessageAbstractIfLatest(
-        501L, 3L, "message revoked");
+        1L, 501L, 3L, "message revoked");
     MsgRevokedEvent event = MsgRevokedEvent.parseFrom(payloadCaptor.getValue());
     assertThat(event.getTenantId()).isEqualTo(1L);
     assertThat(event.getConvId()).isEqualTo(501L);

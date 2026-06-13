@@ -45,10 +45,12 @@ public interface ConversationProgressMapper {
   @Update("""
       UPDATE conversation
       SET last_msg_abstract = #{lastMsgAbstract}
-      WHERE id = #{conversationId}
+      WHERE tenant_id = #{tenantId}
+        AND id = #{conversationId}
         AND max_seq = #{seq}
       """)
-  int updateLastMessageAbstractIfLatest(@Param("conversationId") long conversationId,
+  int updateLastMessageAbstractIfLatest(@Param("tenantId") long tenantId,
+      @Param("conversationId") long conversationId,
       @Param("seq") long seq,
       @Param("lastMsgAbstract") String lastMsgAbstract);
 }
