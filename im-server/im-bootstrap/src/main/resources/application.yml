@@ -26,6 +26,10 @@ spring:
     listener:
       simple:
         auto-startup: ${IM_RABBITMQ_LISTENER_AUTO_STARTUP:true}
+  flyway:
+    baseline-on-migrate: true
+    baseline-version: 1
+    baseline-description: initial schema
 
 management:
   endpoints:

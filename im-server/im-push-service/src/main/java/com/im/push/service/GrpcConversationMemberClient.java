@@ -5,6 +5,7 @@ import com.im.common.tenant.TenantContext;
 import com.im.common.trace.TraceContext;
 import com.im.proto.rpc.ConversationRpcGrpc;
 import com.im.proto.rpc.GetMembersReq;
+import com.im.proto.rpc.GetMembersResp;
 import io.grpc.Metadata;
 import io.grpc.stub.MetadataUtils;
 import java.util.List;
@@ -24,12 +25,22 @@ public class GrpcConversationMemberClient implements ConversationMemberClient {
 
   @Override
   public List<Long> getMemberUserIds(long conversationId) {
-    return conversationStub.withInterceptors(MetadataUtils.newAttachHeadersInterceptor(metadata()))
+    return getMembersResult(conversationId).userIds();
+  }
+
+  @Override
+  public ConvMembersResult getMembersResult(long conversationId) {
+    GetMembersResp resp = conversationStub
+        .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(metadata()))
         .getMembers(GetMembersReq.newBuilder()
             .setConvId(conversationId)
             .setOnlineHint(true)
-            .build())
-        .getUserIdsList();
+            .build());
+    return new ConvMembersResult(
+        resp.getUserIdsList(),
+        resp.getConvType(),
+        resp.getCsStatus(),
+        resp.getAgentId());
   }
 
   private Metadata metadata() {

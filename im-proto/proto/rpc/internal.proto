@@ -13,8 +13,14 @@ import "body/messages.proto";
 
 // ---- user 模块 ----
 service UserRpc {
-  rpc GetUsers (GetUsersReq) returns (GetUsersResp);                 // 批量取昵称/头像/蓝V（推送组装 Sender 用）
-  rpc CheckRelation (CheckRelationReq) returns (CheckRelationResp);  // 黑名单/好友开关校验（D17）
+  rpc GetUsers (GetUsersReq) returns (GetUsersResp);                         // 批量取昵称/头像/蓝V（推送组装 Sender 用）
+  rpc CheckRelation (CheckRelationReq) returns (CheckRelationResp);          // 黑名单/好友开关校验（D17）
+  rpc ProvisionVisitorUser (ProvisionVisitorUserReq) returns (ProvisionVisitorUserResp); // 创建或返回已有访客用户（T31）
+  rpc IssueVisitorToken (IssueVisitorTokenReq) returns (IssueVisitorTokenResp);          // 为访客签发 JWT（T31）
+  rpc CheckIsAgent (CheckIsAgentReq) returns (CheckIsAgentResp);             // 校验 user.is_agent=1（T35）
+  rpc UpdateAgentStatus (UpdateAgentStatusReq) returns (UpdateAgentStatusResp); // 坐席切换在线状态（D35/T35）
+  rpc CheckAgentAvailability (CheckAgentAvailabilityReq) returns (CheckAgentAvailabilityResp); // 租户是否有坐席在线（Widget 用）
+  rpc GetOnlineAgentIds (GetOnlineAgentIdsReq) returns (GetOnlineAgentIdsResp); // 取租户所有在线坐席 user_id（CS open 推送用，D33）
 }
 message GetUsersReq  { repeated int64 user_ids = 1; }
 message GetUsersResp { repeated im.body.v1.Sender users = 1; }
@@ -23,6 +29,42 @@ message CheckRelationResp {
   bool blocked = 1;          // to 拉黑了 from
   bool friend_required_unmet = 2;
 }
+// 访客用户签发（T31）
+message ProvisionVisitorUserReq {
+  int64  tenant_id    = 1;
+  string display_name = 2;   // "访客XXXX" 格式，调用方生成
+}
+message ProvisionVisitorUserResp {
+  int64  user_id      = 1;
+  string display_name = 2;
+}
+message IssueVisitorTokenReq {
+  int64 tenant_id = 1;
+  int64 user_id   = 2;
+}
+message IssueVisitorTokenResp {
+  string access_token  = 1;
+  string refresh_token = 2;
+  int64  expires_in    = 3;  // access token 有效期秒数
+}
+// 坐席身份校验（T35）
+message CheckIsAgentReq  { int64 user_id = 1; }
+message CheckIsAgentResp { bool is_agent = 1; }
+// 坐席在线状态切换（D35）
+message UpdateAgentStatusReq {
+  int64 user_id      = 1;
+  int32 agent_status = 2;  // 0=offline 1=online 2=busy
+}
+message UpdateAgentStatusResp { int32 code = 1; }
+// Widget 可用性查询：租户是否有坐席在线（T36）
+message CheckAgentAvailabilityReq { int64 tenant_id = 1; }
+message CheckAgentAvailabilityResp {
+  bool  available          = 1;  // true=有坐席 online 或 busy
+  int32 online_agent_count = 2;  // 在线坐席数（展示用，非精确值）
+}
+// 获取租户所有 online/busy 坐席的 user_id（D33: open CS 推送扇出用）
+message GetOnlineAgentIdsReq { int64 tenant_id = 1; }
+message GetOnlineAgentIdsResp { repeated int64 agent_ids = 1; }
 
 // ---- message 模块 ----
 service MessageRpc {
@@ -43,6 +85,11 @@ service ConversationRpc {
   rpc GetMembers (GetMembersReq) returns (GetMembersResp);     // 推送扇出取成员
   rpc GetMemberConv (GetMemberConvReq) returns (GetMemberConvResp); // 拉取当前用户视角的单会话信息
   rpc ListMemberConvs (ListMemberConvsReq) returns (ListMemberConvsResp); // 新设备 SYNC 空列表时拉取用户会话水位
+  rpc FindOrCreateCsConv (FindOrCreateCsConvReq) returns (FindOrCreateCsConvResp); // 访客进入 widget 时取/建 CS 会话（T31）
+  rpc ClaimCsConv (ClaimCsConvReq) returns (ClaimCsConvResp);       // 坐席认领 open 会话 → assigned（D31）
+  rpc ResolveCsConv (ResolveCsConvReq) returns (ResolveCsConvResp); // 坐席结单 assigned → resolved（D31）
+  rpc ListAgentCsConvs (ListAgentCsConvsReq) returns (ListAgentCsConvsResp); // 坐席工作台：open + 本人 assigned
+  rpc GetCsConv (GetCsConvReq) returns (GetCsConvResp);             // 取单个 CS 会话元数据（坐席用）
 }
 message ResolveConvReq {
   oneof target { int64 to_user_id = 1; int64 group_id = 2; int64 conv_id = 3; }
@@ -50,7 +97,13 @@ message ResolveConvReq {
 }
 message ResolveConvResp { int32 code = 1; im.body.v1.ConvInfo conv = 2; }
 message GetMembersReq  { int64 conv_id = 1; bool online_hint = 2; }
-message GetMembersResp { repeated int64 user_ids = 1; }
+message GetMembersResp {
+  repeated int64 user_ids = 1;
+  // D33: CS 推送路由所需字段，非 CS 会话时为默认零值
+  int32 conv_type = 2;  // 1=C2C 2=GROUP 3=CS_SESSION
+  int32 cs_status = 3;  // 1=open 2=assigned 3=resolved（仅 CS_SESSION 有效）
+  int64 agent_id  = 4;  // assigned 坐席 user_id，0 表示未分配（仅 CS_SESSION 有效）
+}
 message GetMemberConvReq { int64 user_id = 1; int64 conv_id = 2; }
 message GetMemberConvResp { int32 code = 1; im.body.v1.ConvInfo conv = 2; }
 message ListMemberConvsReq { int64 user_id = 1; int32 limit = 2; int64 conv_list_version = 3; }
@@ -58,6 +111,61 @@ message ListMemberConvsResp {
   repeated im.body.v1.ConvInfo convs = 1;
   bool has_more = 2;
   int64 conv_list_version = 3;
+}
+// CS 会话查找/创建（T31）
+message FindOrCreateCsConvReq {
+  int64 tenant_id       = 1;
+  int64 visitor_user_id = 2;
+}
+message FindOrCreateCsConvResp {
+  int32 code      = 1;
+  int64 conv_id   = 2;
+  bool  is_new    = 3;    // true=新建，false=续旧 open/assigned 会话
+  int32 cs_status = 4;    // 当前 cs_status（1=open 2=assigned）
+}
+// CS 坐席认领（D31: open → assigned）
+message ClaimCsConvReq {
+  int64 conv_id  = 1;
+  int64 agent_id = 2;
+}
+message ClaimCsConvResp {
+  int32 code = 1;  // 0=OK, CONFLICT(409) 已被其他坐席认领
+}
+// CS 坐席结单（D31: assigned → resolved）
+message ResolveCsConvReq {
+  int64 conv_id  = 1;
+  int64 agent_id = 2;  // 必须与当前 agent_id 匹配，防止越权
+}
+message ResolveCsConvResp {
+  int32 code = 1;
+}
+// 坐席工作台会话列表（D33: open 全推 + assigned 只推绑定坐席）
+message ListAgentCsConvsReq {
+  int64 agent_id = 1;
+  int32 limit    = 2;  // 默认 20
+  int32 offset   = 3;
+}
+message ListAgentCsConvsResp {
+  repeated CsConvItem convs = 1;
+  bool  has_more   = 2;
+}
+message CsConvItem {
+  int64  conv_id           = 1;
+  int32  cs_status         = 2;  // 1=open 2=assigned
+  int64  agent_id          = 3;  // 0 表示未分配
+  int64  visitor_user_id   = 4;
+  string visitor_name      = 5;  // display_name from visitor_profile
+  int64  last_msg_time_ms  = 6;  // last_msg_time 毫秒时间戳
+  string last_msg_abstract = 7;
+  int64  max_seq           = 8;
+}
+// 取单个 CS 会话信息（坐席查看访客详情）
+message GetCsConvReq {
+  int64 conv_id = 1;
+}
+message GetCsConvResp {
+  int32      code = 1;
+  CsConvItem conv = 2;
 }
 
 // ---- push 模块 ----

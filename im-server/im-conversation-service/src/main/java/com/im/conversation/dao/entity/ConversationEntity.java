@@ -40,6 +40,10 @@ public class ConversationEntity {
   @TableField("cs_status")
   private Integer csStatus;
 
+  /** 当前绑定的坐席 user_id（V6 migration 新增列，D34）。null 表示未分配。 */
+  @TableField("agent_id")
+  private Long agentId;
+
   @TableField("created_at")
   private LocalDateTime createdAt;
 }

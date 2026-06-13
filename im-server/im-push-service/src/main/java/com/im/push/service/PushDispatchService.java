@@ -164,18 +164,16 @@ public class PushDispatchService {
   }
 
   private String kickMessage(int reason) {
-    if (reason == KickNotify.Reason.NEW_DEVICE_LOGIN_VALUE) {
-      return "new device login";
+    KickNotify.Reason r = KickNotify.Reason.forNumber(reason);
+    if (r == null) {
+      return "kicked";
     }
-    if (reason == KickNotify.Reason.ADMIN_OFFLINE_VALUE) {
-      return "admin offline";
-    }
-    if (reason == KickNotify.Reason.TOKEN_EXPIRED_VALUE) {
-      return "token expired";
-    }
-    if (reason == KickNotify.Reason.PROTO_TOO_OLD_VALUE) {
-      return "protocol too old";
-    }
-    return "kicked";
+    return switch (r) {
+      case NEW_DEVICE_LOGIN -> "new device login";
+      case ADMIN_OFFLINE -> "admin offline";
+      case TOKEN_EXPIRED -> "token expired";
+      case PROTO_TOO_OLD -> "protocol too old";
+      default -> "kicked";
+    };
   }
 }

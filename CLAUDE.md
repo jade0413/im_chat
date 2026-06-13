@@ -45,10 +45,20 @@
 | D26 | 2026-06-13 | seq 方案采纳 **MySQL conversation 行锁自增**：`UPDATE conversation SET max_seq=max_seq+1` 与 message/conversation/outbox 同事务；Redis seq 降级为高吞吐预留路径 | PR-1 审查 S7 补流程：实现偏离文档但技术方向更稳，同事务无空洞、回滚一致、少一个 Redis 故障依赖；流程教训记录在案：后续偏离文档必须先提 Open Question |
 | D27 | 2026-06-13 | `token_ver` 精确语义：REST 登录/注册按平台类递增 `token_ver` 并写入 JWT；`GatewayAuth.VerifyToken` 校验 token 内版本等于 Redis 当前版本；`ConnEvent.OnConnected` 只负责 KICK 旧连接并替换路由 | 避免 OnConnected 递增版本后把新连接 token 一并失效；仍满足同类互踢时旧 token 立即失效 |
 | D28 | 2026-06-13 | `need_ack` 下行确认使用 `Frame.req_id`：网关为每个目标连接分配非 0 `req_id`，客户端 `MSG_RECV_ACK` 回带同 `req_id`；业务 ack body 仍原样转发 Java | 网关不编译业务 body proto，仍能精确跟踪下行送达；10s 未 ack 主动断连并走 SYNC 补齐，不做服务端重推 |
+| D29 | 2026-06-13 | 访客身份 = **`user.user_type=visitor` 的特殊用户**：visitor_profile 表存 localStorage visitor_token → user_id 映射；续旧规则：只续 open/assigned，resolved 建新会话 | D6 已预留 visitor 枚举值；访客持 JWT（与普通用户相同的网关校验流程），消息 sender_id 不变，不引入新的身份体系 |
+| D30 | 2026-06-13 | 新增模块 **`im-cs-service`** 承载客服领域逻辑（访客接入、坐席 inbox、会话状态机、CS 推送路由） | CS 有独立生命周期状态机和访客管理，与 im-conversation-service 职责分离；模块隔离铁律仍适用，跨模块走 gRPC |
+| D31 | 2026-06-13 | CS 会话状态机 **open(0) → assigned(1) → resolved(2)**；坐席用 `conversation.agent_id` 记录，只允许正向流转；resolved 后访客重新发消息开新会话 | D23 已定此三态；resolved 不续是最简且无歧义的 MVP 策略 |
+| D32 | 2026-06-13 | 访客显示名 = **"访客" + 4 位随机大写字母数字**（如"访客A3K9"），生成后不可修改 | 访客不需要填昵称，降低进入门槛；随机后缀在坐席侧可区分多个访客 |
+| D33 | 2026-06-13 | CS 消息推送路由：**open 状态推所有在线坐席**，**assigned 状态只推绑定 agent_id**；铃声区分由前端按 `conv_type=CS` 处理，不影响推送链路 | open 会话需要让所有坐席知晓有待接待任务；assigned 后缩小推送范围避免打扰其他坐席 |
+| D34 | 2026-06-13 | 坐席标识 = `user.is_agent TINYINT(1) DEFAULT 0`，与 `user_type=member` 正交（坐席仍是普通用户，额外开启坐席权限） | 同一账号可同时是 IM 用户和坐席，Flutter App 按 is_agent 决定是否显示"客服"tab，无需双账号 |
+| D35 | 2026-06-13 | 坐席在线状态 = **`user.agent_status` DB 列**（0=offline/1=online/2=busy），坐席手动切换；推送路由只推 online/busy 坐席；widget 通过公开接口查询租户是否有坐席在线 | MVP 用 DB 列足够，避免引入实时 presence 复杂度；自动 offline（WS 断连联动）列为二阶段 |
+| D36 | 2026-06-13 | **离线留言 = 消息链路不变**，访客无论坐席是否在线均可发消息正常存库；坐席上线后查 open 未认领会话并 App 内通知；MVP 不做实时邮件通知 | 最简且可靠：不引入新消息类型，不依赖邮件服务；坐席上线主动拉取比服务端主动推更稳定 |
+| D37 | 2026-06-13 | Widget 配置存 `widget_config` 表（颜色/欢迎语/位置/powered_by 徽标）；企业获得一段 JS snippet 嵌入网站；`powered_by=1` 默认开启作为免费版病毒传播机制 | JS snippet 是 B 端 SaaS 标配嵌入方式；徽标是 Crisp/Intercom 早期核心增长手段 |
 
 ## 设计文档索引
 
 - docs/architecture.md（总体架构）/ docs/protocol.md（协议）/ docs/im-server-design.md（Java 侧模块设计，2026-06-13 待 Jade 评审）
+- docs/cs-service-design.md（客服会话设计，2026-06-13 确定，待实现）
 - Java 根包名 `com.im`；模块依赖铁律：业务模块互相禁止依赖，跨模块走 in-process gRPC（enforcer 固化）
 
 ## 技术栈
@@ -79,7 +89,7 @@
 ## 待讨论（Open Questions）
 
 - [ ] 产品形态终局：自营主 App + SaaS 客服（当前默认）vs 白标租户独立 App——Jade 想清楚后定，白标涉及推送证书/分发/品牌配置中心
-- [ ] 客服会话 resolved 后访客重开：新会话 vs 续旧会话（租户配置）——二阶段
+- [x] 客服会话 resolved 后访客重开：**已定——新建会话**（D31，MVP 基础款，二阶段可改为租户配置）
 
 - [ ] 协议演进候选 E1~E6（对比 OpenIM/Tinode/Matrix 得出，见 docs/protocol.md §7）：E1 conv_list_version 语义补全（群聊后立即）、E2 typing/presence（客服前）、E3 引用回复、E4 reactions、E5 压缩缓、E6 编辑不排期
 - [ ] 推送第三方通道选型（APNs/FCM/厂商通道）放第二阶段

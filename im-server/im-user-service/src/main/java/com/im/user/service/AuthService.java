@@ -13,6 +13,7 @@ import com.im.user.dto.LoginRequest;
 import com.im.user.dto.RegisterRequest;
 import com.im.user.dto.TokenResponse;
 import com.im.user.dto.UserProfileResponse;
+import com.im.user.dto.UserPublicProfileResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -94,6 +95,30 @@ public class AuthService {
     }
     ensureTokenVersionCurrent(claims);
     return toProfile(loadCurrentUser(claims.userId()));
+  }
+
+  /**
+   * 在 token 已由 JwtAuthInterceptor 验证后，按 userId 直接加载资料。
+   * 不再重新验证 token。
+   */
+  public UserProfileResponse getProfile(long userId) {
+    return toProfile(loadCurrentUser(userId));
+  }
+
+  /**
+   * 查询其他用户的公开资料（不含账号字段）。
+   */
+  public UserPublicProfileResponse getPublicProfile(long userId) {
+    UserEntity user = userMapper.selectById(userId);
+    if (user == null) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "user not found");
+    }
+    return new UserPublicProfileResponse(
+        user.getId(),
+        user.getNickname(),
+        user.getAvatar(),
+        user.getUserType(),
+        user.getVerifiedType());
   }
 
   private UserEntity findByAccount(String account) {

@@ -28,6 +28,9 @@ public record FileProperties(
       "audio/opus",
       "audio/wav",
       "audio/mp4",
+      "video/mp4",
+      "video/webm",
+      "video/quicktime",
       "application/pdf",
       "application/zip",
       "application/octet-stream",
@@ -50,7 +53,7 @@ public record FileProperties(
           .collect(Collectors.toUnmodifiableSet());
     }
     if (sizeLimit == null) {
-      sizeLimit = new SizeLimit(null, null, null);
+      sizeLimit = new SizeLimit(null, null, null, null);
     }
   }
 
@@ -62,6 +65,9 @@ public record FileProperties(
     if (normalized.startsWith("audio/")) {
       return sizeLimit.voiceBytes();
     }
+    if (normalized.startsWith("video/")) {
+      return sizeLimit.videoBytes();
+    }
     return sizeLimit.fileBytes();
   }
 
@@ -69,7 +75,7 @@ public record FileProperties(
     return allowedMimes.contains(normalizeMime(mime));
   }
 
-  public record SizeLimit(Long imageBytes, Long voiceBytes, Long fileBytes) {
+  public record SizeLimit(Long imageBytes, Long voiceBytes, Long videoBytes, Long fileBytes) {
 
     public SizeLimit {
       if (imageBytes == null) {
@@ -77,6 +83,9 @@ public record FileProperties(
       }
       if (voiceBytes == null) {
         voiceBytes = 20L * 1024 * 1024;
+      }
+      if (videoBytes == null) {
+        videoBytes = 200L * 1024 * 1024;
       }
       if (fileBytes == null) {
         fileBytes = 50L * 1024 * 1024;

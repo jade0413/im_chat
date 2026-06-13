@@ -101,7 +101,7 @@ public class MessageSendService {
           throw new ImException(ErrorCode.VALIDATION_FAILED, "text message is empty");
         }
       }
-      case IMAGE, VOICE, FILE -> {
+      case IMAGE, VOICE, FILE, CUSTOM -> {
       }
       default -> throw new ImException(ErrorCode.VALIDATION_FAILED, "message content type is unsupported");
     }

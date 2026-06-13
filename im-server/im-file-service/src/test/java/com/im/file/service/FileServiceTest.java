@@ -63,7 +63,7 @@ class FileServiceTest {
         "im-media",
         Duration.ofMinutes(5),
         Set.of("image/png", "audio/aac", "application/pdf"),
-        new FileProperties.SizeLimit(1024L, 2048L, 4096L));
+        new FileProperties.SizeLimit(1024L, 2048L, 4096L, 8192L));
     service = new FileService(
         fileMetaMapper,
         storageClient,

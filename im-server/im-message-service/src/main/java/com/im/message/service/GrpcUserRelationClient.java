@@ -10,6 +10,7 @@ import com.im.proto.rpc.CheckRelationResp;
 import com.im.proto.rpc.UserRpcGrpc;
 import io.grpc.Metadata;
 import io.grpc.stub.MetadataUtils;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -17,7 +18,8 @@ public class GrpcUserRelationClient implements UserRelationClient {
 
   private final UserRpcGrpc.UserRpcBlockingStub userStub;
 
-  public GrpcUserRelationClient(UserRpcGrpc.UserRpcBlockingStub userStub) {
+  public GrpcUserRelationClient(
+      @Qualifier("userRpcBlockingStub") UserRpcGrpc.UserRpcBlockingStub userStub) {
     this.userStub = userStub;
   }
 

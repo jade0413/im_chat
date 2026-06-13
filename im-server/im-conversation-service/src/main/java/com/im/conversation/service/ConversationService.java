@@ -78,6 +78,33 @@ public class ConversationService {
         .toList();
   }
 
+  /**
+   * 返回会话成员列表以及 CS 推送路由所需元数据（D33）。
+   * 非 CS 会话的 csStatus/agentId 为 0。
+   */
+  public MembersResult getMembersResult(long conversationId) {
+    TenantContext.requiredTenantId();
+    if (conversationId <= 0) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "conv_id must be positive");
+    }
+    ConversationEntity conv = conversationMapper.selectById(conversationId);
+    int convType = conv != null && conv.getType() != null ? conv.getType() : 0;
+    int csStatus = (conv != null && conv.getCsStatus() != null) ? conv.getCsStatus() : 0;
+    long agentId  = (conv != null && conv.getAgentId() != null)  ? conv.getAgentId()  : 0L;
+
+    List<Long> userIds = memberMapper.selectList(Wrappers.lambdaQuery(ConversationMemberEntity.class)
+            .eq(ConversationMemberEntity::getConvId, conversationId)
+            .isNull(ConversationMemberEntity::getDeletedAt)
+            .orderByAsc(ConversationMemberEntity::getUserId))
+        .stream()
+        .map(ConversationMemberEntity::getUserId)
+        .toList();
+    return new MembersResult(userIds, convType, csStatus, agentId);
+  }
+
+  /** 会话成员列表及 CS 路由元数据（GetMembers gRPC 响应的 Java 侧）。 */
+  public record MembersResult(List<Long> userIds, int convType, int csStatus, long agentId) {}
+
   public ConversationListResult listMemberConvs(long userId, int limit, long afterVersion) {
     long tenantId = TenantContext.requiredTenantId();
     if (userId <= 0) {

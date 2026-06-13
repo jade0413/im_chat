@@ -1681,11 +1681,270 @@
 
 ---
 
+---
+
+### T30 — im-cs-service 模块骨架 + Flyway V6 + 访客身份
+
+状态：DONE（2026-06-13）
+
+目标：
+
+- 新增 `im-cs-service` Maven 模块，建立包结构。
+- 新增 `V6__cs.sql` Flyway 迁移：visitor_profile 表，conversation 新增 status/agent_id 列，user 表新增 is_agent 列。
+- 激活 `user.user_type=visitor`：创建访客用户时写入此枚举值，现有 user_type 校验需兼容。
+
+涉及模块：
+
+- `im-server/im-cs-service`（新增）
+- `im-server/im-bootstrap`
+- `im-server/im-common`
+
+需要修改的文件：
+
+- `im-server/im-cs-service/pom.xml`（新建）
+- `im-server/im-cs-service/src/main/java/com/im/cs/**`（包骨架）
+- `im-server/im-bootstrap/pom.xml`（加 im-cs-service 依赖）
+- `im-server/im-bootstrap/src/main/resources/db/migration/V6__cs.sql`（新建）
+- `im-server/pom.xml`（加 im-cs-service 模块声明）
+
+验收标准：
+
+- `mvn verify` 通过，enforcer 不报业务模块互依赖。
+- V6 迁移执行后：`visitor_profile` 表存在，`conversation` 表有 `status`/`agent_id` 列，`user` 表有 `is_agent` 列。
+- 新模块只依赖 `im-common` 和 `im-proto-java`。
+
+测试方式：
+
+- `mvn -q -pl im-cs-service -am test`
+- `mvn -q verify`
+
+---
+
+### T31 — 访客接入 API（widget/sessions）+ 访客 JWT 签发
+
+状态：DONE（2026-06-13）
+
+目标：
+
+- 实现 `POST /api/v1/cs/widget/sessions`：首次创建访客身份 + CS 会话，再次进入续旧或建新。
+- 访客 JWT 签发：由 `UserRpc` 新增 gRPC 方法 `IssueVisitorToken`，cs-service 调用后返回给前端。
+- 续旧逻辑：查 `status IN (0,1)` 的最近会话；全部 resolved 则建新。
+
+涉及模块：
+
+- `im-server/im-cs-service`
+- `im-server/im-user-service`
+- `im-server/im-proto-java`
+
+需要修改的文件：
+
+- `im-proto/proto/rpc/internal.proto`（新增 IssueVisitorToken RPC）
+- `im-server/im-user-service/src/main/java/com/im/user/grpcapi/UserRpcGrpcService.java`
+- `im-server/im-cs-service/src/main/java/com/im/cs/visitor/**`（VisitorService、visitor_profile mapper/entity）
+- `im-server/im-cs-service/src/main/java/com/im/cs/widget/WidgetSessionController.java`
+- `im-server/im-cs-service/src/test/java/com/im/cs/**`
+
+验收标准：
+
+- 首次请求：创建 user(user_type=visitor)、visitor_profile、CS conversation(status=open)，返回 visitor_token + JWT + conversation_id。
+- 再次请求（相同 visitor_token）：找到活跃会话则续，无则建新。
+- 无效 visitor_token 当作首次处理（不报错）。
+- visitor JWT 中 user_type=visitor，有效期 7 天。
+- 访客无法调用 inbox/assign/resolve 接口（JWT 校验中断）。
+
+测试方式：
+
+- `mvn -q -pl im-cs-service,im-user-service -am test`
+
+---
+
+### T32 — CS 会话状态机 + 坐席认领/结束 API
+
+状态：PENDING
+
+目标：
+
+- 实现 `POST /api/v1/cs/conversations/{conv_id}/assign`：open → assigned，写入 agent_id。
+- 实现 `POST /api/v1/cs/conversations/{conv_id}/resolve`：assigned → resolved。
+- 状态转移校验：只允许正向流转；assign 只能操作 open 会话；resolve 只能操作 assigned 且 agent_id = 当前用户。
+- 坐席权限校验：请求 JWT 对应 user 必须 `is_agent=true`。
+
+涉及模块：
+
+- `im-server/im-cs-service`
+- `im-server/im-conversation-service`
+- `im-server/im-proto-java`
+
+需要修改的文件：
+
+- `im-proto/proto/rpc/internal.proto`（新增 GetCsConv、UpdateCsConvStatus RPC）
+- `im-server/im-conversation-service/src/main/java/com/im/conversation/**`（新增 CS 状态更新逻辑）
+- `im-server/im-cs-service/src/main/java/com/im/cs/inbox/CsInboxController.java`
+- `im-server/im-cs-service/src/test/java/com/im/cs/**`
+
+验收标准：
+
+- assign 成功：status 0→1，agent_id 写入，返回更新后状态。
+- 并发认领同一会话：只有一个坐席成功（乐观锁/状态条件 UPDATE）。
+- resolve 成功：status 1→2。
+- 非坐席（is_agent=false）调用 assign/resolve 返回 403。
+- 重复 assign 已 assigned 会话：返回明确错误（CONV_ALREADY_ASSIGNED）。
+
+测试方式：
+
+- `mvn -q -pl im-cs-service,im-conversation-service -am test`
+
+---
+
+### T33 — 坐席 inbox API + CS 消息推送路由
+
+状态：PENDING
+
+目标：
+
+- 实现 `GET /api/v1/cs/inbox`：返回当前 tenant 下坐席可见的 CS 会话列表（open + 自己的 assigned）。
+- 扩展 push 模块：`msg.saved.*` 消费时，CS 会话按状态路由推送（open → 全坐席，assigned → 绑定 agent）。
+- 前端通过 `conv_type=CS` 区分铃声，后端不需要额外字段。
+
+涉及模块：
+
+- `im-server/im-cs-service`
+- `im-server/im-push-service`
+- `im-server/im-conversation-service`
+
+需要修改的文件：
+
+- `im-server/im-cs-service/src/main/java/com/im/cs/inbox/CsInboxController.java`
+- `im-server/im-push-service/src/main/java/com/im/push/consumer/MsgSavedEventConsumer.java`（扩展 CS 路由分支）
+- `im-server/im-push-service/src/test/java/com/im/push/**`
+- `im-server/im-cs-service/src/test/java/com/im/cs/**`
+
+验收标准：
+
+- `GET /inbox` 返回坐席视角的 open + 本人 assigned 会话，支持 status 过滤和分页。
+- 访客发消息后：open 状态会推送给所有在线坐席；assigned 状态只推给 agent_id 对应坐席。
+- `MsgPush.ext` 含 `conv_type=CS` 字段，前端可据此切换铃声。
+- push 路由扩展对 C2C/GROUP 现有消息不产生影响（CS 分支独立判断）。
+
+测试方式：
+
+- `mvn -q -pl im-cs-service,im-push-service -am test`
+- `mvn -q verify`
+
+---
+
+---
+
+### T34 — 坐席在线状态
+
+状态：PENDING
+
+目标：
+
+- `user` 表新增 `agent_status TINYINT DEFAULT 0`（0=offline/1=online/2=busy）。
+- 坐席通过 `PUT /api/v1/cs/agent/status` 切换状态。
+- 公开接口 `GET /api/v1/cs/widget/availability?tenant_id=xxx` 返回是否有坐席在线。
+- T33 推送路由同步更新：open 会话只推 `agent_status IN (1,2)` 的坐席。
+
+涉及模块：
+
+- `im-server/im-cs-service`
+- `im-server/im-user-service`
+- `im-server/im-bootstrap`（V6 迁移补列）
+
+需要修改的文件：
+
+- `im-server/im-bootstrap/src/main/resources/db/migration/V6__cs.sql`（补 `agent_status` 列）
+- `im-server/im-cs-service/src/main/java/com/im/cs/inbox/AgentStatusController.java`
+- `im-server/im-cs-service/src/main/java/com/im/cs/widget/WidgetAvailabilityController.java`
+- `im-server/im-push-service/src/main/java/com/im/push/consumer/MsgSavedEventConsumer.java`（push 路由加 agent_status 过滤）
+- `im-server/im-cs-service/src/test/java/com/im/cs/**`
+
+验收标准：
+
+- 坐席切换 online/offline 后，availability 接口返回值变化。
+- offline 坐席收不到 open 会话的 CS 推送。
+- 非坐席（is_agent=false）调用 status 接口返回 403。
+
+测试方式：
+
+- `mvn -q -pl im-cs-service,im-push-service -am test`
+
+---
+
+### T35 — 坐席上线通知（离线留言收口）
+
+状态：PENDING
+
+目标：
+
+- 坐席将 `agent_status` 切为 online 时，系统查询该 tenant 下 24h 内有新消息的未认领 open 会话数。
+- 若有待处理会话，向坐席下发 App 内系统消息提醒（复用现有 push 链路）。
+- widget 在检测到坐席全部 offline 时，切换显示 `offline_msg` 提示文案。
+
+涉及模块：
+
+- `im-server/im-cs-service`
+- `im-server/im-push-service`
+
+需要修改的文件：
+
+- `im-server/im-cs-service/src/main/java/com/im/cs/inbox/AgentStatusController.java`（上线时触发检查）
+- `im-server/im-cs-service/src/main/java/com/im/cs/notify/PendingConvNotifier.java`（新建）
+- `im-server/im-cs-service/src/test/java/com/im/cs/**`
+
+验收标准：
+
+- 坐席从 offline→online 后，若有 open 会话，App 内收到提醒通知。
+- 无待处理会话时不发通知，不打扰。
+
+测试方式：
+
+- `mvn -q -pl im-cs-service -am test`
+
+---
+
+### T36 — Widget 配置接口
+
+状态：PENDING
+
+目标：
+
+- 新增 `widget_config` 表（颜色/欢迎语/离线文案/位置/powered_by 徽标）。
+- 管理接口：`PUT /api/v1/cs/widget/config`（租户管理员）。
+- 公开查询：`GET /api/v1/cs/widget/config?tenant_id=xxx`（无需 auth，widget.js 调用）。
+- 租户注册后自动创建默认配置。
+
+涉及模块：
+
+- `im-server/im-cs-service`
+- `im-server/im-bootstrap`（V6 或 V7 迁移）
+
+需要修改的文件：
+
+- `im-server/im-bootstrap/src/main/resources/db/migration/`（新增 widget_config DDL）
+- `im-server/im-cs-service/src/main/java/com/im/cs/config/WidgetConfigController.java`
+- `im-server/im-cs-service/src/main/java/com/im/cs/config/WidgetConfigService.java`
+- `im-server/im-cs-service/src/test/java/com/im/cs/**`
+
+验收标准：
+
+- 公开接口无需 token 可查到租户 widget 配置。
+- 管理接口需验证当前用户属于该 tenant 且有管理权限。
+- `powered_by` 字段默认 true，可配置。
+- 查询不存在的 tenant_id 返回默认配置（不报错，允许租户未配置时正常展示 widget）。
+
+测试方式：
+
+- `mvn -q -pl im-cs-service -am test`
+- `mvn -q verify`
+
+---
+
 ## 4. 后续候选任务（当前阶段不执行）
 
-这些任务进入后续阶段，不在当前 im-server MVP 优先队列：
+这些任务进入后续阶段，不在当前优先队列：
 
-- 客服会话。
 - Web/App 客户端。
 - 图片/语音消息（PR1 复审 Q3）：进入文件上传与消息类型 PR。
 

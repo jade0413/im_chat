@@ -261,6 +261,20 @@ public class FileService {
     return toResponse(current);
   }
 
+  /**
+   * 生成文件下载预签名 URL（15 分钟有效），仅允许已确认的文件。
+   */
+  public String presignDownload(long requestUserId, String objectKey) {
+    long tenantId = TenantContext.requiredTenantId();
+    validateUploader(requestUserId);
+    String normalized = validateObjectKey(tenantId, objectKey);
+    FileMetaEntity entity = fileMetaMapper.selectByObjectKey(tenantId, normalized);
+    if (entity == null || !isStatus(entity, FileMetaConstants.STATUS_CONFIRMED)) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "file not found or not confirmed");
+    }
+    return storageClient.presignGet(properties.bucket(), normalized, java.time.Duration.ofMinutes(15));
+  }
+
   private boolean isStatus(FileMetaEntity entity, int status) {
     return entity.getStatus() != null && entity.getStatus() == status;
   }

@@ -3,12 +3,27 @@ use anyhow::{Context, Result};
 use prost::Message;
 
 pub const CURRENT_PROTOCOL_VERSION: u32 = 1;
+/// 默认帧上限：64 KB。可通过 IM_GATEWAY_MAX_FRAME_BYTES 环境变量覆盖。
+pub const DEFAULT_MAX_FRAME_BYTES: usize = 64 * 1024;
 
 pub fn encode(frame: &Frame) -> Vec<u8> {
     frame.encode_to_vec()
 }
 
+/// 用默认帧大小限制解码（`DEFAULT_MAX_FRAME_BYTES`）。
 pub fn decode(payload: &[u8]) -> Result<Frame> {
+    decode_with_limit(payload, DEFAULT_MAX_FRAME_BYTES)
+}
+
+/// 带自定义帧大小限制的解码。超限直接返回错误，防止恶意超大帧造成 OOM。
+pub fn decode_with_limit(payload: &[u8], max_bytes: usize) -> Result<Frame> {
+    if payload.len() > max_bytes {
+        anyhow::bail!(
+            "ws frame too large: {} bytes (limit {})",
+            payload.len(),
+            max_bytes
+        );
+    }
     Frame::decode(payload).context("invalid ws frame")
 }
 
@@ -43,7 +58,7 @@ struct GatewayErrorBody {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode, encode, new_frame};
+    use super::{decode, decode_with_limit, encode, new_frame, DEFAULT_MAX_FRAME_BYTES};
     use crate::proto::im::ws::v1::Cmd;
 
     #[test]
@@ -55,5 +70,20 @@ mod tests {
         assert_eq!(decoded.req_id, 42);
         assert_eq!(decoded.cmd, Cmd::Ping as i32);
         assert_eq!(decoded.body, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn rejects_frame_exceeding_limit() {
+        let oversized = vec![0u8; DEFAULT_MAX_FRAME_BYTES + 1];
+        let err = decode_with_limit(&oversized, DEFAULT_MAX_FRAME_BYTES).unwrap_err();
+        assert!(err.to_string().contains("too large"), "err={err}");
+    }
+
+    #[test]
+    fn accepts_frame_at_exact_limit() {
+        // 只需不被 size check 拒绝（会被 protobuf 解析拒绝，但不是 size 错误）
+        let at_limit = vec![0u8; DEFAULT_MAX_FRAME_BYTES];
+        let err = decode_with_limit(&at_limit, DEFAULT_MAX_FRAME_BYTES).unwrap_err();
+        assert!(!err.to_string().contains("too large"), "err={err}");
     }
 }

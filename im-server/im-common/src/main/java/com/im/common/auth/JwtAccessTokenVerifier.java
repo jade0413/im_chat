@@ -71,10 +71,14 @@ public class JwtAccessTokenVerifier {
     if (!expiresAt.isAfter(clock.instant())) {
       throw new ImException(ErrorCode.TOKEN_EXPIRED);
     }
+    String platformClass = (String) payload.get("platform_class");
+    long tokenVersion = payload.containsKey("token_ver") ? longClaim(payload, "token_ver") : 0L;
     return new AuthTokenClaims(
         longClaim(payload, "tenant_id"),
         Long.parseLong(stringClaim(payload, "sub")),
-        expiresAt);
+        expiresAt,
+        platformClass,
+        tokenVersion);
   }
 
   private Map<String, Object> decodeJson(String encodedPayload) {

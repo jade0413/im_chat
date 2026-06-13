@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.common.web.GlobalExceptionHandler;
 import com.im.common.web.TenantContextFilter;
 import com.im.user.dto.UserProfileResponse;
+import com.im.user.service.AgentService;
 import com.im.user.service.AuthService;
 import java.time.LocalDateTime;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,12 +25,15 @@ class UserControllerTest {
   @Mock
   private AuthService authService;
 
+  @Mock
+  private AgentService agentService;
+
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     MockitoAnnotations.openMocks(this);
-    UserController controller = new UserController(authService);
+    UserController controller = new UserController(authService, agentService);
     mockMvc = MockMvcBuilders.standaloneSetup(controller)
         .setControllerAdvice(new GlobalExceptionHandler())
         .addFilter(new TenantContextFilter(new ObjectMapper()))

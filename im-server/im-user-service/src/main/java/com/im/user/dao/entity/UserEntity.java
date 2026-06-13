@@ -46,6 +46,14 @@ public class UserEntity {
   @TableField("mute_until")
   private LocalDateTime muteUntil;
 
+  /** V6 新增：0=普通用户 1=坐席（与 user_type 正交，见 D34） */
+  @TableField("is_agent")
+  private Integer isAgent;
+
+  /** V6 新增：0=offline 1=online 2=busy（见 D35） */
+  @TableField("agent_status")
+  private Integer agentStatus;
+
   @TableField("created_at")
   private LocalDateTime createdAt;
 }

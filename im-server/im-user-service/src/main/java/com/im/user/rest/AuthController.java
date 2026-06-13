@@ -1,7 +1,5 @@
 package com.im.user.rest;
 
-import com.im.common.error.ErrorCode;
-import com.im.common.error.ImException;
 import com.im.common.web.ApiResponse;
 import com.im.user.dto.LoginRequest;
 import com.im.user.dto.RefreshRequest;
@@ -39,18 +37,4 @@ public class AuthController {
     return ApiResponse.ok(authService.refresh(request.refreshToken()));
   }
 
-  static String bearerToken(String authorization) {
-    if (authorization == null || authorization.isBlank()) {
-      throw new ImException(ErrorCode.TOKEN_INVALID);
-    }
-    String prefix = "Bearer ";
-    if (!authorization.regionMatches(true, 0, prefix, 0, prefix.length())) {
-      throw new ImException(ErrorCode.TOKEN_INVALID);
-    }
-    String token = authorization.substring(prefix.length()).trim();
-    if (token.isBlank()) {
-      throw new ImException(ErrorCode.TOKEN_INVALID);
-    }
-    return token;
-  }
 }

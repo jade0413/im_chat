@@ -24,6 +24,7 @@ import com.im.group.dao.mapper.TenantConfigMapper;
 import com.im.group.dto.AddGroupMembersRequest;
 import com.im.group.dto.CreateGroupRequest;
 import com.im.group.dto.GroupMemberChangeResponse;
+import com.im.group.dto.GroupMemberResponse;
 import com.im.group.dto.GroupResponse;
 import com.im.group.dto.UpdateGroupRequest;
 import com.im.proto.body.MsgPush;
@@ -516,6 +517,36 @@ public class GroupService {
 
   private LocalDateTime now() {
     return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+  }
+
+  /** 获取群信息（需是群成员）。 */
+  public GroupResponse getGroup(long operatorUserId, long groupId) {
+    validateUserId(operatorUserId, "operator_user_id");
+    GroupInfoEntity group = loadGroup(groupId);
+    if (findGroupMember(groupId, operatorUserId) == null) {
+      throw new ImException(ErrorCode.NOT_GROUP_MEMBER);
+    }
+    GroupConversationEntity conversation = findConversationByGroupId(groupId);
+    if (conversation == null) {
+      throw new ImException(ErrorCode.CONV_NOT_FOUND);
+    }
+    return toResponse(group, conversation.getId());
+  }
+
+  /** 获取群成员列表（需是群成员）。 */
+  public List<GroupMemberResponse> getMembers(long operatorUserId, long groupId) {
+    validateUserId(operatorUserId, "operator_user_id");
+    loadGroup(groupId);
+    if (findGroupMember(groupId, operatorUserId) == null) {
+      throw new ImException(ErrorCode.NOT_GROUP_MEMBER);
+    }
+    List<GroupMemberEntity> members = groupMemberMapper.selectList(
+        Wrappers.lambdaQuery(GroupMemberEntity.class)
+            .eq(GroupMemberEntity::getGroupId, groupId)
+            .orderByAsc(GroupMemberEntity::getRole));
+    return members.stream()
+        .map(m -> new GroupMemberResponse(m.getUserId(), m.getRole(), m.getJoinedAt()))
+        .toList();
   }
 
   private record GroupContext(GroupInfoEntity group, long conversationId) {

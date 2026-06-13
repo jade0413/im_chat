@@ -371,7 +371,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
 async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
     let (mut ws_sender, mut ws_receiver) = socket.split();
-    let first_frame = read_auth_frame(&mut ws_receiver, state.config.auth_timeout).await?;
+    let first_frame = read_auth_frame(&mut ws_receiver, state.config.auth_timeout, state.config.max_frame_bytes).await?;
     if first_frame.version < state.config.min_protocol_version {
         send_kick(&mut ws_sender, PROTO_TOO_OLD_REASON, "protocol too old").await?;
         return Ok(());
@@ -543,7 +543,7 @@ async fn read_loop(
             Message::Close(_) => break,
             _ => continue,
         };
-        let frame = frame_codec::decode(&payload)?;
+        let frame = frame_codec::decode_with_limit(&payload, state.config.max_frame_bytes)?;
         if frame.version < state.config.min_protocol_version {
             if let Some(handle) = state.registry.get(
                 key.tenant_id,
@@ -671,13 +671,14 @@ async fn read_loop(
 async fn read_auth_frame(
     receiver: &mut SplitStream<WebSocket>,
     timeout: Duration,
+    max_frame_bytes: usize,
 ) -> Result<Frame> {
     let next = time::timeout(timeout, receiver.next())
         .await
         .context("AUTH timeout")?
         .context("websocket closed before AUTH")??;
     match next {
-        Message::Binary(payload) => frame_codec::decode(&payload),
+        Message::Binary(payload) => frame_codec::decode_with_limit(&payload, max_frame_bytes),
         _ => anyhow::bail!("AUTH must be sent as binary protobuf frame"),
     }
 }

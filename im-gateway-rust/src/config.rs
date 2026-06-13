@@ -21,6 +21,8 @@ pub struct Config {
     pub outbound_queue_full_disconnect_threshold: u64,
     pub route_renew_heartbeat_interval: u64,
     pub min_protocol_version: u32,
+    /// 单帧最大字节数，超过则拒绝解码（防恶意超大帧 OOM）
+    pub max_frame_bytes: usize,
 }
 
 impl Config {
@@ -73,6 +75,9 @@ impl Config {
             min_protocol_version: read_env(&["IM_GATEWAY_MIN_PROTOCOL_VERSION"], "1")
                 .parse()
                 .context("invalid min protocol version")?,
+            max_frame_bytes: read_env(&["IM_GATEWAY_MAX_FRAME_BYTES"], "65536")
+                .parse()
+                .context("invalid max frame bytes")?,
         })
     }
 
@@ -130,6 +135,7 @@ mod tests {
             outbound_queue_full_disconnect_threshold: 3,
             route_renew_heartbeat_interval: 3,
             min_protocol_version: 1,
+            max_frame_bytes: 65536,
         };
 
         assert_eq!(config.push_queue_name(), "push.gw.gw-a");

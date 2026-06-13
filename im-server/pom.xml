@@ -21,6 +21,7 @@
     <module>im-group-service</module>
     <module>im-file-service</module>
     <module>im-push-service</module>
+    <module>im-cs-service</module>
     <module>im-bootstrap</module>
   </modules>
 

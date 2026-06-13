@@ -34,6 +34,20 @@ public class MinioObjectStorageClient implements ObjectStorageClient {
   }
 
   @Override
+  public String presignGet(String bucket, String objectKey, Duration ttl) {
+    try {
+      return minioClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
+          .method(Method.GET)
+          .bucket(bucket)
+          .object(objectKey)
+          .expiry(Math.toIntExact(ttl.toSeconds()), TimeUnit.SECONDS)
+          .build());
+    } catch (Exception ex) {
+      throw new ObjectStorageException("failed to create presigned download url", ex, false);
+    }
+  }
+
+  @Override
   public ObjectStat statObject(String bucket, String objectKey) {
     try {
       StatObjectResponse response = minioClient.statObject(StatObjectArgs.builder()

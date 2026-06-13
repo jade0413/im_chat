@@ -48,9 +48,9 @@ async fn run_push_consumer_once(state: AppState) -> Result<()> {
         .queue_declare(
             &queue_name,
             QueueDeclareOptions {
-                durable: false,
+                durable: true,
                 exclusive: false,
-                auto_delete: true,
+                auto_delete: false,
                 ..QueueDeclareOptions::default()
             },
             FieldTable::default(),

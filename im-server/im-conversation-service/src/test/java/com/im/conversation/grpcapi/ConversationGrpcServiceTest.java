@@ -7,6 +7,7 @@ import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.conversation.service.ConversationListResult;
 import com.im.conversation.service.ConversationService;
+import com.im.conversation.service.CsConversationService;
 import com.im.proto.body.ConvInfo;
 import com.im.proto.common.ConvType;
 import com.im.proto.rpc.GetMembersReq;
@@ -30,6 +31,9 @@ class ConversationGrpcServiceTest {
   @Mock
   private ConversationService conversationService;
 
+  @Mock
+  private CsConversationService csConversationService;
+
   @Test
   void returnsResolvedConversation() {
     ResolveConvReq request = ResolveConvReq.newBuilder()
@@ -44,7 +48,7 @@ class ConversationGrpcServiceTest {
     when(conversationService.resolve(request)).thenReturn(conv);
 
     CapturingObserver<ResolveConvResp> observer = new CapturingObserver<>();
-    new ConversationGrpcService(conversationService).resolveConv(request, observer);
+    service().resolveConv(request, observer);
 
     assertThat(observer.completed).isTrue();
     assertThat(observer.value.getCode()).isEqualTo(ErrorCode.OK.code());
@@ -60,7 +64,7 @@ class ConversationGrpcServiceTest {
     when(conversationService.resolve(request)).thenThrow(new ImException(ErrorCode.NOT_CONV_MEMBER));
 
     CapturingObserver<ResolveConvResp> observer = new CapturingObserver<>();
-    new ConversationGrpcService(conversationService).resolveConv(request, observer);
+    service().resolveConv(request, observer);
 
     assertThat(observer.value.getCode()).isEqualTo(ErrorCode.NOT_CONV_MEMBER.code());
     assertThat(observer.completed).isTrue();
@@ -71,8 +75,7 @@ class ConversationGrpcServiceTest {
     when(conversationService.getMemberUserIds(501L)).thenReturn(List.of(100L, 200L));
 
     CapturingObserver<GetMembersResp> observer = new CapturingObserver<>();
-    new ConversationGrpcService(conversationService)
-        .getMembers(GetMembersReq.newBuilder().setConvId(501L).build(), observer);
+    service().getMembers(GetMembersReq.newBuilder().setConvId(501L).build(), observer);
 
     assertThat(observer.value.getUserIdsList()).containsExactly(100L, 200L);
     assertThat(observer.completed).isTrue();
@@ -91,8 +94,7 @@ class ConversationGrpcServiceTest {
         .thenReturn(new ConversationListResult(List.of(conv), false, 9L));
 
     CapturingObserver<ListMemberConvsResp> observer = new CapturingObserver<>();
-    new ConversationGrpcService(conversationService)
-        .listMemberConvs(ListMemberConvsReq.newBuilder()
+    service().listMemberConvs(ListMemberConvsReq.newBuilder()
             .setUserId(100L)
             .setLimit(100)
             .setConvListVersion(7L)
@@ -113,8 +115,8 @@ class ConversationGrpcServiceTest {
     when(conversationService.getMemberConv(100L, 501L)).thenReturn(conv);
 
     CapturingObserver<GetMemberConvResp> observer = new CapturingObserver<>();
-    new ConversationGrpcService(conversationService)
-        .getMemberConv(GetMemberConvReq.newBuilder().setUserId(100L).setConvId(501L).build(), observer);
+    service().getMemberConv(
+        GetMemberConvReq.newBuilder().setUserId(100L).setConvId(501L).build(), observer);
 
     assertThat(observer.value.getCode()).isEqualTo(ErrorCode.OK.code());
     assertThat(observer.value.getConv().getReadSeq()).isEqualTo(2L);
@@ -140,5 +142,9 @@ class ConversationGrpcServiceTest {
     public void onCompleted() {
       completed = true;
     }
+  }
+
+  private ConversationGrpcService service() {
+    return new ConversationGrpcService(conversationService, csConversationService);
   }
 }
