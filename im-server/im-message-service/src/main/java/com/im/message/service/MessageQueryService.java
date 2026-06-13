@@ -3,6 +3,7 @@ package com.im.message.service;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.im.common.tenant.TenantContext;
 import com.im.message.dao.entity.MessageEntity;
+import com.im.message.dao.mapper.ConversationProgressMapper;
 import com.im.message.dao.mapper.MessageMapper;
 import com.im.proto.body.ConvInfo;
 import com.im.proto.body.MsgPush;
@@ -20,13 +21,16 @@ public class MessageQueryService {
   private static final int MAX_LIMIT = 100;
 
   private final MessageMapper messageMapper;
+  private final ConversationProgressMapper conversationProgressMapper;
   private final MessageAssembler assembler;
   private final ConversationMemberClient memberClient;
 
   public MessageQueryService(MessageMapper messageMapper,
+      ConversationProgressMapper conversationProgressMapper,
       MessageAssembler assembler,
       ConversationMemberClient memberClient) {
     this.messageMapper = messageMapper;
+    this.conversationProgressMapper = conversationProgressMapper;
     this.assembler = assembler;
     this.memberClient = memberClient;
   }
@@ -77,7 +81,7 @@ public class MessageQueryService {
     int limit = normalizeLimit(request.getLimit());
     long endSeq = request.getEndSeq() <= 0 ? Long.MAX_VALUE : request.getEndSeq();
     return range(request.getConvId(), request.getBeginSeq(), endSeq, limit,
-        ConvType.CONV_TYPE_UNSPECIFIED).messages();
+        selectConvType(request.getConvId())).messages();
   }
 
   private MessagePage range(long conversationId, long beginSeq, long endSeq, int limit,
@@ -125,6 +129,12 @@ public class MessageQueryService {
       return DEFAULT_LIMIT;
     }
     return Math.min(limit, MAX_LIMIT);
+  }
+
+  private ConvType selectConvType(long conversationId) {
+    Integer type = conversationProgressMapper.selectType(conversationId);
+    ConvType convType = type == null ? ConvType.CONV_TYPE_UNSPECIFIED : ConvType.forNumber(type);
+    return convType == null ? ConvType.CONV_TYPE_UNSPECIFIED : convType;
   }
 
   private MsgPush toPush(MessageEntity entity, ConvType convType) {

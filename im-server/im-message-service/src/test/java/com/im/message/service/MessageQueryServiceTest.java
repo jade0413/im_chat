@@ -10,14 +10,16 @@ import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.common.tenant.TenantContext;
 import com.im.message.dao.entity.MessageEntity;
+import com.im.message.dao.mapper.ConversationProgressMapper;
 import com.im.message.dao.mapper.MessageMapper;
+import com.im.proto.body.ConvInfo;
 import com.im.proto.body.MsgPush;
 import com.im.proto.body.SyncReq;
 import com.im.proto.body.SyncResp;
-import com.im.proto.body.ConvInfo;
 import com.im.proto.common.ConvType;
 import com.im.proto.common.MsgContent;
 import com.im.proto.common.TextContent;
+import com.im.proto.rpc.PullMsgsReq;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -34,6 +36,9 @@ class MessageQueryServiceTest {
   private MessageMapper messageMapper;
 
   @Mock
+  private ConversationProgressMapper conversationProgressMapper;
+
+  @Mock
   private MessageAssembler assembler;
 
   @Mock
@@ -43,7 +48,7 @@ class MessageQueryServiceTest {
 
   @BeforeEach
   void setUp() {
-    service = new MessageQueryService(messageMapper, assembler, memberClient);
+    service = new MessageQueryService(messageMapper, conversationProgressMapper, assembler, memberClient);
   }
 
   @Test
@@ -131,6 +136,26 @@ class MessageQueryServiceTest {
         .isEqualTo(ErrorCode.NOT_CONV_MEMBER);
   }
 
+  @Test
+  void pullForRpcUsesConversationTypeWhenAssemblingMessages() {
+    MessageEntity first = message(1L);
+    when(conversationProgressMapper.selectType(501L)).thenReturn(ConvType.GROUP.getNumber());
+    when(messageMapper.selectList(anyWrapper())).thenReturn(List.of(first));
+    when(assembler.toPush(first, ConvType.GROUP)).thenReturn(push(1L).toBuilder()
+        .setConvType(ConvType.GROUP)
+        .build());
+
+    List<MsgPush> messages = pullRpcWithTenant(PullMsgsReq.newBuilder()
+        .setConvId(501L)
+        .setBeginSeq(1L)
+        .setEndSeq(10L)
+        .setLimit(20)
+        .build());
+
+    assertThat(messages).hasSize(1);
+    assertThat(messages.getFirst().getConvType()).isEqualTo(ConvType.GROUP);
+  }
+
   private SyncResp syncWithTenant(long userId, SyncReq request) {
     AtomicReference<SyncResp> result = new AtomicReference<>();
     TenantContext.runWithTenant(1L, () -> result.set(service.sync(userId, request)));
@@ -140,6 +165,12 @@ class MessageQueryServiceTest {
   private MessagePage historyWithTenant(long userId, long convId, Long endSeq, int limit) {
     AtomicReference<MessagePage> result = new AtomicReference<>();
     TenantContext.runWithTenant(1L, () -> result.set(service.history(userId, convId, endSeq, limit)));
+    return result.get();
+  }
+
+  private List<MsgPush> pullRpcWithTenant(PullMsgsReq request) {
+    AtomicReference<List<MsgPush>> result = new AtomicReference<>();
+    TenantContext.runWithTenant(1L, () -> result.set(service.pullForRpc(request)));
     return result.get();
   }
 

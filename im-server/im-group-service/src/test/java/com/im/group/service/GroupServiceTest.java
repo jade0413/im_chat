@@ -213,6 +213,36 @@ class GroupServiceTest {
     verify(groupMemberMapper, never()).delete(anyWrapper());
   }
 
+  @Test
+  void removeMemberSoftDeletesConversationMemberAndWritesNotification() throws Exception {
+    GroupInfoEntity group = group(10L, "team", 100L, 3);
+    when(groupInfoMapper.selectById(10L)).thenReturn(group);
+    when(groupMemberMapper.selectOne(anyWrapper()))
+        .thenReturn(member(10L, 100L, 3), member(10L, 200L, 1));
+    when(conversationMapper.selectOne(anyWrapper())).thenReturn(conversation(20L, 10L));
+    when(conversationMapper.incrementMaxSeq(20L)).thenReturn(1);
+    when(conversationMapper.selectMaxSeq(20L)).thenReturn(7L);
+    when(conversationMapper.updateLastMessage(eq(20L), eq(7L), any(), any())).thenReturn(1);
+    when(idGenerator.nextId()).thenReturn(30L, 40L);
+
+    GroupMemberChangeResponse response = withTenant(() -> service.removeMember(100L, 10L, 200L));
+
+    assertThat(response.changedUserIds()).containsExactly(200L);
+    assertThat(response.memberCount()).isEqualTo(2);
+    verify(groupMemberMapper).delete(anyWrapper());
+    verify(conversationMemberMapper).update(conversationMemberCaptor.capture(), anyWrapper());
+    assertThat(conversationMemberCaptor.getValue().getDeletedAt()).isNotNull();
+    verify(groupInfoMapper).updateById(groupCaptor.capture());
+    assertThat(groupCaptor.getValue().getMemberCount()).isEqualTo(2);
+    verify(messageMapper).insert(messageCaptor.capture());
+    MsgContent content = MsgContent.parseFrom(messageCaptor.getValue().getContent());
+    assertThat(content.getNotification().getEventType()).isEqualTo("group.member_removed");
+    verify(outboxWriter).write(eq(1L), eq("msg.saved"), eq("msg.saved.1"), payloadCaptor.capture());
+    MsgSavedEvent event = MsgSavedEvent.parseFrom(payloadCaptor.getValue());
+    assertThat(event.getPushReady().getConvType()).isEqualTo(ConvType.GROUP);
+    assertThat(event.getPushReady().getSeq()).isEqualTo(7L);
+  }
+
   private <T> T withTenant(java.util.concurrent.Callable<T> callable) {
     AtomicReference<T> result = new AtomicReference<>();
     AtomicReference<RuntimeException> error = new AtomicReference<>();

@@ -66,7 +66,23 @@ class ReadReceiptServiceTest {
         ArgumentCaptor.forClass(ConversationMemberEntity.class);
     verify(memberMapper).update(updateCaptor.capture(), anyWrapper());
     assertThat(updateCaptor.getValue().getReadSeq()).isEqualTo(2L);
+    verify(memberMapper).selectList(anyWrapper());
     verify(readReceiptPusher).pushReadNotify(ctx(), List.of(100L, 200L), result.readNotify());
+  }
+
+  @Test
+  void groupReadOnlyPushesNotifyToReaderOtherDevices() {
+    when(conversationMapper.selectById(601L)).thenReturn(conversation(601L, 4L, ConvType.GROUP));
+    when(memberMapper.selectOne(anyWrapper()))
+        .thenReturn(member(601L, 100L, 1L), member(601L, 100L, 3L));
+    when(memberMapper.update(any(), anyWrapper())).thenReturn(1);
+
+    ReadReceiptResult result = report(601L, 3L);
+
+    assertThat(result.changed()).isTrue();
+    assertThat(result.readNotify().getReadSeq()).isEqualTo(3L);
+    verify(memberMapper, never()).selectList(anyWrapper());
+    verify(readReceiptPusher).pushReadNotify(ctx(), List.of(100L), result.readNotify());
   }
 
   @Test
@@ -119,9 +135,13 @@ class ReadReceiptServiceTest {
   }
 
   private ConversationEntity conversation(long id, long maxSeq) {
+    return conversation(id, maxSeq, ConvType.C2C);
+  }
+
+  private ConversationEntity conversation(long id, long maxSeq, ConvType type) {
     ConversationEntity conversation = new ConversationEntity();
     conversation.setId(id);
-    conversation.setType(ConvType.C2C.getNumber());
+    conversation.setType(type.getNumber());
     conversation.setMaxSeq(maxSeq);
     return conversation;
   }

@@ -10,6 +10,7 @@ import com.im.conversation.dao.mapper.ConversationMapper;
 import com.im.conversation.dao.mapper.ConversationMemberMapper;
 import com.im.proto.body.ReadNotify;
 import com.im.proto.body.ReadReport;
+import com.im.proto.common.ConvType;
 import com.im.proto.rpc.ConnCtx;
 import java.util.List;
 import org.springframework.stereotype.Service;
@@ -54,6 +55,7 @@ public class ReadReceiptService {
       int updated = memberMapper.update(update, Wrappers.lambdaUpdate(ConversationMemberEntity.class)
           .eq(ConversationMemberEntity::getConvId, request.getConvId())
           .eq(ConversationMemberEntity::getUserId, ctx.getUserId())
+          .isNull(ConversationMemberEntity::getDeletedAt)
           .lt(ConversationMemberEntity::getReadSeq, request.getReadSeq()));
       ConversationMemberEntity latest = findMember(request.getConvId(), ctx.getUserId());
       effectiveReadSeq = latest == null ? request.getReadSeq() : nullToZero(latest.getReadSeq());
@@ -66,7 +68,7 @@ public class ReadReceiptService {
         .setReadSeq(effectiveReadSeq)
         .build();
     if (changed) {
-      readReceiptPusher.pushReadNotify(ctx, getMemberUserIds(request.getConvId()), notify);
+      readReceiptPusher.pushReadNotify(ctx, notifyTargetUserIds(ctx, conversation), notify);
     }
     return new ReadReceiptResult(notify, changed);
   }
@@ -86,16 +88,31 @@ public class ReadReceiptService {
   private ConversationMemberEntity findMember(long conversationId, long userId) {
     return memberMapper.selectOne(Wrappers.lambdaQuery(ConversationMemberEntity.class)
         .eq(ConversationMemberEntity::getConvId, conversationId)
-        .eq(ConversationMemberEntity::getUserId, userId));
+        .eq(ConversationMemberEntity::getUserId, userId)
+        .isNull(ConversationMemberEntity::getDeletedAt));
   }
 
   private List<Long> getMemberUserIds(long conversationId) {
     return memberMapper.selectList(Wrappers.lambdaQuery(ConversationMemberEntity.class)
             .eq(ConversationMemberEntity::getConvId, conversationId)
+            .isNull(ConversationMemberEntity::getDeletedAt)
             .orderByAsc(ConversationMemberEntity::getUserId))
         .stream()
         .map(ConversationMemberEntity::getUserId)
         .toList();
+  }
+
+  private List<Long> notifyTargetUserIds(ConnCtx ctx, ConversationEntity conversation) {
+    if (ConvType.GROUP == convType(conversation)) {
+      return List.of(ctx.getUserId());
+    }
+    return getMemberUserIds(conversation.getId());
+  }
+
+  private ConvType convType(ConversationEntity conversation) {
+    Integer type = conversation.getType();
+    ConvType convType = type == null ? ConvType.CONV_TYPE_UNSPECIFIED : ConvType.forNumber(type);
+    return convType == null ? ConvType.CONV_TYPE_UNSPECIFIED : convType;
   }
 
   private long nullToZero(Long value) {

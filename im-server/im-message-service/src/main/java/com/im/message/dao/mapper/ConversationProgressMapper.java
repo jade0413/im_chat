@@ -23,6 +23,13 @@ public interface ConversationProgressMapper {
       """)
   Long selectMaxSeq(@Param("conversationId") long conversationId);
 
+  @Select("""
+      SELECT type
+      FROM conversation
+      WHERE id = #{conversationId}
+      """)
+  Integer selectType(@Param("conversationId") long conversationId);
+
   @Update("""
       UPDATE conversation
       SET last_msg_abstract = #{lastMsgAbstract},

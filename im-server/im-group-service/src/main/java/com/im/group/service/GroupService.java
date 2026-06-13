@@ -186,7 +186,7 @@ public class GroupService {
         .eq(GroupMemberEntity::getUserId, userId));
     GroupConversationMemberEntity patch = new GroupConversationMemberEntity();
     patch.setDeletedAt(now());
-    conversationMemberMapper.update(patch, Wrappers.lambdaQuery(GroupConversationMemberEntity.class)
+    conversationMemberMapper.update(patch, Wrappers.lambdaUpdate(GroupConversationMemberEntity.class)
         .eq(GroupConversationMemberEntity::getConvId, context.conversationId())
         .eq(GroupConversationMemberEntity::getUserId, userId));
 
