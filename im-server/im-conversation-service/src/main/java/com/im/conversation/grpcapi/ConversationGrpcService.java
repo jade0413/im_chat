@@ -7,6 +7,8 @@ import com.im.proto.body.ConvInfo;
 import com.im.proto.rpc.ConversationRpcGrpc;
 import com.im.proto.rpc.GetMembersReq;
 import com.im.proto.rpc.GetMembersResp;
+import com.im.proto.rpc.GetMemberConvReq;
+import com.im.proto.rpc.GetMemberConvResp;
 import com.im.proto.rpc.ListMemberConvsReq;
 import com.im.proto.rpc.ListMemberConvsResp;
 import com.im.proto.rpc.ResolveConvReq;
@@ -56,6 +58,28 @@ public class ConversationGrpcService extends ConversationRpcGrpc.ConversationRpc
           .build();
     } catch (Exception ex) {
       response = GetMembersResp.getDefaultInstance();
+    }
+    responseObserver.onNext(response);
+    responseObserver.onCompleted();
+  }
+
+  @Override
+  public void getMemberConv(GetMemberConvReq request,
+      StreamObserver<GetMemberConvResp> responseObserver) {
+    GetMemberConvResp response;
+    try {
+      response = GetMemberConvResp.newBuilder()
+          .setCode(ErrorCode.OK.code())
+          .setConv(conversationService.getMemberConv(request.getUserId(), request.getConvId()))
+          .build();
+    } catch (ImException ex) {
+      response = GetMemberConvResp.newBuilder()
+          .setCode(ex.errorCode().code())
+          .build();
+    } catch (Exception ex) {
+      response = GetMemberConvResp.newBuilder()
+          .setCode(ErrorCode.INTERNAL_ERROR.code())
+          .build();
     }
     responseObserver.onNext(response);
     responseObserver.onCompleted();

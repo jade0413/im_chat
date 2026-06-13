@@ -78,6 +78,18 @@ public class ConversationService {
         .toList();
   }
 
+  public ConvInfo getMemberConv(long userId, long conversationId) {
+    TenantContext.requiredTenantId();
+    if (userId <= 0 || conversationId <= 0) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED);
+    }
+    ConversationMemberEntity member = findMember(conversationId, userId);
+    if (member == null) {
+      throw new ImException(ErrorCode.NOT_CONV_MEMBER);
+    }
+    return toMemberConvInfo(userId, member);
+  }
+
   private ConvInfo resolveC2c(long fromUserId, long toUserId) {
     String c2cKey = c2cKeyGenerator.generate(fromUserId, toUserId);
     ConversationEntity existing = findByC2cKey(c2cKey);

@@ -41,6 +41,11 @@ public class PushDispatchService {
   }
 
   public PushResult pushToUsers(long tenantId, Collection<Long> userIds, int cmd, byte[] body, boolean needAck) {
+    return pushToUsers(tenantId, userIds, cmd, body, needAck, 0L, "");
+  }
+
+  public PushResult pushToUsers(long tenantId, Collection<Long> userIds, int cmd, byte[] body, boolean needAck,
+      long excludeUserId, String excludeConnId) {
     validateTenant(tenantId);
     if (userIds == null || userIds.isEmpty()) {
       return new PushResult(0, 0);
@@ -55,7 +60,10 @@ public class PushDispatchService {
     int offlineUsers = 0;
     int onlineRoutes = 0;
     for (Long userId : targetUserIds) {
-      List<OnlineRoute> routes = routesByUser.getOrDefault(userId, List.of());
+      List<OnlineRoute> routes = routesByUser.getOrDefault(userId, List.of())
+          .stream()
+          .filter(route -> !isExcluded(route, excludeUserId, excludeConnId))
+          .toList();
       if (routes.isEmpty()) {
         offlineUsers++;
         continue;
@@ -123,6 +131,13 @@ public class PushDispatchService {
       grouped.computeIfAbsent(route.userId(), ignored -> new ArrayList<>()).add(route);
     }
     return grouped;
+  }
+
+  private boolean isExcluded(OnlineRoute route, long excludeUserId, String excludeConnId) {
+    if (excludeUserId <= 0 || excludeConnId == null || excludeConnId.isBlank()) {
+      return false;
+    }
+    return route.userId() == excludeUserId && excludeConnId.equals(route.connId());
   }
 
   private void publishKick(OnlineRoute route, int reason) {

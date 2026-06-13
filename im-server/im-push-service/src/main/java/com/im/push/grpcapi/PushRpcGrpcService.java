@@ -26,7 +26,9 @@ public class PushRpcGrpcService extends PushRpcGrpc.PushRpcImplBase {
         request.getUserIdsList(),
         request.getCmd(),
         request.getBody().toByteArray(),
-        request.getNeedAck());
+        request.getNeedAck(),
+        request.getExcludeUserId(),
+        request.getExcludeConnId());
     complete(responseObserver, result);
   }
 

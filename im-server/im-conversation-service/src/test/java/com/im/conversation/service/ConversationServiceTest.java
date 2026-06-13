@@ -161,6 +161,25 @@ class ConversationServiceTest {
     assertThat(result.get().getFirst().getMaxSeq()).isEqualTo(3L);
   }
 
+  @Test
+  void returnsSingleMemberConversationWithReadSeq() {
+    ConversationEntity existing = conversation(501L, "100_200");
+    existing.setMaxSeq(3L);
+    ConversationMemberEntity member = member(501L, 100L);
+    member.setReadSeq(2L);
+    when(memberMapper.selectOne(anyWrapper())).thenReturn(member);
+    when(conversationMapper.selectById(501L)).thenReturn(existing);
+    when(memberMapper.selectList(anyWrapper())).thenReturn(List.of(member(501L, 100L), member(501L, 200L)));
+
+    AtomicReference<ConvInfo> result = new AtomicReference<>();
+    TenantContext.runWithTenant(1L, () -> result.set(service.getMemberConv(100L, 501L)));
+
+    assertThat(result.get().getConvId()).isEqualTo(501L);
+    assertThat(result.get().getReadSeq()).isEqualTo(2L);
+    assertThat(result.get().getMaxSeq()).isEqualTo(3L);
+    assertThat(result.get().getPeerUserId()).isEqualTo(200L);
+  }
+
   private ConvInfo resolveWithTenant(ResolveConvReq request) {
     AtomicReference<ConvInfo> result = new AtomicReference<>();
     TenantContext.runWithTenant(1L, () -> result.set(service.resolve(request)));

@@ -10,6 +10,8 @@ import com.im.proto.body.ConvInfo;
 import com.im.proto.common.ConvType;
 import com.im.proto.rpc.GetMembersReq;
 import com.im.proto.rpc.GetMembersResp;
+import com.im.proto.rpc.GetMemberConvReq;
+import com.im.proto.rpc.GetMemberConvResp;
 import com.im.proto.rpc.ListMemberConvsReq;
 import com.im.proto.rpc.ListMemberConvsResp;
 import com.im.proto.rpc.ResolveConvReq;
@@ -92,6 +94,23 @@ class ConversationGrpcServiceTest {
 
     assertThat(observer.value.getConvsList()).hasSize(1);
     assertThat(observer.value.getConvs(0).getReadSeq()).isEqualTo(1L);
+    assertThat(observer.completed).isTrue();
+  }
+
+  @Test
+  void returnsSingleMemberConversation() {
+    ConvInfo conv = ConvInfo.newBuilder()
+        .setConvId(501L)
+        .setReadSeq(2L)
+        .build();
+    when(conversationService.getMemberConv(100L, 501L)).thenReturn(conv);
+
+    CapturingObserver<GetMemberConvResp> observer = new CapturingObserver<>();
+    new ConversationGrpcService(conversationService)
+        .getMemberConv(GetMemberConvReq.newBuilder().setUserId(100L).setConvId(501L).build(), observer);
+
+    assertThat(observer.value.getCode()).isEqualTo(ErrorCode.OK.code());
+    assertThat(observer.value.getConv().getReadSeq()).isEqualTo(2L);
     assertThat(observer.completed).isTrue();
   }
 

@@ -79,6 +79,28 @@ class PushDispatchServiceTest {
   }
 
   @Test
+  void excludesCurrentConnectionWhenRequested() {
+    when(routeRepository.findAllByUsers(1L, List.of(100L, 200L)))
+        .thenReturn(List.of(
+            route(100L, "gw-a", "conn-current"),
+            route(100L, "gw-a", "conn-other"),
+            route(200L, "gw-a", "conn-peer")));
+
+    PushResult result = service.pushToUsers(1L, List.of(100L, 200L),
+        Cmd.READ_NOTIFY_VALUE, "read".getBytes(), false, 100L, "conn-current");
+
+    assertThat(result.onlineCount()).isEqualTo(2);
+    assertThat(result.offlineCount()).isZero();
+    ArgumentCaptor<PushEnvelope> envelopeCaptor = ArgumentCaptor.forClass(PushEnvelope.class);
+    verify(gatewayPushPublisher).publish(org.mockito.Mockito.eq("gw-a"), envelopeCaptor.capture());
+    assertThat(envelopeCaptor.getValue().getTargetsList())
+        .extracting(com.im.proto.rpc.PushTarget::getConnId)
+        .containsExactly("conn-other", "conn-peer");
+    assertThat(envelopeCaptor.getValue().getCmd()).isEqualTo(Cmd.READ_NOTIFY_VALUE);
+    assertThat(envelopeCaptor.getValue().getNeedAck()).isFalse();
+  }
+
+  @Test
   void connectedRouteKicksPreviousConnectionOfSamePlatformClassThenSavesNewRoute() throws Exception {
     OnlineRoute oldRoute = route(100L, "gw-a", "old-conn");
     ConnCtx newCtx = ctx("new-conn", "gw-b");

@@ -1,10 +1,14 @@
 package com.im.message.service;
 
 import com.im.common.grpc.GrpcMetadataKeys;
+import com.im.common.error.ErrorCode;
+import com.im.common.error.ImException;
 import com.im.common.tenant.TenantContext;
 import com.im.common.trace.TraceContext;
 import com.im.proto.body.ConvInfo;
 import com.im.proto.rpc.ConversationRpcGrpc;
+import com.im.proto.rpc.GetMemberConvReq;
+import com.im.proto.rpc.GetMemberConvResp;
 import com.im.proto.rpc.GetMembersReq;
 import com.im.proto.rpc.ListMemberConvsReq;
 import io.grpc.Metadata;
@@ -30,6 +34,20 @@ public class GrpcConversationMemberClient implements ConversationMemberClient {
         .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(metadata()))
         .getMembers(GetMembersReq.newBuilder().setConvId(conversationId).build())
         .getUserIdsList();
+  }
+
+  @Override
+  public ConvInfo getMemberConv(long userId, long conversationId) {
+    GetMemberConvResp response = conversationStub
+        .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(metadata()))
+        .getMemberConv(GetMemberConvReq.newBuilder()
+            .setUserId(userId)
+            .setConvId(conversationId)
+            .build());
+    if (response.getCode() != ErrorCode.OK.code()) {
+      throw new ImException(ErrorCode.fromCode(response.getCode()).orElse(ErrorCode.INTERNAL_ERROR));
+    }
+    return response.getConv();
   }
 
   @Override

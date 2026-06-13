@@ -48,11 +48,12 @@ class MessageHistoryControllerTest {
             .setSendTime(1000L)
             .setContent(MsgContent.newBuilder()
                 .setText(TextContent.newBuilder().setText("hello")))
-            .build()), false));
+            .build()), false, 8L));
 
     ApiResponse<MessageHistoryResponse> response = historyWithTenant();
 
     assertThat(response.data().messages()).hasSize(1);
+    assertThat(response.data().readSeq()).isEqualTo(8L);
     assertThat(response.data().messages().getFirst().text()).isEqualTo("hello");
     assertThat(response.data().hasMore()).isFalse();
   }

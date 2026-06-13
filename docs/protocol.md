@@ -51,6 +51,8 @@ WSS 连接 → 5s 内必须发 AUTH（否则断）→ 网关 gRPC VerifyToken（
 - **MsgPush 复用于实时推送与 SyncResp**：客户端只写一套消息入库逻辑
 - **Sender 冗余昵称/头像/蓝V**：避免客户端收推送后再查用户，代价是资料变更有短暂不一致（可接受）
 - **MsgRecvAck 批量**：滚动收消息时攒批确认，降低上行帧数
+- **READ_REPORT/READ_NOTIFY**：`READ_REPORT` 成功的同步响应也使用 `READ_NOTIFY` body 回带最终 read_seq；
+  服务端再以 `READ_NOTIFY` 轻量推送给会话其他成员和自己的其他端，内部 push 会排除当前连接，且 `need_ack=false`
 - **NotificationContent 事件化**（学 Matrix）：建群/进群/坐席分配走消息管道拿 seq，多端同步免费获得；
   事件类型注册表见附录 A
 - **ext map 字段**：MsgSend/MsgPush 预留，二阶段"消息扩展字段"零协议改动

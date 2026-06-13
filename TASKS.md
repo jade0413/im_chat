@@ -1402,7 +1402,7 @@
 
 ### T25 — 已读回执 MVP
 
-状态：PENDING
+状态：DONE
 
 目标：
 
@@ -1419,7 +1419,7 @@
 
 需要修改的文件：
 
-- `im-proto/proto/body/messages.proto`
+- `im-proto/proto/rpc/internal.proto`
 - `im-server/im-conversation-service/src/main/java/com/im/conversation/**`
 - `im-server/im-message-service/src/main/java/com/im/message/**`
 - `im-server/im-push-service/src/main/java/com/im/push/**`
@@ -1435,6 +1435,16 @@
 测试方式：
 
 - `mvn -q -pl im-conversation-service,im-message-service,im-push-service -am test`
+
+完成记录：
+
+- 已实现 `READ_REPORT` CmdHandler：解析 `ReadReport` 后校验 tenant/user/conv 成员身份，并以 `READ_NOTIFY` 作为同步响应返回最终 `read_seq`。
+- `conversation_member.read_seq` 更新使用单调条件 `read_seq < request.read_seq`；回退请求不更新、不推送；超过 `conversation.max_seq` 直接拒绝。
+- 已新增内部 `ConversationRpc.GetMemberConv`，message 模块显式同步和 REST 历史均返回当前用户视角的 `read_seq`。
+- 已读通知通过 `PushRpc.PushToUsers` 发送 `READ_NOTIFY`，`need_ack=false`，并新增 `exclude_user_id/exclude_conn_id` 排除当前连接，只推给对端和自己其他端。
+- 已扩展端到端冒烟：两个客户端互发后，B 上报 read_seq=1，历史接口和 DB 均校验 B 的 read_seq。
+- 已执行 `mvn -q -pl im-conversation-service,im-message-service,im-push-service -am test`，通过。
+- 已执行外部冒烟 `ImServerMvpExternalSmokeTest`，本地 MySQL/Redis 环境下 `Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`，通过。
 
 ---
 

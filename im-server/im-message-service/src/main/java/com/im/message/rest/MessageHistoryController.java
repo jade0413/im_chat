@@ -45,6 +45,7 @@ public class MessageHistoryController {
     MessagePage page = messageQueryService.history(claims.userId(), convId, endSeq, limit);
     return ApiResponse.ok(new MessageHistoryResponse(
         convId,
+        page.readSeq(),
         page.messages().stream().map(this::toResponse).toList(),
         page.hasMore()));
   }

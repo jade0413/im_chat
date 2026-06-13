@@ -22,6 +22,8 @@ import com.im.message.service.MsgSavedEventFactory;
 import com.im.proto.body.MsgPush;
 import com.im.proto.body.MsgSend;
 import com.im.proto.body.MsgSendAck;
+import com.im.proto.body.ReadNotify;
+import com.im.proto.body.ReadReport;
 import com.im.proto.body.SyncReq;
 import com.im.proto.body.SyncResp;
 import com.im.proto.common.ConvType;
@@ -124,8 +126,13 @@ abstract class AbstractImServerMvpSmokeTest {
     assertThat(firstSynced.getServerMsgId()).isEqualTo(firstAck.getServerMsgId());
     assertThat(firstSynced.getContent().getText().getText()).isEqualTo("hello from alice");
 
+    ReadNotify readNotify = reportRead(uplink, userB, firstAck.getConvId(), 1L, "device-b", 3L);
+    assertThat(readNotify.getConvId()).isEqualTo(firstAck.getConvId());
+    assertThat(readNotify.getReaderUserId()).isEqualTo(userB);
+    assertThat(readNotify.getReadSeq()).isEqualTo(1L);
+
     MsgSendAck secondAck = sendTextToConversation(uplink, userB, firstAck.getConvId(),
-        "device-b", "reply from bob", 3L);
+        "device-b", "reply from bob", 4L);
     assertThat(secondAck.getCode()).isZero();
     assertThat(secondAck.getConvId()).isEqualTo(firstAck.getConvId());
     assertThat(secondAck.getServerMsgId()).isPositive();
@@ -136,7 +143,7 @@ abstract class AbstractImServerMvpSmokeTest {
     assertThat(verifyToken(reconnectedAuth, tokensA.accessToken(), "device-a-reconnect")).isEqualTo(userA);
     UplinkGrpc.UplinkBlockingStub reconnectedUplink = UplinkGrpc.newBlockingStub(channel());
     SyncResp reconnectSync = sync(reconnectedUplink, userA, firstAck.getConvId(),
-        1L, "device-a-reconnect", 4L);
+        1L, "device-a-reconnect", 5L);
     assertThat(reconnectSync.getDeltasList()).hasSize(1);
     SyncResp.ConvDelta reconnectDelta = reconnectSync.getDeltas(0);
     assertThat(reconnectDelta.getServerMaxSeq()).isEqualTo(2L);
@@ -148,6 +155,7 @@ abstract class AbstractImServerMvpSmokeTest {
 
     JsonNode history = history(tokensB.accessToken(), firstAck.getConvId());
     assertThat(history.at("/data/convId").asLong()).isEqualTo(firstAck.getConvId());
+    assertThat(history.at("/data/readSeq").asLong()).isEqualTo(1L);
     assertThat(history.at("/data/messages")).hasSize(2);
     assertThat(history.at("/data/messages/0/seq").asLong()).isEqualTo(2L);
     assertThat(history.at("/data/messages/0/serverMsgId").asLong()).isEqualTo(secondAck.getServerMsgId());
@@ -272,6 +280,28 @@ abstract class AbstractImServerMvpSmokeTest {
     return SyncResp.parseFrom(response.getBody());
   }
 
+  private ReadNotify reportRead(UplinkGrpc.UplinkBlockingStub uplink,
+      long userId,
+      long convId,
+      long readSeq,
+      String deviceId,
+      long reqId)
+      throws Exception {
+    ReadReport request = ReadReport.newBuilder()
+        .setConvId(convId)
+        .setReadSeq(readSeq)
+        .build();
+    UplinkResp response = uplink.dispatch(UplinkReq.newBuilder()
+        .setReqId(reqId)
+        .setCtx(ctx(userId, deviceId))
+        .setCmd(Cmd.READ_REPORT_VALUE)
+        .setBody(request.toByteString())
+        .build());
+
+    assertThat(response.getCmd()).isEqualTo(Cmd.READ_NOTIFY_VALUE);
+    return ReadNotify.parseFrom(response.getBody());
+  }
+
   private JsonNode history(String accessToken, long convId) throws Exception {
     MvcResult result = mockMvc.perform(get("/api/v1/convs/{convId}/messages", convId)
             .header(TenantContextFilter.TENANT_HEADER, TENANT_ID)
@@ -296,6 +326,11 @@ abstract class AbstractImServerMvpSmokeTest {
               .eq(ConversationMemberEntity::getConvId, firstAck.getConvId()));
       assertThat(members).extracting(ConversationMemberEntity::getUserId)
           .containsExactlyInAnyOrder(userA, userB);
+      assertThat(members.stream()
+          .filter(member -> member.getUserId().equals(userB))
+          .findFirst()
+          .orElseThrow()
+          .getReadSeq()).isEqualTo(1L);
 
       MessageEntity firstMessage = messageMapper.selectById(firstAck.getServerMsgId());
       assertThat(firstMessage).isNotNull();

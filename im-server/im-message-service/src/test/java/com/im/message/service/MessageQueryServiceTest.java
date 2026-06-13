@@ -48,11 +48,16 @@ class MessageQueryServiceTest {
 
   @Test
   void syncReturnsGapMessagesAndHasMore() {
-    MessageEntity latest = message(3L);
     MessageEntity first = message(2L);
     MessageEntity second = message(3L);
-    when(memberClient.getMemberUserIds(501L)).thenReturn(List.of(100L, 200L));
-    when(messageMapper.selectList(anyWrapper())).thenReturn(List.of(latest), List.of(first, second));
+    when(memberClient.getMemberConv(100L, 501L)).thenReturn(ConvInfo.newBuilder()
+        .setConvId(501L)
+        .setType(ConvType.C2C)
+        .setPeerUserId(200L)
+        .setMaxSeq(3L)
+        .setReadSeq(1L)
+        .build());
+    when(messageMapper.selectList(anyWrapper())).thenReturn(List.of(first, second));
     when(assembler.toPush(first)).thenReturn(push(2L));
     when(assembler.toPush(second)).thenReturn(push(3L));
 
@@ -63,6 +68,7 @@ class MessageQueryServiceTest {
         .build());
 
     assertThat(response.getDeltasList()).hasSize(1);
+    assertThat(response.getDeltas(0).getConv().getReadSeq()).isEqualTo(1L);
     assertThat(response.getDeltas(0).getServerMaxSeq()).isEqualTo(3L);
     assertThat(response.getDeltas(0).getMsgsList()).extracting(MsgPush::getSeq)
         .containsExactly(2L, 3L);
@@ -99,7 +105,11 @@ class MessageQueryServiceTest {
     MessageEntity newest = message(5L);
     MessageEntity older = message(4L);
     MessageEntity extra = message(3L);
-    when(memberClient.getMemberUserIds(501L)).thenReturn(List.of(100L, 200L));
+    when(memberClient.getMemberConv(100L, 501L)).thenReturn(ConvInfo.newBuilder()
+        .setConvId(501L)
+        .setMaxSeq(5L)
+        .setReadSeq(4L)
+        .build());
     when(messageMapper.selectList(anyWrapper())).thenReturn(List.of(newest, older, extra));
     when(assembler.toPush(newest)).thenReturn(push(5L));
     when(assembler.toPush(older)).thenReturn(push(4L));
@@ -107,12 +117,13 @@ class MessageQueryServiceTest {
     MessagePage page = historyWithTenant(100L, 501L, null, 2);
 
     assertThat(page.hasMore()).isTrue();
+    assertThat(page.readSeq()).isEqualTo(4L);
     assertThat(page.messages()).extracting(MsgPush::getSeq).containsExactly(5L, 4L);
   }
 
   @Test
   void rejectsHistoryForNonMember() {
-    when(memberClient.getMemberUserIds(501L)).thenReturn(List.of(200L));
+    when(memberClient.getMemberConv(100L, 501L)).thenThrow(new ImException(ErrorCode.NOT_CONV_MEMBER));
 
     assertThatThrownBy(() -> historyWithTenant(100L, 501L, null, 20))
         .isInstanceOf(ImException.class)

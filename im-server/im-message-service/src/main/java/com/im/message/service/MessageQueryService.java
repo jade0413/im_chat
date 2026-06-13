@@ -1,8 +1,6 @@
 package com.im.message.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.im.common.error.ErrorCode;
-import com.im.common.error.ImException;
 import com.im.common.tenant.TenantContext;
 import com.im.message.dao.entity.MessageEntity;
 import com.im.message.dao.mapper.MessageMapper;
@@ -11,7 +9,6 @@ import com.im.proto.body.MsgPush;
 import com.im.proto.body.SyncReq;
 import com.im.proto.body.SyncResp;
 import com.im.proto.rpc.PullMsgsReq;
-import java.util.ArrayList;
 import java.util.List;
 import org.springframework.stereotype.Service;
 
@@ -46,18 +43,17 @@ public class MessageQueryService {
     }
     for (SyncReq.ConvVersion version : request.getConvVersionsList()) {
       long conversationId = version.getConvId();
-      ensureMember(conversationId, userId);
-      long serverMaxSeq = maxSeq(conversationId);
+      ConvInfo conv = memberClient.getMemberConv(userId, conversationId);
+      long serverMaxSeq = conv.getMaxSeq();
       long beginSeq = version.getLocalMaxSeq() + 1;
-      addDelta(response, ConvInfo.newBuilder().setConvId(conversationId).setMaxSeq(serverMaxSeq).build(),
-          beginSeq, serverMaxSeq);
+      addDelta(response, conv, beginSeq, serverMaxSeq);
     }
     return response.build();
   }
 
   public MessagePage history(long userId, long conversationId, Long endSeq, int limit) {
     TenantContext.requiredTenantId();
-    ensureMember(conversationId, userId);
+    ConvInfo conv = memberClient.getMemberConv(userId, conversationId);
     long effectiveEndSeq = endSeq == null || endSeq <= 0 ? Long.MAX_VALUE : endSeq;
     int effectiveLimit = normalizeLimit(limit);
     List<MessageEntity> entities = messageMapper.selectList(Wrappers.lambdaQuery(MessageEntity.class)
@@ -72,7 +68,7 @@ public class MessageQueryService {
     List<MsgPush> messages = entities.stream()
         .map(assembler::toPush)
         .toList();
-    return new MessagePage(messages, hasMore);
+    return new MessagePage(messages, hasMore, conv.getReadSeq());
   }
 
   public List<MsgPush> pullForRpc(PullMsgsReq request) {
@@ -84,7 +80,7 @@ public class MessageQueryService {
 
   private MessagePage range(long conversationId, long beginSeq, long endSeq, int limit) {
     if (conversationId <= 0 || beginSeq <= 0 || endSeq < beginSeq) {
-      return new MessagePage(List.of(), false);
+      return new MessagePage(List.of(), false, 0L);
     }
     int effectiveLimit = normalizeLimit(limit);
     List<MessageEntity> entities = messageMapper.selectList(Wrappers.lambdaQuery(MessageEntity.class)
@@ -97,7 +93,7 @@ public class MessageQueryService {
     if (hasMore) {
       entities = entities.subList(0, effectiveLimit);
     }
-    return new MessagePage(entities.stream().map(assembler::toPush).toList(), hasMore);
+    return new MessagePage(entities.stream().map(assembler::toPush).toList(), hasMore, 0L);
   }
 
   private void addDelta(SyncResp.Builder response, ConvInfo conv, long beginSeq, long serverMaxSeq) {
@@ -117,27 +113,6 @@ public class MessageQueryService {
         .addAllMsgs(page.messages())
         .setServerMaxSeq(serverMaxSeq)
         .setHasMore(page.hasMore()));
-  }
-
-  private long maxSeq(long conversationId) {
-    List<MessageEntity> latest = messageMapper.selectList(Wrappers.lambdaQuery(MessageEntity.class)
-        .eq(MessageEntity::getConversationId, conversationId)
-        .orderByDesc(MessageEntity::getSeq)
-        .last("LIMIT 1"));
-    if (latest.isEmpty()) {
-      return 0L;
-    }
-    return latest.getFirst().getSeq();
-  }
-
-  private void ensureMember(long conversationId, long userId) {
-    if (conversationId <= 0 || userId <= 0) {
-      throw new ImException(ErrorCode.VALIDATION_FAILED);
-    }
-    List<Long> userIds = new ArrayList<>(memberClient.getMemberUserIds(conversationId));
-    if (userIds.stream().noneMatch(memberUserId -> memberUserId == userId)) {
-      throw new ImException(ErrorCode.NOT_CONV_MEMBER);
-    }
   }
 
   private int normalizeLimit(int limit) {
