@@ -34,6 +34,12 @@ public final class RedisKeys {
     return "push:event:" + tenantId + ":" + eventId;
   }
 
+  public static String moderationEventDedup(long tenantId, long eventId) {
+    validatePositive("tenantId", tenantId);
+    validatePositive("eventId", eventId);
+    return "moderation:event:" + tenantId + ":" + eventId;
+  }
+
   public static String messageDedup(long tenantId, String clientMsgId) {
     validatePositive("tenantId", tenantId);
     if (clientMsgId == null || clientMsgId.isBlank()) {

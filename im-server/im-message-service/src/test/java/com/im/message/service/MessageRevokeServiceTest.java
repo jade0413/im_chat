@@ -152,6 +152,24 @@ class MessageRevokeServiceTest {
         org.mockito.Mockito.eq("msg.revoked.1"), org.mockito.Mockito.any());
   }
 
+  @Test
+  void moderationCanRevokeWithSystemOperator() throws Exception {
+    when(messageMapper.selectByConversationSeq(1L, 501L, 3L)).thenReturn(message(1));
+    when(messageMapper.markRevoked(1L, 501L, 3L, MessageAssembler.STATUS_REVOKED,
+        RevokeReason.BY_MODERATION.getNumber())).thenReturn(1);
+
+    boolean revoked = TenantContext.callWithTenant(1L,
+        () -> service.revokeIfNeeded(501L, 3L, RevokeReason.BY_MODERATION, 0L));
+
+    assertThat(revoked).isTrue();
+    verify(memberClient, never()).getMemberConv(org.mockito.Mockito.anyLong(), org.mockito.Mockito.anyLong());
+    verify(outboxWriter).write(org.mockito.Mockito.eq(1L), org.mockito.Mockito.eq("msg.revoked"),
+        org.mockito.Mockito.eq("msg.revoked.1"), payloadCaptor.capture());
+    MsgRevokedEvent event = MsgRevokedEvent.parseFrom(payloadCaptor.getValue());
+    assertThat(event.getReason()).isEqualTo(RevokeReason.BY_MODERATION.getNumber());
+    assertThat(event.getOperatorUserId()).isZero();
+  }
+
   private void revokeWithTenant(RevokeReason reason, long operatorUserId) {
     TenantContext.runWithTenant(1L, () -> {
       service.revoke(501L, 3L, reason, operatorUserId);

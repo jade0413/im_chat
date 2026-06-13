@@ -1622,11 +1622,62 @@
 
 ---
 
+### T29 — 内容安全审核最小版
+
+状态：DONE
+
+目标：
+
+- 实现 D16 的最小闭环：文本消息先发后审，命中敏感词后复用撤回链路下发撤回通知，并写入审核日志留证。
+- MVP 只做本地敏感词审核，不接第三方图片/语音审核、不做复杂处罚和申诉后台。
+
+涉及模块：
+
+- `im-server/im-message-service`
+- `im-server/im-common`
+- `im-server/im-bootstrap`
+- `TASKS.md`
+
+需要修改的文件：
+
+- `im-server/im-message-service/src/main/java/com/im/message/moderation/**`
+- `im-server/im-message-service/src/main/java/com/im/message/service/MessageRevokeService.java`
+- `im-server/im-common/src/main/java/com/im/common/mybatis/TenantLineHandlerConfig.java`
+- `im-server/im-common/src/main/java/com/im/common/redis/RedisKeys.java`
+- `im-server/im-bootstrap/src/main/resources/db/migration/V4__moderation.sql`
+- `im-server/im-message-service/src/test/java/com/im/message/moderation/**`
+- `TASKS.md`
+
+验收标准：
+
+- `msg.saved.*` 事件会触发审核消费者；非文本消息跳过。
+- 敏感词支持平台级 `tenant_id IS NULL` 和租户级词库，`word.reload` 事件可热刷新本地缓存。
+- 命中 REVOKE 词后调用 `MessageRevokeService`，以 `BY_MODERATION` 原因撤回消息，并通过现有 outbox 产生 `msg.revoked`。
+- `moderation_log` 写入 `provider/category/action_taken/original_content`，重复事件不重复处理。
+- 新增 Flyway migration 覆盖 `sensitive_word` / `moderation_log`，不依赖 docker 初始 schema。
+
+测试方式：
+
+- `mvn -q -pl im-message-service -am test`
+- `mvn -q -pl im-bootstrap -am test`
+
+完成记录：
+
+- 新增 `V4__moderation.sql`，补齐 `sensitive_word` / `moderation_log` Flyway 迁移，并为 `moderation_log` 增加 `(tenant_id, message_id, provider)` 唯一键防重复日志。
+- 新增 `com.im.message.moderation` 子包：监听 `msg.saved.*` 做文本敏感词审核，监听 `word.reload` 热刷新词库缓存。
+- 词库匹配支持平台级 `tenant_id IS NULL` 和租户级词；`sensitive_word` 因平台词语义加入 MyBatis tenant ignore，mapper SQL 显式约束租户范围。
+- 命中 REVOKE 词后，审核服务在同一事务内调用 `MessageRevokeService.revokeIfNeeded(..., BY_MODERATION, 0)` 并写入 `moderation_log.original_content` 留证。
+- 新增 Redis 审核事件去重 key，避免 clean 消息被重复扫描；违规消息同时依赖 `moderation_log` 唯一键和撤回幂等兜底。
+- `MessageRevokeService` 保留原 REST/gRPC `revoke` 入口，并新增返回 boolean 的 `revokeIfNeeded` 供审核链路判断是否真的撤回。
+- 已执行 `mvn -q -pl im-message-service -am test`，通过。
+- 已执行 `mvn -q -pl im-bootstrap -am test`，通过。
+
+---
+
 ## 4. 后续候选任务（当前阶段不执行）
 
 这些任务进入后续阶段，不在当前 im-server MVP 优先队列：
 
-- 内容安全审核。
 - 客服会话。
 - Web/App 客户端。
 - 图片/语音消息（PR1 复审 Q3）：进入文件上传与消息类型 PR。

@@ -55,6 +55,12 @@ public class MessageRevokeService {
 
   @Transactional
   public void revoke(long conversationId, long seq, RevokeReason reason, long operatorUserId) {
+    revokeIfNeeded(conversationId, seq, reason, operatorUserId);
+  }
+
+  @Transactional
+  public boolean revokeIfNeeded(long conversationId, long seq, RevokeReason reason,
+      long operatorUserId) {
     long tenantId = TenantContext.requiredTenantId();
     validateRequest(conversationId, seq, reason, operatorUserId);
     MessageEntity message = messageMapper.selectByConversationSeq(tenantId, conversationId, seq);
@@ -62,7 +68,7 @@ public class MessageRevokeService {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "message not found");
     }
     if (isRevoked(message)) {
-      return;
+      return false;
     }
     validatePermission(message, reason, operatorUserId);
     int updated = messageMapper.markRevoked(
@@ -72,7 +78,7 @@ public class MessageRevokeService {
         MessageAssembler.STATUS_REVOKED,
         reason.getNumber());
     if (updated == 0) {
-      return;
+      return false;
     }
     conversationProgressMapper.updateLastMessageAbstractIfLatest(
         tenantId, conversationId, seq, REVOKED_ABSTRACT);
@@ -84,15 +90,19 @@ public class MessageRevokeService {
         reason.getNumber(),
         operatorUserId);
     outboxWriter.write(tenantId, event.eventType(), event.routingKey(), event.payload());
+    return true;
   }
 
   private void validateRequest(long conversationId, long seq, RevokeReason reason,
       long operatorUserId) {
-    if (conversationId <= 0 || seq <= 0 || operatorUserId <= 0) {
+    if (conversationId <= 0 || seq <= 0) {
       throw new ImException(ErrorCode.VALIDATION_FAILED);
     }
     if (reason == null || reason == RevokeReason.REVOKE_REASON_UNSPECIFIED) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "revoke reason is required");
+    }
+    if (reason != RevokeReason.BY_MODERATION && operatorUserId <= 0) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED);
     }
   }
 
