@@ -13,6 +13,8 @@ import com.im.common.error.ImException;
 import com.im.common.tenant.TenantContext;
 import com.im.conversation.dao.entity.ConversationEntity;
 import com.im.conversation.dao.entity.ConversationMemberEntity;
+import com.im.conversation.dao.entity.GroupInfoEntity;
+import com.im.conversation.dao.mapper.ConversationGroupInfoMapper;
 import com.im.conversation.dao.mapper.ConversationMapper;
 import com.im.conversation.dao.mapper.ConversationMemberMapper;
 import com.im.proto.body.ConvInfo;
@@ -37,6 +39,9 @@ class ConversationServiceTest {
   private ConversationMemberMapper memberMapper;
 
   @Mock
+  private ConversationGroupInfoMapper groupInfoMapper;
+
+  @Mock
   private ConversationCreator conversationCreator;
 
   private ConversationService service;
@@ -46,6 +51,7 @@ class ConversationServiceTest {
     service = new ConversationService(
         conversationMapper,
         memberMapper,
+        groupInfoMapper,
         new C2cKeyGenerator(),
         conversationCreator);
   }
@@ -132,14 +138,36 @@ class ConversationServiceTest {
   }
 
   @Test
-  void rejectsUnsupportedGroupTarget() {
-    assertThatThrownBy(() -> resolveWithTenant(ResolveConvReq.newBuilder()
+  void resolvesGroupConversationByGroupId() {
+    ConversationEntity groupConversation = groupConversation(601L, 10L);
+    when(conversationMapper.selectOne(anyWrapper())).thenReturn(groupConversation);
+    when(memberMapper.selectOne(anyWrapper())).thenReturn(member(601L, 100L));
+    when(groupInfoMapper.selectById(10L)).thenReturn(group(10L, "team"));
+
+    ConvInfo conv = resolveWithTenant(ResolveConvReq.newBuilder()
         .setFromUserId(100L)
+        .setGroupId(10L)
+        .build());
+
+    assertThat(conv.getConvId()).isEqualTo(601L);
+    assertThat(conv.getType()).isEqualTo(ConvType.GROUP);
+    assertThat(conv.getGroupId()).isEqualTo(10L);
+    assertThat(conv.getTitle()).isEqualTo("team");
+  }
+
+  @Test
+  void rejectsNonMemberWhenResolvingGroup() {
+    ConversationEntity groupConversation = groupConversation(601L, 10L);
+    when(conversationMapper.selectOne(anyWrapper())).thenReturn(groupConversation);
+    when(memberMapper.selectOne(anyWrapper())).thenReturn(null);
+
+    assertThatThrownBy(() -> resolveWithTenant(ResolveConvReq.newBuilder()
+        .setFromUserId(200L)
         .setGroupId(10L)
         .build()))
         .isInstanceOf(ImException.class)
         .extracting("errorCode")
-        .isEqualTo(ErrorCode.VALIDATION_FAILED);
+        .isEqualTo(ErrorCode.NOT_GROUP_MEMBER);
   }
 
   @Test
@@ -199,6 +227,24 @@ class ConversationServiceTest {
     conversation.setMaxSeq(0L);
     conversation.setLastMsgAbstract("");
     return conversation;
+  }
+
+  private ConversationEntity groupConversation(long id, long groupId) {
+    ConversationEntity conversation = new ConversationEntity();
+    conversation.setId(id);
+    conversation.setType(ConvType.GROUP.getNumber());
+    conversation.setGroupId(groupId);
+    conversation.setMaxSeq(0L);
+    conversation.setLastMsgAbstract("");
+    return conversation;
+  }
+
+  private GroupInfoEntity group(long id, String name) {
+    GroupInfoEntity group = new GroupInfoEntity();
+    group.setId(id);
+    group.setName(name);
+    group.setAvatar("");
+    return group;
   }
 
   private ConversationMemberEntity member(long conversationId, long userId) {

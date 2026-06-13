@@ -8,6 +8,7 @@ import com.im.proto.body.ConvInfo;
 import com.im.proto.body.MsgPush;
 import com.im.proto.body.SyncReq;
 import com.im.proto.body.SyncResp;
+import com.im.proto.common.ConvType;
 import com.im.proto.rpc.PullMsgsReq;
 import java.util.List;
 import org.springframework.stereotype.Service;
@@ -66,7 +67,7 @@ public class MessageQueryService {
       entities = entities.subList(0, effectiveLimit);
     }
     List<MsgPush> messages = entities.stream()
-        .map(assembler::toPush)
+        .map(entity -> toPush(entity, conv.getType()))
         .toList();
     return new MessagePage(messages, hasMore, conv.getReadSeq());
   }
@@ -75,10 +76,12 @@ public class MessageQueryService {
     TenantContext.requiredTenantId();
     int limit = normalizeLimit(request.getLimit());
     long endSeq = request.getEndSeq() <= 0 ? Long.MAX_VALUE : request.getEndSeq();
-    return range(request.getConvId(), request.getBeginSeq(), endSeq, limit).messages();
+    return range(request.getConvId(), request.getBeginSeq(), endSeq, limit,
+        ConvType.CONV_TYPE_UNSPECIFIED).messages();
   }
 
-  private MessagePage range(long conversationId, long beginSeq, long endSeq, int limit) {
+  private MessagePage range(long conversationId, long beginSeq, long endSeq, int limit,
+      ConvType convType) {
     if (conversationId <= 0 || beginSeq <= 0 || endSeq < beginSeq) {
       return new MessagePage(List.of(), false, 0L);
     }
@@ -93,7 +96,9 @@ public class MessageQueryService {
     if (hasMore) {
       entities = entities.subList(0, effectiveLimit);
     }
-    return new MessagePage(entities.stream().map(assembler::toPush).toList(), hasMore, 0L);
+    return new MessagePage(entities.stream()
+        .map(entity -> toPush(entity, convType))
+        .toList(), hasMore, 0L);
   }
 
   private void addDelta(SyncResp.Builder response, ConvInfo conv, long beginSeq, long serverMaxSeq) {
@@ -107,7 +112,7 @@ public class MessageQueryService {
     if (serverMaxSeq < beginSeq) {
       return;
     }
-    MessagePage page = range(conv.getConvId(), beginSeq, serverMaxSeq, DEFAULT_LIMIT);
+    MessagePage page = range(conv.getConvId(), beginSeq, serverMaxSeq, DEFAULT_LIMIT, conv.getType());
     response.addDeltas(SyncResp.ConvDelta.newBuilder()
         .setConv(conv.toBuilder().setMaxSeq(serverMaxSeq))
         .addAllMsgs(page.messages())
@@ -120,5 +125,12 @@ public class MessageQueryService {
       return DEFAULT_LIMIT;
     }
     return Math.min(limit, MAX_LIMIT);
+  }
+
+  private MsgPush toPush(MessageEntity entity, ConvType convType) {
+    if (convType == ConvType.GROUP) {
+      return assembler.toPush(entity, ConvType.GROUP);
+    }
+    return assembler.toPush(entity);
   }
 }

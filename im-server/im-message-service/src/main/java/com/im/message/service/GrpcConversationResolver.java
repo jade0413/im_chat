@@ -41,8 +41,9 @@ public class GrpcConversationResolver implements ConversationResolver {
     if (!response.hasConv() || response.getConv().getConvId() <= 0) {
       throw new ImException(ErrorCode.INTERNAL_ERROR, "conversation resolver returned empty conv");
     }
-    if (response.getConv().getType() != ConvType.C2C) {
-      throw new ImException(ErrorCode.VALIDATION_FAILED, "only c2c message is supported");
+    ConvType type = response.getConv().getType();
+    if (type != ConvType.C2C && type != ConvType.GROUP) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "unsupported conversation type");
     }
     return response.getConv();
   }
@@ -53,7 +54,7 @@ public class GrpcConversationResolver implements ConversationResolver {
     return switch (request.getTargetCase()) {
       case TO_USER_ID -> builder.setToUserId(request.getToUserId()).build();
       case CONV_ID -> builder.setConvId(request.getConvId()).build();
-      case GROUP_ID -> throw new ImException(ErrorCode.VALIDATION_FAILED, "group message is not supported yet");
+      case GROUP_ID -> builder.setGroupId(request.getGroupId()).build();
       case TARGET_NOT_SET -> throw new ImException(ErrorCode.VALIDATION_FAILED, "message target is required");
     };
   }

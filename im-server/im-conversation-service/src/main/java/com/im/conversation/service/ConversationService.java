@@ -6,6 +6,8 @@ import com.im.common.error.ImException;
 import com.im.common.tenant.TenantContext;
 import com.im.conversation.dao.entity.ConversationEntity;
 import com.im.conversation.dao.entity.ConversationMemberEntity;
+import com.im.conversation.dao.entity.GroupInfoEntity;
+import com.im.conversation.dao.mapper.ConversationGroupInfoMapper;
 import com.im.conversation.dao.mapper.ConversationMapper;
 import com.im.conversation.dao.mapper.ConversationMemberMapper;
 import com.im.proto.body.ConvInfo;
@@ -22,15 +24,18 @@ public class ConversationService {
 
   private final ConversationMapper conversationMapper;
   private final ConversationMemberMapper memberMapper;
+  private final ConversationGroupInfoMapper groupInfoMapper;
   private final C2cKeyGenerator c2cKeyGenerator;
   private final ConversationCreator conversationCreator;
 
   public ConversationService(ConversationMapper conversationMapper,
       ConversationMemberMapper memberMapper,
+      ConversationGroupInfoMapper groupInfoMapper,
       C2cKeyGenerator c2cKeyGenerator,
       ConversationCreator conversationCreator) {
     this.conversationMapper = conversationMapper;
     this.memberMapper = memberMapper;
+    this.groupInfoMapper = groupInfoMapper;
     this.c2cKeyGenerator = c2cKeyGenerator;
     this.conversationCreator = conversationCreator;
   }
@@ -42,8 +47,8 @@ public class ConversationService {
     }
     return switch (request.getTargetCase()) {
       case TO_USER_ID -> resolveC2c(request.getFromUserId(), request.getToUserId());
-      case CONV_ID -> resolveExistingC2c(request.getFromUserId(), request.getConvId());
-      case GROUP_ID -> throw new ImException(ErrorCode.VALIDATION_FAILED, "group conversation is not supported yet");
+      case CONV_ID -> resolveExisting(request.getFromUserId(), request.getConvId());
+      case GROUP_ID -> resolveGroup(request.getFromUserId(), request.getGroupId());
       case TARGET_NOT_SET -> throw new ImException(ErrorCode.VALIDATION_FAILED, "conversation target is required");
     };
   }
@@ -55,6 +60,7 @@ public class ConversationService {
     }
     return memberMapper.selectList(Wrappers.lambdaQuery(ConversationMemberEntity.class)
             .eq(ConversationMemberEntity::getConvId, conversationId)
+            .isNull(ConversationMemberEntity::getDeletedAt)
             .orderByAsc(ConversationMemberEntity::getUserId))
         .stream()
         .map(ConversationMemberEntity::getUserId)
@@ -109,7 +115,7 @@ public class ConversationService {
     }
   }
 
-  private ConvInfo resolveExistingC2c(long fromUserId, long conversationId) {
+  private ConvInfo resolveExisting(long fromUserId, long conversationId) {
     if (conversationId <= 0) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "conv_id must be positive");
     }
@@ -117,20 +123,49 @@ public class ConversationService {
     if (conversation == null) {
       throw new ImException(ErrorCode.CONV_NOT_FOUND);
     }
-    if (!Integer.valueOf(ConvType.C2C.getNumber()).equals(conversation.getType())) {
-      throw new ImException(ErrorCode.VALIDATION_FAILED, "only c2c conversation is supported");
+    ConvType type = convType(conversation);
+    if (type == ConvType.C2C) {
+      return resolveExistingC2c(fromUserId, conversation);
     }
+    if (type == ConvType.GROUP) {
+      return resolveExistingGroup(fromUserId, conversation);
+    }
+    throw new ImException(ErrorCode.VALIDATION_FAILED, "unsupported conversation type");
+  }
 
-    ConversationMemberEntity currentMember = findMember(conversationId, fromUserId);
+  private ConvInfo resolveExistingC2c(long fromUserId, ConversationEntity conversation) {
+    ConversationMemberEntity currentMember = findMember(conversation.getId(), fromUserId);
     if (currentMember == null) {
       throw new ImException(ErrorCode.NOT_CONV_MEMBER);
     }
-    long peerUserId = findMembers(conversationId).stream()
+    long peerUserId = findMembers(conversation.getId()).stream()
         .map(ConversationMemberEntity::getUserId)
         .filter(userId -> userId != fromUserId)
         .findFirst()
         .orElseThrow(() -> new ImException(ErrorCode.INTERNAL_ERROR, "c2c peer member not found"));
     return toConvInfo(conversation, peerUserId, currentMember);
+  }
+
+  private ConvInfo resolveGroup(long fromUserId, long groupId) {
+    if (groupId <= 0) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "group_id must be positive");
+    }
+    ConversationEntity conversation = conversationMapper.selectOne(Wrappers
+        .lambdaQuery(ConversationEntity.class)
+        .eq(ConversationEntity::getType, ConvType.GROUP.getNumber())
+        .eq(ConversationEntity::getGroupId, groupId));
+    if (conversation == null) {
+      throw new ImException(ErrorCode.GROUP_NOT_FOUND);
+    }
+    return resolveExistingGroup(fromUserId, conversation);
+  }
+
+  private ConvInfo resolveExistingGroup(long fromUserId, ConversationEntity conversation) {
+    ConversationMemberEntity currentMember = findMember(conversation.getId(), fromUserId);
+    if (currentMember == null) {
+      throw new ImException(ErrorCode.NOT_GROUP_MEMBER);
+    }
+    return toConvInfo(conversation, 0L, currentMember);
   }
 
   private ConversationEntity findByC2cKey(String c2cKey) {
@@ -141,12 +176,14 @@ public class ConversationService {
   private ConversationMemberEntity findMember(long conversationId, long userId) {
     return memberMapper.selectOne(Wrappers.lambdaQuery(ConversationMemberEntity.class)
         .eq(ConversationMemberEntity::getConvId, conversationId)
-        .eq(ConversationMemberEntity::getUserId, userId));
+        .eq(ConversationMemberEntity::getUserId, userId)
+        .isNull(ConversationMemberEntity::getDeletedAt));
   }
 
   private List<ConversationMemberEntity> findMembers(long conversationId) {
     return memberMapper.selectList(Wrappers.lambdaQuery(ConversationMemberEntity.class)
         .eq(ConversationMemberEntity::getConvId, conversationId)
+        .isNull(ConversationMemberEntity::getDeletedAt)
         .orderByAsc(ConversationMemberEntity::getUserId));
   }
 
@@ -191,7 +228,23 @@ public class ConversationService {
     if (conversation.getLastMsgTime() != null) {
       builder.setLastMsgTime(conversation.getLastMsgTime().toInstant(ZoneOffset.UTC).toEpochMilli());
     }
+    if (type == ConvType.GROUP) {
+      applyGroupInfo(builder, conversation);
+    }
     return builder.build();
+  }
+
+  private void applyGroupInfo(ConvInfo.Builder builder, ConversationEntity conversation) {
+    Long groupId = conversation.getGroupId();
+    if (groupId == null || groupId <= 0) {
+      throw new ImException(ErrorCode.GROUP_NOT_FOUND);
+    }
+    GroupInfoEntity group = groupInfoMapper.selectById(groupId);
+    if (group == null) {
+      throw new ImException(ErrorCode.GROUP_NOT_FOUND);
+    }
+    builder.setTitle(nullToBlank(group.getName()))
+        .setAvatar(nullToBlank(group.getAvatar()));
   }
 
   private ConvType convType(ConversationEntity conversation) {
@@ -202,6 +255,9 @@ public class ConversationService {
   private String defaultTitle(ConvType type, long peerUserId) {
     if (type == ConvType.C2C && peerUserId > 0) {
       return Long.toString(peerUserId);
+    }
+    if (type == ConvType.GROUP) {
+      return "";
     }
     return "";
   }

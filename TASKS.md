@@ -1450,7 +1450,7 @@
 
 ### T26 — 群聊 MVP
 
-状态：PENDING
+状态：DONE
 
 目标：
 
@@ -1484,6 +1484,18 @@
 测试方式：
 
 - `mvn -q -pl im-group-service,im-conversation-service,im-message-service -am test`
+
+完成记录：
+
+- 已新增 group-service REST 写入口：建群、加成员、踢成员、改名。
+- 建群会同事务写入 `group_info`、`group_member`、`conversation`、`conversation_member`，并追加 `group.created` NotificationContent 系统消息。
+- 成员变更和改名会追加 `group.member_added`、`group.member_removed`、`group.name_changed` 系统消息，走 `msg.saved` outbox，不新增旁路通知通道。
+- 群成员上限从 `tenant_config.max_group_members` 读取，默认 500；超限返回 `GROUP_FULL`。
+- message/conversation 已支持 `group_id` 和 GROUP `conv_id` 解析，非群成员不能发群消息；群消息同步和历史返回 GROUP 类型。
+- 已补充 group-service 单测、conversation GROUP 解析单测、bootstrap E2E 群聊冒烟。
+- 已执行 `mvn -q -pl im-group-service,im-conversation-service,im-message-service -am test`，通过。
+- 已执行 `mvn -q -pl im-bootstrap -am test`，通过；本机无 Docker socket，Testcontainers 用例按既有配置跳过。
+- 已执行外部冒烟 `ImServerMvpExternalSmokeTest`，本地 MySQL/Redis 环境下 `Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`，通过。
 
 ---
 

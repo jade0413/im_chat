@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 public class MessageAssembler {
 
   public static final int MSG_TYPE_TEXT = 1;
+  public static final int MSG_TYPE_NOTIFICATION = 10;
   public static final int STATUS_NORMAL = 1;
   public static final int OUTBOX_PENDING = 0;
   public static final String EVENT_MSG_SAVED = MsgSavedEventFactory.EVENT_TYPE;
@@ -74,9 +75,13 @@ public class MessageAssembler {
   }
 
   public MsgPush toPush(MessageEntity message) {
+    return toPush(message, com.im.proto.common.ConvType.C2C);
+  }
+
+  public MsgPush toPush(MessageEntity message, com.im.proto.common.ConvType convType) {
     return MsgPush.newBuilder()
         .setConvId(message.getConversationId())
-        .setConvType(com.im.proto.common.ConvType.C2C)
+        .setConvType(convType == null ? com.im.proto.common.ConvType.CONV_TYPE_UNSPECIFIED : convType)
         .setSeq(message.getSeq())
         .setServerMsgId(message.getId())
         .setClientMsgId(nullToBlank(message.getClientMsgId()))

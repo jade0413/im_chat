@@ -165,6 +165,32 @@ abstract class AbstractImServerMvpSmokeTest {
     assertThat(history.at("/data/messages/1/text").asText()).isEqualTo("hello from alice");
 
     assertDatabaseState(userA, userB, firstAck, secondAck);
+
+    JsonNode group = createGroup(tokensA.accessToken(), "e2e group " + suffix, userB);
+    long groupId = group.at("/data/groupId").asLong();
+    long groupConvId = group.at("/data/convId").asLong();
+    assertThat(groupId).isPositive();
+    assertThat(groupConvId).isPositive();
+    assertThat(group.at("/data/memberCount").asInt()).isEqualTo(2);
+
+    MsgSendAck groupAck = sendTextToGroup(reconnectedUplink, userA, groupId,
+        "device-a-reconnect", "hello group", 6L);
+    assertThat(groupAck.getCode()).isZero();
+    assertThat(groupAck.getConvId()).isEqualTo(groupConvId);
+    assertThat(groupAck.getSeq()).isEqualTo(2L);
+
+    SyncResp groupSync = sync(reconnectedUplink, userB, groupConvId, 0L,
+        "device-b", 7L);
+    assertThat(groupSync.getDeltasList()).hasSize(1);
+    SyncResp.ConvDelta groupDelta = groupSync.getDeltas(0);
+    assertThat(groupDelta.getConv().getType()).isEqualTo(ConvType.GROUP);
+    assertThat(groupDelta.getConv().getGroupId()).isEqualTo(groupId);
+    assertThat(groupDelta.getConv().getTitle()).isEqualTo("e2e group " + suffix);
+    assertThat(groupDelta.getServerMaxSeq()).isEqualTo(2L);
+    assertThat(groupDelta.getMsgsList()).hasSize(2);
+    assertThat(groupDelta.getMsgs(0).getContent().getNotification().getEventType())
+        .isEqualTo("group.created");
+    assertThat(groupDelta.getMsgs(1).getContent().getText().getText()).isEqualTo("hello group");
   }
 
   private void register(String account, String nickname) throws Exception {
@@ -239,6 +265,22 @@ abstract class AbstractImServerMvpSmokeTest {
     return sendText(uplink, senderId, deviceId, request, reqId);
   }
 
+  private MsgSendAck sendTextToGroup(UplinkGrpc.UplinkBlockingStub uplink,
+      long senderId,
+      long groupId,
+      String deviceId,
+      String text,
+      long reqId)
+      throws Exception {
+    MsgSend request = MsgSend.newBuilder()
+        .setClientMsgId("client-" + UUID.randomUUID())
+        .setGroupId(groupId)
+        .setContent(MsgContent.newBuilder()
+            .setText(TextContent.newBuilder().setText(text)))
+        .build();
+    return sendText(uplink, senderId, deviceId, request, reqId);
+  }
+
   private MsgSendAck sendText(UplinkGrpc.UplinkBlockingStub uplink,
       long senderId,
       String deviceId,
@@ -307,6 +349,19 @@ abstract class AbstractImServerMvpSmokeTest {
             .header(TenantContextFilter.TENANT_HEADER, TENANT_ID)
             .header("Authorization", "Bearer " + accessToken)
             .queryParam("limit", "20"))
+        .andExpect(status().isOk())
+        .andReturn();
+    return objectMapper.readTree(result.getResponse().getContentAsByteArray());
+  }
+
+  private JsonNode createGroup(String accessToken, String name, long memberUserId) throws Exception {
+    MvcResult result = mockMvc.perform(post("/api/v1/groups")
+            .header(TenantContextFilter.TENANT_HEADER, TENANT_ID)
+            .header("Authorization", "Bearer " + accessToken)
+            .contentType("application/json")
+            .content("""
+                {"name":"%s","memberUserIds":[%d]}
+                """.formatted(name, memberUserId)))
         .andExpect(status().isOk())
         .andReturn();
     return objectMapper.readTree(result.getResponse().getContentAsByteArray());

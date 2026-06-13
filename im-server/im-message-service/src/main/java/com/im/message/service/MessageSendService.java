@@ -6,6 +6,7 @@ import com.im.common.tenant.TenantContext;
 import com.im.message.dao.entity.MessageEntity;
 import com.im.proto.body.ConvInfo;
 import com.im.proto.body.MsgSend;
+import com.im.proto.common.ConvType;
 import com.im.proto.common.MsgContent;
 import com.im.proto.rpc.ConnCtx;
 import org.springframework.dao.DuplicateKeyException;
@@ -51,7 +52,7 @@ public class MessageSendService {
       relationClient.ensureCanSendC2c(ctx.getUserId(), request.getToUserId());
     }
     ConvInfo conv = conversationResolver.resolve(ctx, request);
-    if (request.getTargetCase() == MsgSend.TargetCase.CONV_ID) {
+    if (request.getTargetCase() == MsgSend.TargetCase.CONV_ID && conv.getType() == ConvType.C2C) {
       relationClient.ensureCanSendC2c(ctx.getUserId(), conv.getPeerUserId());
     }
     try {
@@ -85,9 +86,6 @@ public class MessageSendService {
     }
     if (request.getTargetCase() == MsgSend.TargetCase.TARGET_NOT_SET) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "message target is required");
-    }
-    if (request.getTargetCase() == MsgSend.TargetCase.GROUP_ID) {
-      throw new ImException(ErrorCode.VALIDATION_FAILED, "group message is not supported yet");
     }
     if (!request.hasContent()) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "message content is required");

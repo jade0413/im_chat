@@ -71,11 +71,18 @@ com.im.{module}/
 | user | GatewayAuth、UserRpc | — | /auth/login、/auth/register、/auth/refresh、/users/me、黑名单 CRUD |
 | message | MessageRpc | MSG_SEND、SYNC_REQ | /convs/{id}/messages（历史分页）、撤回 |
 | conversation | ConversationRpc | READ_REPORT | 会话置顶/免打扰/删除 |
-| group | — (MVP 内部调用经 ConversationRpc) | — | 建群/加人/踢人/改名（产生 NotificationContent 系统消息） |
+| group | — | — | 建群/加人/踢人/改名（产生 NotificationContent 系统消息） |
 | file | — | — | /files/presign、上传确认 |
 | push | PushRpc、ConnEvent | MSG_RECV_ACK 缺失上报处理 | — |
 
 moderation（D16）作为 message 模块内子包 `com.im.message.moderation` 起步（消费 msg.saved），二阶段需要独立扩缩时再抽模块。
+
+**T26 群聊实现约定（2026-06-13 补充）**：
+
+- group-service 拥有群资料与群成员的 REST 写入口；建群/加人/踢人/改名必须与 `GROUP conversation`、`conversation_member`、`NotificationContent` 系统消息和 outbox 写入处于同一个 MySQL 事务。
+- 为避免业务模块编译期互依赖，group-service 可定义本模块私有 DAO model 操作 `conversation`、`conversation_member`、`message`、`outbox` 共享表；禁止依赖 conversation/message 模块内部类。
+- 普通群文本消息仍走 message-service `MSG_SEND`，由 ConversationRpc 解析 `group_id/conv_id` 并校验当前用户是 active conversation member。
+- 群成员变更事件统一落为 `NotificationContent`，事件名登记在 `docs/protocol.md` 附录 A；不新增旁路通知通道。
 
 ## 5. im-bootstrap 组装
 
