@@ -10,18 +10,18 @@ spring:
   datasource:
     url: ${IM_MYSQL_URL:jdbc:mysql://localhost:3306/im?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
     username: ${IM_MYSQL_USERNAME:root}
-    password: ${IM_MYSQL_PASSWORD:im_dev_mysql_pwd}
+    password: ${IM_MYSQL_PASSWORD:123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
   data:
     redis:
       host: ${IM_REDIS_HOST:localhost}
       port: ${IM_REDIS_PORT:6379}
-      password: ${IM_REDIS_PASSWORD:${REDIS_PASSWORD:}}
+      password:
   rabbitmq:
-    host: ${IM_RABBITMQ_HOST:${RABBITMQ_HOST:localhost}}
+    host: ${IM_RABBITMQ_HOST:${RABBITMQ_HOST:103.45.65.84}}
     port: ${IM_RABBITMQ_PORT:${RABBITMQ_PORT:5672}}
-    username: ${IM_RABBITMQ_USERNAME:${RABBITMQ_USER:im}}
-    password: ${IM_RABBITMQ_PASSWORD:${RABBITMQ_PASSWORD:im_dev_mq_pwd}}
+    username: ${IM_RABBITMQ_USERNAME:${RABBITMQ_USER:admin}}
+    password: ${IM_RABBITMQ_PASSWORD:${RABBITMQ_PASSWORD:admin123}}
     publisher-confirm-type: correlated
     listener:
       simple:

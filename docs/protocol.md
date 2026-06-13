@@ -72,6 +72,19 @@ WSS 连接 → 5s 内必须发 AUTH（否则断）→ 网关 gRPC VerifyToken（
 4. 改 proto 流程：im-proto 改动 → `./generate.sh`（待建）→ Rust + Java 同时编译通过才可提交
 5. body 与 Cmd 的对应关系以 frame.proto 注释为准，新增帧必须同步更新注释
 
+## 7. 协议演进候选（2026-06-13 与 OpenIM/Tinode/Matrix 对比得出，按优先级）
+
+| # | 能力 | 对标 | 设计要点 | 阶段 |
+|---|------|------|---------|------|
+| E1 | **conv_list_version 语义补全**（当前最实质的洞） | OpenIM 会话级同步水位 | 每用户一个会话列表变更流水号（置顶/免打扰/删除/新会话都 +1，记 user_conv_event 流水表或 Redis+落库）；SYNC_REQ 已带此字段，服务端 diff 返回变更的 ConvInfo——补齐后置顶等操作获得与消息同级的"丢推送可对齐"保障 | 群聊 PR 后立即做 |
+| E2 | **typing / presence 轻信令** | Tinode pres/typing | 新增 Cmd TYPING(C→S→对端在线连接)：不落库、不走 outbox、不需要 ack，纯 best-effort 推送；presence 订阅放客服工作台需求来时设计（坐席看访客在线）| 二阶段（客服前） |
+| E3 | **引用回复结构化** | Matrix relations / 微信 | MsgSend/MsgPush 加 optional `QuoteRef{server_msg_id, seq, abstract, sender_id}` 字段（proto 加字段向后兼容）；被引用消息撤回时客户端按 abstract 降级展示 | 群聊 PR 后 |
+| E4 | **表情回应 reactions** | Matrix annotations | 事件化：NotificationContent("msg.reaction") 走消息管道拿 seq（多端同步免费），服务端聚合存 message_reaction 表，MsgPush.ext 带聚合计数 | 二阶段后 |
+| E5 | 包体压缩 | OpenIM gzip | AUTH 协商 compression 能力 + Frame 加标志；万级规模流量不痛 | 按流量数据驱动，暂缓 |
+| E6 | 消息编辑 | Matrix/Slack | 产品决策未做（微信无此功能）；若做走 REVOKE 同款事件化路径 | 不排期 |
+
+明确不抄：Matrix DAG/联邦（中心化 seq 全序已满足）、Tinode 的 topic 订阅状态机（我们的 conversation 模型更简单够用）、XMPP/MQTT 形态。
+
 ## 附录 A：NotificationContent 事件类型注册表
 
 | event_type | payload 字段 | 阶段 |

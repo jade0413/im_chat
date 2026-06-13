@@ -81,6 +81,7 @@
 - [ ] 产品形态终局：自营主 App + SaaS 客服（当前默认）vs 白标租户独立 App——Jade 想清楚后定，白标涉及推送证书/分发/品牌配置中心
 - [ ] 客服会话 resolved 后访客重开：新会话 vs 续旧会话（租户配置）——二阶段
 
+- [ ] 协议演进候选 E1~E6（对比 OpenIM/Tinode/Matrix 得出，见 docs/protocol.md §7）：E1 conv_list_version 语义补全（群聊后立即）、E2 typing/presence（客服前）、E3 引用回复、E4 reactions、E5 压缩缓、E6 编辑不排期
 - [ ] 推送第三方通道选型（APNs/FCM/厂商通道）放第二阶段
 - [ ] 第三方内容安全 API 选型（阿里云内容安全/网易易盾/数美）——接口先抽象，MVP 可只接文本词库
 - [ ] 消息全文搜索（ES vs 客户端 SQLite FTS）——二阶段
