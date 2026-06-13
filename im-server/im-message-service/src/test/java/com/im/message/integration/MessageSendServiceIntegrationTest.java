@@ -16,6 +16,7 @@ import com.im.message.dao.mapper.OutboxMapper;
 import com.im.message.service.ConversationResolver;
 import com.im.message.service.MessageAssembler;
 import com.im.message.service.MessageIdempotencyService;
+import com.im.message.service.MessageFileReferenceValidator;
 import com.im.message.service.MessagePersistService;
 import com.im.message.service.MessageSendResult;
 import com.im.message.service.MessageSendService;
@@ -58,6 +59,7 @@ import org.testcontainers.utility.DockerImageName;
     SnowflakeIdGenerator.class,
     MessageAssembler.class,
     MessageIdempotencyService.class,
+    MessageFileReferenceValidator.class,
     SequenceService.class,
     OutboxWriter.class,
     MsgSavedEventFactory.class,

@@ -1,0 +1,107 @@
+package com.im.message.service;
+
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.when;
+
+import com.im.common.error.ErrorCode;
+import com.im.common.error.ImException;
+import com.im.message.dao.entity.MessageFileMetaEntity;
+import com.im.message.dao.mapper.MessageFileMetaMapper;
+import com.im.proto.common.FileContent;
+import com.im.proto.common.ImageContent;
+import com.im.proto.common.MsgContent;
+import com.im.proto.common.TextContent;
+import com.im.proto.common.VoiceContent;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+@ExtendWith(MockitoExtension.class)
+class MessageFileReferenceValidatorTest {
+
+  @Mock
+  private MessageFileMetaMapper fileMetaMapper;
+
+  @Test
+  void acceptsConfirmedImageFromSameTenant() {
+    when(fileMetaMapper.selectByObjectKey(1L, "1/202606/a.png"))
+        .thenReturn(fileMeta("1/202606/a.png", "image/png", 512L, 1));
+
+    assertThatCode(() -> new MessageFileReferenceValidator(fileMetaMapper)
+        .ensureReferencesConfirmed(1L, MsgContent.newBuilder()
+            .setImage(ImageContent.newBuilder()
+                .setObjectKey("1/202606/a.png")
+                .setMime("image/png")
+                .setSize(512L))
+            .build()))
+        .doesNotThrowAnyException();
+  }
+
+  @Test
+  void rejectsUnconfirmedFile() {
+    when(fileMetaMapper.selectByObjectKey(1L, "1/202606/a.pdf"))
+        .thenReturn(fileMeta("1/202606/a.pdf", "application/pdf", 512L, 0));
+
+    assertThatThrownBy(() -> new MessageFileReferenceValidator(fileMetaMapper)
+        .ensureReferencesConfirmed(1L, MsgContent.newBuilder()
+            .setFile(FileContent.newBuilder()
+                .setObjectKey("1/202606/a.pdf")
+                .setFileName("a.pdf")
+                .setMime("application/pdf")
+                .setSize(512L))
+            .build()))
+        .isInstanceOf(ImException.class)
+        .extracting("errorCode")
+        .isEqualTo(ErrorCode.VALIDATION_FAILED);
+  }
+
+  @Test
+  void rejectsCrossTenantObjectKeyBeforeQuerying() {
+    assertThatThrownBy(() -> new MessageFileReferenceValidator(fileMetaMapper)
+        .ensureReferencesConfirmed(1L, MsgContent.newBuilder()
+            .setImage(ImageContent.newBuilder()
+                .setObjectKey("2/202606/a.png")
+                .setMime("image/png")
+                .setSize(512L))
+            .build()))
+        .isInstanceOf(ImException.class)
+        .extracting("errorCode")
+        .isEqualTo(ErrorCode.VALIDATION_FAILED);
+  }
+
+  @Test
+  void acceptsTextWithoutFileLookup() {
+    assertThatCode(() -> new MessageFileReferenceValidator(fileMetaMapper)
+        .ensureReferencesConfirmed(1L, MsgContent.newBuilder()
+            .setText(TextContent.newBuilder().setText("hello"))
+            .build()))
+        .doesNotThrowAnyException();
+  }
+
+  @Test
+  void validatesVoiceAsAudioFile() {
+    when(fileMetaMapper.selectByObjectKey(1L, "1/202606/a.aac"))
+        .thenReturn(fileMeta("1/202606/a.aac", "audio/aac", 256L, 1));
+
+    assertThatCode(() -> new MessageFileReferenceValidator(fileMetaMapper)
+        .ensureReferencesConfirmed(1L, MsgContent.newBuilder()
+            .setVoice(VoiceContent.newBuilder()
+                .setObjectKey("1/202606/a.aac")
+                .setDurationMs(2000)
+                .setSize(256L)
+                .setCodec("aac"))
+            .build()))
+        .doesNotThrowAnyException();
+  }
+
+  private MessageFileMetaEntity fileMeta(String objectKey, String mime, long size, int status) {
+    MessageFileMetaEntity entity = new MessageFileMetaEntity();
+    entity.setObjectKey(objectKey);
+    entity.setMime(mime);
+    entity.setSize(size);
+    entity.setStatus(status);
+    return entity;
+  }
+}

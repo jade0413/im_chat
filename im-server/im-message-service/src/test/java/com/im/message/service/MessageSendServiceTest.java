@@ -13,6 +13,7 @@ import com.im.message.dao.entity.MessageEntity;
 import com.im.proto.body.ConvInfo;
 import com.im.proto.body.MsgSend;
 import com.im.proto.common.ConvType;
+import com.im.proto.common.CustomContent;
 import com.im.proto.common.ImageContent;
 import com.im.proto.common.MsgContent;
 import com.im.proto.common.TextContent;
@@ -44,6 +45,9 @@ class MessageSendServiceTest {
   @Mock
   private MessageAssembler assembler;
 
+  @Mock
+  private MessageFileReferenceValidator fileReferenceValidator;
+
   private MessageSendService service;
 
   @BeforeEach
@@ -53,7 +57,8 @@ class MessageSendServiceTest {
         conversationResolver,
         relationClient,
         persistService,
-        assembler);
+        assembler,
+        fileReferenceValidator);
   }
 
   @Test
@@ -129,15 +134,38 @@ class MessageSendServiceTest {
   }
 
   @Test
-  void rejectsNonTextContent() {
+  void sendsNewImageMessageAfterFileReferenceValidation() {
     MsgSend imageRequest = MsgSend.newBuilder()
         .setClientMsgId("client-1")
         .setToUserId(200L)
         .setContent(MsgContent.newBuilder()
-            .setImage(ImageContent.newBuilder().setObjectKey("k")))
+            .setImage(ImageContent.newBuilder()
+                .setObjectKey("1/202606/a.png")
+                .setMime("image/png")
+                .setSize(512L)))
+        .build();
+    MessageSendResult expected = new MessageSendResult(9002L, 501L, 4L, 1000L);
+    when(idempotencyService.findExisting("client-1")).thenReturn(null);
+    when(idempotencyService.tryAcquire(1L, "client-1")).thenReturn(true);
+    when(conversationResolver.resolve(ctx(), imageRequest)).thenReturn(conv());
+    when(persistService.persist(1L, ctx(), imageRequest, conv())).thenReturn(expected);
+
+    MessageSendResult result = sendWithTenant(imageRequest);
+
+    assertThat(result).isSameAs(expected);
+    verify(fileReferenceValidator).ensureReferencesConfirmed(1L, imageRequest.getContent());
+  }
+
+  @Test
+  void rejectsUnsupportedContent() {
+    MsgSend request = MsgSend.newBuilder()
+        .setClientMsgId("client-1")
+        .setToUserId(200L)
+        .setContent(MsgContent.newBuilder()
+            .setCustom(CustomContent.newBuilder().setCustomType("x").setPayload("{}")))
         .build();
 
-    assertThatThrownBy(() -> sendWithTenant(imageRequest))
+    assertThatThrownBy(() -> sendWithTenant(request))
         .isInstanceOf(ImException.class)
         .extracting("errorCode")
         .isEqualTo(ErrorCode.VALIDATION_FAILED);

@@ -10,6 +10,7 @@ import com.im.proto.body.ConvInfo;
 import com.im.proto.body.MsgPush;
 import com.im.proto.body.MsgSend;
 import com.im.proto.common.ConvType;
+import com.im.proto.common.ImageContent;
 import com.im.proto.common.MsgContent;
 import com.im.proto.common.RevokeReason;
 import com.im.proto.common.TextContent;
@@ -52,6 +53,7 @@ class MessageAssemblerTest {
     assertThat(push.getSeq()).isEqualTo(7L);
     assertThat(push.getSender().getUserId()).isEqualTo(100L);
     assertThat(push.getContent().getText().getText()).isEqualTo("hello");
+    assertThat(push.getExtOrThrow("msg_type")).isEqualTo("1");
     assertThat(push.getExtOrThrow("status")).isEqualTo("1");
 
     OutboxEntity outbox = assembler.msgSavedOutbox(1L, push);
@@ -61,6 +63,30 @@ class MessageAssemblerTest {
     assertThat(event.getTenantId()).isEqualTo(1L);
     assertThat(event.getConvId()).isEqualTo(501L);
     assertThat(event.getPushReady().getSeq()).isEqualTo(7L);
+  }
+
+  @Test
+  void assemblesImageMessageAbstractAndType() {
+    when(idGenerator.nextId()).thenReturn(9002L);
+    MessageAssembler assembler = new MessageAssembler(
+        idGenerator,
+        Clock.fixed(Instant.parse("2026-06-13T00:00:00Z"), ZoneOffset.UTC));
+    MsgSend request = MsgSend.newBuilder()
+        .setClientMsgId("client-2")
+        .setToUserId(200L)
+        .setContent(MsgContent.newBuilder()
+            .setImage(ImageContent.newBuilder()
+                .setObjectKey("1/202606/a.png")
+                .setMime("image/png")
+                .setSize(512L)))
+        .build();
+
+    MessageEntity message = assembler.newMessage(ctx(), request, conv(), 8L);
+    MsgPush push = assembler.toPush(ctx(), request, conv(), message);
+
+    assertThat(message.getMsgType()).isEqualTo(MessageAssembler.MSG_TYPE_IMAGE);
+    assertThat(message.getAbstractText()).isEqualTo("[image]");
+    assertThat(push.getExtOrThrow("msg_type")).isEqualTo("2");
   }
 
   @Test

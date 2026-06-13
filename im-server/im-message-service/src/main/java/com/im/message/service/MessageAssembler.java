@@ -23,6 +23,9 @@ import org.springframework.stereotype.Service;
 public class MessageAssembler {
 
   public static final int MSG_TYPE_TEXT = 1;
+  public static final int MSG_TYPE_IMAGE = 2;
+  public static final int MSG_TYPE_VOICE = 3;
+  public static final int MSG_TYPE_FILE = 4;
   public static final int MSG_TYPE_NOTIFICATION = 10;
   public static final int STATUS_NORMAL = 1;
   public static final int STATUS_REVOKED = 2;
@@ -31,6 +34,7 @@ public class MessageAssembler {
 
   private static final String EXT_STATUS = "status";
   private static final String EXT_REVOKE_REASON = "revoke_reason";
+  private static final String EXT_MSG_TYPE = "msg_type";
 
   private static final int ABSTRACT_LIMIT = 255;
 
@@ -48,6 +52,10 @@ public class MessageAssembler {
   }
 
   public MessageEntity newTextMessage(ConnCtx ctx, MsgSend request, ConvInfo conv, long seq) {
+    return newMessage(ctx, request, conv, seq);
+  }
+
+  public MessageEntity newMessage(ConnCtx ctx, MsgSend request, ConvInfo conv, long seq) {
     MsgContent content = request.getContent();
     LocalDateTime createdAt = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
 
@@ -57,9 +65,9 @@ public class MessageAssembler {
     message.setSeq(seq);
     message.setSenderId(ctx.getUserId());
     message.setClientMsgId(request.getClientMsgId());
-    message.setMsgType(MSG_TYPE_TEXT);
+    message.setMsgType(msgType(content));
     message.setContent(content.toByteArray());
-    message.setAbstractText(abstractText(content.getText().getText()));
+    message.setAbstractText(abstractText(content));
     message.setStatus(STATUS_NORMAL);
     message.setCreatedAt(createdAt);
     return message;
@@ -76,6 +84,7 @@ public class MessageAssembler {
         .setSendTime(toEpochMillis(message.getCreatedAt()))
         .setContent(request.getContent())
         .putAllExt(request.getExtMap())
+        .putExt(EXT_MSG_TYPE, Integer.toString(message.getMsgType()))
         .putExt(EXT_STATUS, Integer.toString(STATUS_NORMAL))
         .build();
   }
@@ -93,6 +102,7 @@ public class MessageAssembler {
         .setClientMsgId(nullToBlank(message.getClientMsgId()))
         .setSender(Sender.newBuilder().setUserId(message.getSenderId()).build())
         .setSendTime(toEpochMillis(message.getCreatedAt()))
+        .putExt(EXT_MSG_TYPE, Integer.toString(msgType(message)))
         .putExt(EXT_STATUS, Integer.toString(status(message)));
     if (isRevoked(message)) {
       builder.putExt(EXT_REVOKE_REASON, Integer.toString(revokeReason(message)));
@@ -129,6 +139,33 @@ public class MessageAssembler {
       return normalized;
     }
     return normalized.substring(0, ABSTRACT_LIMIT);
+  }
+
+  private String abstractText(MsgContent content) {
+    return switch (content.getContentCase()) {
+      case TEXT -> abstractText(content.getText().getText());
+      case IMAGE -> "[image]";
+      case VOICE -> "[voice]";
+      case FILE -> abstractText("[file] " + content.getFile().getFileName());
+      case NOTIFICATION -> abstractText(content.getNotification().getEventType());
+      case CUSTOM -> abstractText(content.getCustom().getCustomType());
+      default -> "";
+    };
+  }
+
+  private int msgType(MsgContent content) {
+    return switch (content.getContentCase()) {
+      case TEXT -> MSG_TYPE_TEXT;
+      case IMAGE -> MSG_TYPE_IMAGE;
+      case VOICE -> MSG_TYPE_VOICE;
+      case FILE -> MSG_TYPE_FILE;
+      case NOTIFICATION -> MSG_TYPE_NOTIFICATION;
+      default -> 0;
+    };
+  }
+
+  private int msgType(MessageEntity message) {
+    return message.getMsgType() == null ? 0 : message.getMsgType();
   }
 
   private long toEpochMillis(LocalDateTime dateTime) {

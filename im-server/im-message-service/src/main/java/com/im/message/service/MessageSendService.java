@@ -23,17 +23,20 @@ public class MessageSendService {
   private final UserRelationClient relationClient;
   private final MessagePersistService persistService;
   private final MessageAssembler assembler;
+  private final MessageFileReferenceValidator fileReferenceValidator;
 
   public MessageSendService(MessageIdempotencyService idempotencyService,
       ConversationResolver conversationResolver,
       UserRelationClient relationClient,
       MessagePersistService persistService,
-      MessageAssembler assembler) {
+      MessageAssembler assembler,
+      MessageFileReferenceValidator fileReferenceValidator) {
     this.idempotencyService = idempotencyService;
     this.conversationResolver = conversationResolver;
     this.relationClient = relationClient;
     this.persistService = persistService;
     this.assembler = assembler;
+    this.fileReferenceValidator = fileReferenceValidator;
   }
 
   public MessageSendResult send(ConnCtx ctx, MsgSend request) {
@@ -55,6 +58,7 @@ public class MessageSendService {
     if (request.getTargetCase() == MsgSend.TargetCase.CONV_ID && conv.getType() == ConvType.C2C) {
       relationClient.ensureCanSendC2c(ctx.getUserId(), conv.getPeerUserId());
     }
+    fileReferenceValidator.ensureReferencesConfirmed(tenantId, request.getContent());
     try {
       return persistService.persist(tenantId, ctx, request, conv);
     } catch (DuplicateKeyException ex) {
@@ -91,11 +95,15 @@ public class MessageSendService {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "message content is required");
     }
     MsgContent content = request.getContent();
-    if (content.getContentCase() != MsgContent.ContentCase.TEXT) {
-      throw new ImException(ErrorCode.VALIDATION_FAILED, "only text message is supported");
-    }
-    if (content.getText().getText() == null || content.getText().getText().isBlank()) {
-      throw new ImException(ErrorCode.VALIDATION_FAILED, "text message is empty");
+    switch (content.getContentCase()) {
+      case TEXT -> {
+        if (content.getText().getText() == null || content.getText().getText().isBlank()) {
+          throw new ImException(ErrorCode.VALIDATION_FAILED, "text message is empty");
+        }
+      }
+      case IMAGE, VOICE, FILE -> {
+      }
+      default -> throw new ImException(ErrorCode.VALIDATION_FAILED, "message content type is unsupported");
     }
     if (content.toByteArray().length > CONTENT_BYTES_LIMIT) {
       throw new ImException(ErrorCode.MSG_TOO_LARGE);

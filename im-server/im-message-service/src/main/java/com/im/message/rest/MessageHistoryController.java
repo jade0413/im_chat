@@ -80,7 +80,7 @@ public class MessageHistoryController {
         push.getClientMsgId(),
         push.getSender().getUserId(),
         push.getSendTime(),
-        push.getContent().hasText() ? 1 : 0,
+        intExt(push, "msg_type", push.getContent().hasText() ? 1 : 0),
         intExt(push, "status", MsgStatus.NORMAL.getNumber()),
         intExt(push, "revoke_reason", RevokeReason.REVOKE_REASON_UNSPECIFIED.getNumber()),
         push.getContent().hasText() ? push.getContent().getText().getText() : "");

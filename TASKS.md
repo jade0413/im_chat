@@ -1576,7 +1576,7 @@
 
 ### T28 — 文件上传 MVP
 
-状态：PENDING
+状态：DONE
 
 目标：
 
@@ -1608,6 +1608,17 @@
 测试方式：
 
 - `mvn -q -pl im-file-service,im-message-service -am test`
+
+完成记录：
+
+- 新增 `im-file-service` 文件上传 REST 接口：`POST /api/v1/files/presign` 生成 5 分钟 PUT 预签名 URL，`POST /api/v1/files/confirm` 确认上传并更新 `file_meta`。
+- 文件服务按租户生成对象 key：`{tenant}/{yyyyMM}/{uuid}.{ext}`，并限制 MIME、大小、tenant 前缀和上传确认状态。
+- MinIO 访问通过 `ObjectStorageClient` 抽象隔离，生产实现为 `MinioObjectStorageClient`，单测使用 fake/mock，不依赖本地 MinIO。
+- `im-message-service` 发送链路支持 `ImageContent` / `VoiceContent` / `FileContent`，发送前只允许引用同租户、已确认、大小/MIME 匹配的 `file_meta`。
+- `MessageAssembler` 已补齐图片/语音/文件消息类型和会话列表摘要，并在 `MsgPush.ext.msg_type` 暴露类型供 REST history 回显。
+- 未修改 `application.yml` / docker compose：当前 compose 已注入 `MINIO_ENDPOINT`、`MINIO_ROOT_USER`、`MINIO_ROOT_PASSWORD`、`MINIO_BUCKET`，文件服务配置会读取这些环境变量作为默认值。
+- 已执行 `mvn -q -pl im-file-service,im-message-service -am test`，通过。
+- 已执行 `mvn -q -pl im-bootstrap -am test`，通过。
 
 ---
 

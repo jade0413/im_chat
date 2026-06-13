@@ -40,7 +40,7 @@ public class MessagePersistService {
   @Transactional
   public MessageSendResult persist(long tenantId, ConnCtx ctx, MsgSend request, ConvInfo conv) {
     long seq = sequenceService.nextSeq(conv.getConvId());
-    MessageEntity message = assembler.newTextMessage(ctx, request, conv, seq);
+    MessageEntity message = assembler.newMessage(ctx, request, conv, seq);
     messageMapper.insert(message);
 
     int updated = conversationProgressMapper.updateLastMessage(

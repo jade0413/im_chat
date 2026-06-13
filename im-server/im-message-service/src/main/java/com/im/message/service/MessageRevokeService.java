@@ -12,6 +12,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +29,7 @@ public class MessageRevokeService {
   private final MsgRevokedEventFactory eventFactory;
   private final Clock clock;
 
+  @Autowired
   public MessageRevokeService(MessageMapper messageMapper,
       ConversationProgressMapper conversationProgressMapper,
       ConversationMemberClient memberClient,
