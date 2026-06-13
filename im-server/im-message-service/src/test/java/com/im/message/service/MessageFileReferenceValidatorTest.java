@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 
 import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
+import com.im.common.file.FileMetaConstants;
 import com.im.message.dao.entity.MessageFileMetaEntity;
 import com.im.message.dao.mapper.MessageFileMetaMapper;
 import com.im.proto.common.FileContent;
@@ -27,7 +28,7 @@ class MessageFileReferenceValidatorTest {
   @Test
   void acceptsConfirmedImageFromSameTenant() {
     when(fileMetaMapper.selectByObjectKey(1L, "1/202606/a.png"))
-        .thenReturn(fileMeta("1/202606/a.png", "image/png", 512L, 1));
+        .thenReturn(fileMeta("1/202606/a.png", "image/png", 512L, FileMetaConstants.STATUS_CONFIRMED));
 
     assertThatCode(() -> new MessageFileReferenceValidator(fileMetaMapper)
         .ensureReferencesConfirmed(1L, MsgContent.newBuilder()
@@ -42,7 +43,7 @@ class MessageFileReferenceValidatorTest {
   @Test
   void rejectsUnconfirmedFile() {
     when(fileMetaMapper.selectByObjectKey(1L, "1/202606/a.pdf"))
-        .thenReturn(fileMeta("1/202606/a.pdf", "application/pdf", 512L, 0));
+        .thenReturn(fileMeta("1/202606/a.pdf", "application/pdf", 512L, FileMetaConstants.STATUS_PENDING));
 
     assertThatThrownBy(() -> new MessageFileReferenceValidator(fileMetaMapper)
         .ensureReferencesConfirmed(1L, MsgContent.newBuilder()
@@ -83,7 +84,7 @@ class MessageFileReferenceValidatorTest {
   @Test
   void validatesVoiceAsAudioFile() {
     when(fileMetaMapper.selectByObjectKey(1L, "1/202606/a.aac"))
-        .thenReturn(fileMeta("1/202606/a.aac", "audio/aac", 256L, 1));
+        .thenReturn(fileMeta("1/202606/a.aac", "audio/aac", 256L, FileMetaConstants.STATUS_CONFIRMED));
 
     assertThatCode(() -> new MessageFileReferenceValidator(fileMetaMapper)
         .ensureReferencesConfirmed(1L, MsgContent.newBuilder()

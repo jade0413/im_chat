@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
+import com.im.common.file.FileMetaConstants;
 import com.im.common.id.SnowflakeIdGenerator;
 import com.im.common.tenant.TenantContext;
 import com.im.file.config.FileProperties;
@@ -30,6 +31,11 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @ExtendWith(MockitoExtension.class)
 class FileServiceTest {
@@ -63,6 +69,7 @@ class FileServiceTest {
         storageClient,
         idGenerator,
         properties,
+        transactionTemplate(),
         Clock.fixed(Instant.parse("2026-06-13T00:00:00Z"), ZoneOffset.UTC));
   }
 
@@ -85,7 +92,7 @@ class FileServiceTest {
     org.mockito.Mockito.verify(fileMetaMapper).insert(fileCaptor.capture());
     assertThat(fileCaptor.getValue().getTenantId()).isEqualTo(1L);
     assertThat(fileCaptor.getValue().getUploaderId()).isEqualTo(100L);
-    assertThat(fileCaptor.getValue().getStatus()).isEqualTo(FileMetaStatus.PENDING);
+    assertThat(fileCaptor.getValue().getStatus()).isEqualTo(FileMetaConstants.STATUS_PENDING);
     assertThat(fileCaptor.getValue().getMime()).isEqualTo("image/png");
   }
 
@@ -113,26 +120,26 @@ class FileServiceTest {
     when(fileMetaMapper.selectByObjectKey(1L, "1/202606/a.png")).thenReturn(meta);
     when(storageClient.statObject("im-media", "1/202606/a.png"))
         .thenReturn(new ObjectStat(512L, "image/png"));
-    when(fileMetaMapper.updateStatus(1L, "1/202606/a.png", FileMetaStatus.PENDING,
-        FileMetaStatus.CONFIRMED)).thenReturn(1);
+    when(fileMetaMapper.updateStatus(1L, "1/202606/a.png", FileMetaConstants.STATUS_PENDING,
+        FileMetaConstants.STATUS_CONFIRMED)).thenReturn(1);
 
     FileMetaResponse response = TenantContext.callWithTenant(1L,
         () -> service.confirm(100L, new ConfirmFileRequest("1/202606/a.png", 512L, "image/png")));
 
     assertThat(response.fileId()).isEqualTo(9001L);
-    assertThat(response.status()).isEqualTo(FileMetaStatus.CONFIRMED);
+    assertThat(response.status()).isEqualTo(FileMetaConstants.STATUS_CONFIRMED);
   }
 
   @Test
   void confirmIsIdempotentWhenAlreadyConfirmed() throws Exception {
     FileMetaEntity meta = pendingMeta();
-    meta.setStatus(FileMetaStatus.CONFIRMED);
+    meta.setStatus(FileMetaConstants.STATUS_CONFIRMED);
     when(fileMetaMapper.selectByObjectKey(1L, "1/202606/a.png")).thenReturn(meta);
 
     FileMetaResponse response = TenantContext.callWithTenant(1L,
         () -> service.confirm(100L, new ConfirmFileRequest("1/202606/a.png", null, null)));
 
-    assertThat(response.status()).isEqualTo(FileMetaStatus.CONFIRMED);
+    assertThat(response.status()).isEqualTo(FileMetaConstants.STATUS_CONFIRMED);
   }
 
   @Test
@@ -152,7 +159,24 @@ class FileServiceTest {
     entity.setObjectKey("1/202606/a.png");
     entity.setMime("image/png");
     entity.setSize(512L);
-    entity.setStatus(FileMetaStatus.PENDING);
+    entity.setStatus(FileMetaConstants.STATUS_PENDING);
     return entity;
+  }
+
+  private TransactionTemplate transactionTemplate() {
+    return new TransactionTemplate(new PlatformTransactionManager() {
+      @Override
+      public TransactionStatus getTransaction(TransactionDefinition definition) {
+        return new SimpleTransactionStatus();
+      }
+
+      @Override
+      public void commit(TransactionStatus status) {
+      }
+
+      @Override
+      public void rollback(TransactionStatus status) {
+      }
+    });
   }
 }

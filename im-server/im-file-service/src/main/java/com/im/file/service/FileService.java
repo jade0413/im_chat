@@ -1,5 +1,6 @@
 package com.im.file.service;
 
+import com.im.common.file.FileMetaConstants;
 import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.common.id.SnowflakeIdGenerator;
@@ -17,10 +18,10 @@ import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class FileService {
@@ -32,29 +33,23 @@ public class FileService {
   private final ObjectStorageClient storageClient;
   private final SnowflakeIdGenerator idGenerator;
   private final FileProperties properties;
+  private final TransactionTemplate transactionTemplate;
   private final Clock clock;
 
-  @Autowired
   public FileService(FileMetaMapper fileMetaMapper,
       ObjectStorageClient storageClient,
       SnowflakeIdGenerator idGenerator,
-      FileProperties properties) {
-    this(fileMetaMapper, storageClient, idGenerator, properties, Clock.systemUTC());
-  }
-
-  FileService(FileMetaMapper fileMetaMapper,
-      ObjectStorageClient storageClient,
-      SnowflakeIdGenerator idGenerator,
       FileProperties properties,
+      TransactionTemplate transactionTemplate,
       Clock clock) {
     this.fileMetaMapper = fileMetaMapper;
     this.storageClient = storageClient;
     this.idGenerator = idGenerator;
     this.properties = properties;
+    this.transactionTemplate = transactionTemplate;
     this.clock = clock;
   }
 
-  @Transactional
   public PresignFileResponse presign(long uploaderId, PresignFileRequest request) {
     long tenantId = TenantContext.requiredTenantId();
     validateUploader(uploaderId);
@@ -73,20 +68,22 @@ public class FileService {
     entity.setMime(mime);
     entity.setSize(size);
     entity.setDurationMs(durationMs);
-    entity.setStatus(FileMetaStatus.PENDING);
+    entity.setStatus(FileMetaConstants.STATUS_PENDING);
     entity.setCreatedAt(LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC));
-    fileMetaMapper.insert(entity);
+    FileMetaEntity inserted = Objects.requireNonNull(transactionTemplate.execute(status -> {
+      fileMetaMapper.insert(entity);
+      return entity;
+    }));
 
-    String url = storageClient.presignPut(properties.bucket(), objectKey, properties.presignTtl());
+    String url = storageClient.presignPut(properties.bucket(), inserted.getObjectKey(), properties.presignTtl());
     return new PresignFileResponse(
-        entity.getId(),
-        objectKey,
+        inserted.getId(),
+        inserted.getObjectKey(),
         url,
         clock.millis() + properties.presignTtl().toMillis(),
-        Map.of("Content-Type", mime));
+        Map.of("Content-Type", inserted.getMime()));
   }
 
-  @Transactional
   public FileMetaResponse confirm(long uploaderId, ConfirmFileRequest request) {
     long tenantId = TenantContext.requiredTenantId();
     validateUploader(uploaderId);
@@ -99,27 +96,16 @@ public class FileService {
     if (!Long.valueOf(uploaderId).equals(entity.getUploaderId())) {
       throw new ImException(ErrorCode.NO_PERMISSION, "file uploader mismatch");
     }
-    if (entity.getStatus() == FileMetaStatus.CONFIRMED) {
+    if (isStatus(entity, FileMetaConstants.STATUS_CONFIRMED)) {
       return toResponse(entity);
     }
-    if (entity.getStatus() != FileMetaStatus.PENDING) {
+    if (!isStatus(entity, FileMetaConstants.STATUS_PENDING)) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "file status cannot be confirmed");
     }
     validateConfirmRequest(entity, request);
     ObjectStat stat = statObject(objectKey);
-    validateStoredObject(entity, stat);
-
-    int updated = fileMetaMapper.updateStatus(
-        tenantId, objectKey, FileMetaStatus.PENDING, FileMetaStatus.CONFIRMED);
-    if (updated != 1) {
-      FileMetaEntity current = fileMetaMapper.selectByObjectKey(tenantId, objectKey);
-      if (current != null && current.getStatus() == FileMetaStatus.CONFIRMED) {
-        return toResponse(current);
-      }
-      throw new ImException(ErrorCode.INTERNAL_ERROR, "file confirm update failed");
-    }
-    entity.setStatus(FileMetaStatus.CONFIRMED);
-    return toResponse(entity);
+    return Objects.requireNonNull(transactionTemplate.execute(
+        status -> confirmAfterStat(tenantId, uploaderId, objectKey, request, stat)));
   }
 
   private void validateUploader(long uploaderId) {
@@ -241,6 +227,41 @@ public class FileService {
     if (!contentType.isBlank() && !contentType.equals(entity.getMime())) {
       throw new ImException(ErrorCode.MIME_NOT_ALLOWED, "uploaded object mime mismatch");
     }
+  }
+
+  private FileMetaResponse confirmAfterStat(long tenantId, long uploaderId, String objectKey,
+      ConfirmFileRequest request, ObjectStat stat) {
+    FileMetaEntity current = fileMetaMapper.selectByObjectKey(tenantId, objectKey);
+    if (current == null) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "file metadata not found");
+    }
+    if (!Long.valueOf(uploaderId).equals(current.getUploaderId())) {
+      throw new ImException(ErrorCode.NO_PERMISSION, "file uploader mismatch");
+    }
+    if (isStatus(current, FileMetaConstants.STATUS_CONFIRMED)) {
+      return toResponse(current);
+    }
+    if (!isStatus(current, FileMetaConstants.STATUS_PENDING)) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "file status cannot be confirmed");
+    }
+    validateConfirmRequest(current, request);
+    validateStoredObject(current, stat);
+
+    int updated = fileMetaMapper.updateStatus(
+        tenantId, objectKey, FileMetaConstants.STATUS_PENDING, FileMetaConstants.STATUS_CONFIRMED);
+    if (updated != 1) {
+      FileMetaEntity latest = fileMetaMapper.selectByObjectKey(tenantId, objectKey);
+      if (latest != null && isStatus(latest, FileMetaConstants.STATUS_CONFIRMED)) {
+        return toResponse(latest);
+      }
+      throw new ImException(ErrorCode.INTERNAL_ERROR, "file confirm update failed");
+    }
+    current.setStatus(FileMetaConstants.STATUS_CONFIRMED);
+    return toResponse(current);
+  }
+
+  private boolean isStatus(FileMetaEntity entity, int status) {
+    return entity.getStatus() != null && entity.getStatus() == status;
   }
 
   private FileMetaResponse toResponse(FileMetaEntity entity) {

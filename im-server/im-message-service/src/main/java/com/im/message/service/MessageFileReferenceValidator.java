@@ -1,5 +1,6 @@
 package com.im.message.service;
 
+import com.im.common.file.FileMetaConstants;
 import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.message.dao.entity.MessageFileMetaEntity;
@@ -13,8 +14,6 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class MessageFileReferenceValidator {
-
-  private static final int FILE_STATUS_CONFIRMED = 1;
 
   private final MessageFileMetaMapper fileMetaMapper;
 
@@ -72,7 +71,8 @@ public class MessageFileReferenceValidator {
   private MessageFileMetaEntity confirmedFile(long tenantId, String objectKey) {
     String normalized = validateObjectKey(tenantId, objectKey);
     MessageFileMetaEntity meta = fileMetaMapper.selectByObjectKey(tenantId, normalized);
-    if (meta == null || meta.getStatus() == null || meta.getStatus() != FILE_STATUS_CONFIRMED) {
+    if (meta == null || meta.getStatus() == null
+        || meta.getStatus() != FileMetaConstants.STATUS_CONFIRMED) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "file is not confirmed");
     }
     return meta;
