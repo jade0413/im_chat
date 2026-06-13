@@ -12,46 +12,47 @@ import {
   SyncResp,
   WsCmd,
 } from '../proto/codec';
+import type { im } from '../proto/generated/bundle';
 import { useAuthStore } from '../store/authStore';
 import { useConvStore } from '../store/convStore';
 import { useMessageStore } from '../store/messageStore';
 import { useSocketStore } from '../store/socketStore';
 import { useUiStore } from '../store/uiStore';
-import { idToLong, idToString } from '../utils/id';
+import { idToString } from '../utils/id';
 import { convInfoToConversation, msgPushToChatMessage } from './mappers';
 import type { ImSocket } from './ImSocket';
 
-export function dispatchFrame(socket: ImSocket, frame: any) {
+export function dispatchFrame(socket: ImSocket, frame: im.ws.v1.IFrame) {
   switch (frame.cmd) {
     case WsCmd.AUTH_ACK:
-      handleAuthAck(socket, frame.body);
+      handleAuthAck(socket, frame.body as Uint8Array);
       break;
     case WsCmd.PONG:
       useSocketStore.getState().setStatus('connected');
       break;
     case WsCmd.KICK:
-      handleKick(socket, frame.body);
+      handleKick(socket, frame.body as Uint8Array);
       break;
     case WsCmd.MSG_PUSH:
-      handleMsgPush(socket, frame.body, frame.reqId);
+      handleMsgPush(socket, frame.body as Uint8Array, frame.reqId as Long | undefined);
       break;
     case WsCmd.MSG_SEND_ACK:
-      handleMsgSendAck(frame.body);
+      handleMsgSendAck(frame.body as Uint8Array);
       break;
     case WsCmd.SYNC_RESP:
-      handleSyncResp(frame.body);
+      handleSyncResp(frame.body as Uint8Array);
       break;
     case WsCmd.READ_NOTIFY:
-      handleReadNotify(frame.body);
+      handleReadNotify(frame.body as Uint8Array);
       break;
     case WsCmd.REVOKE_NOTIFY:
-      handleRevokeNotify(frame.body);
+      handleRevokeNotify(frame.body as Uint8Array);
       break;
     case WsCmd.CONV_NOTIFY:
-      handleConvNotify(frame.body);
+      handleConvNotify(frame.body as Uint8Array);
       break;
     case WsCmd.ERROR:
-      handleError(frame.body);
+      handleError(frame.body as Uint8Array);
       break;
     default:
       console.debug('[im-web] unhandled ws cmd', frame.cmd);
@@ -83,19 +84,23 @@ function handleMsgPush(socket: ImSocket, body: Uint8Array, reqId?: Long) {
   const push = MsgPush.decode(body);
   const message = msgPushToChatMessage(push);
   useMessageStore.getState().appendMessages(message.convId, [message]);
+
+  // L1：已有会话保留原 title/avatar，仅首次用 sender 兜底（群聊 title 是群名，不能被发送方覆盖）
+  const convId = message.convId;
+  const existing = useConvStore.getState().conversations.get(convId);
   useConvStore.getState().upsertConv({
-    convId: message.convId,
+    convId,
     type: Number(push.convType ?? 0),
-    title: message.sender.nickname,
-    avatar: message.sender.avatar,
+    title: existing?.title ?? message.sender.nickname,
+    avatar: existing?.avatar ?? message.sender.avatar,
     maxSeq: idToString(push.seq),
-    readSeq: useConvStore.getState().conversations.get(message.convId)?.readSeq ?? '0',
-    pinned: false,
-    muted: false,
+    readSeq: existing?.readSeq ?? '0',
+    pinned: existing?.pinned ?? false,
+    muted: existing?.muted ?? false,
     lastMsgAbstract: message.content.kind === 'text' ? message.content.text : '[新消息]',
     lastMsgTime: idToString(push.sendTime),
   });
-  socket.sendRecvAck([{ convId: message.convId, seq: idToString(push.seq) }], reqId);
+  socket.sendRecvAck([{ convId, seq: idToString(push.seq) }], reqId);
 }
 
 function handleMsgSendAck(body: Uint8Array) {
@@ -132,11 +137,9 @@ function handleSyncResp(body: Uint8Array) {
   }
   useConvStore.getState().setConvListVersion(idToString(resp.convListVersion));
   for (const delta of resp.deltas ?? []) {
-    if (!delta.conv) {
-      continue;
-    }
+    if (!delta.conv) continue;
     const conv = convInfoToConversation(delta.conv);
-    if ((delta.conv as any).deleted) {
+    if ((delta as { deleted?: boolean }).deleted) {
       useConvStore.getState().removeConv(conv.convId);
       continue;
     }
@@ -160,9 +163,7 @@ function handleRevokeNotify(body: Uint8Array) {
 
 function handleConvNotify(body: Uint8Array) {
   const notify = ConvNotify.decode(body);
-  if (!notify.conv) {
-    return;
-  }
+  if (!notify.conv) return;
   const conv = convInfoToConversation(notify.conv);
   if (notify.changeType === 'removed') {
     useConvStore.getState().removeConv(conv.convId);
@@ -180,8 +181,8 @@ export function buildRecvAck(items: { convId: string; seq: string }[]) {
   return MsgRecvAck.encode(
     MsgRecvAck.create({
       items: items.map((item) => ({
-        convId: idToLong(item.convId),
-        seq: idToLong(item.seq),
+        convId: Long.fromString(item.convId, false),
+        seq: Long.fromString(item.seq, false),
       })),
     }),
   ).finish();

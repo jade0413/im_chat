@@ -1,8 +1,10 @@
 import type { MessageItemResponse } from '../api/types';
 import { idToString } from '../utils/id';
 import type { ChatMessage, Conversation, MessageContent, SenderInfo } from '../store/types';
+import { useUserStore } from '../store/userStore';
+import type { im } from '../proto/generated/bundle';
 
-export function convInfoToConversation(conv: any): Conversation {
+export function convInfoToConversation(conv: im.body.v1.IConvInfo): Conversation {
   return {
     convId: idToString(conv.convId),
     type: Number(conv.type ?? 0),
@@ -16,32 +18,39 @@ export function convInfoToConversation(conv: any): Conversation {
     muted: Boolean(conv.muted),
     lastMsgAbstract: conv.lastMsgAbstract || '',
     lastMsgTime: conv.lastMsgTime ? idToString(conv.lastMsgTime) : undefined,
-    csStatus: conv.csStatus || undefined,
+    csStatus: (conv as { csStatus?: string }).csStatus || undefined,
   };
 }
 
-export function msgPushToChatMessage(push: any): ChatMessage {
+export function msgPushToChatMessage(push: im.body.v1.IMsgPush): ChatMessage {
   return {
     clientMsgId: push.clientMsgId || crypto.randomUUID(),
     serverMsgId: idToString(push.serverMsgId),
     seq: idToString(push.seq),
     convId: idToString(push.convId),
     sender: senderToInfo(push.sender),
-    content: protoContentToMessageContent(push.content),
+    content: protoContentToMessageContent(push.content ?? null),
     sendTime: idToString(push.sendTime),
     status: 'sent',
   };
 }
 
+/**
+ * 历史消息映射（L2）：优先从 userStore 缓存取昵称/头像，
+ * 缓存未命中时用 userId 兜底（MessageList 会随后触发批量拉取刷新）。
+ */
 export function historyItemToChatMessage(item: MessageItemResponse): ChatMessage {
+  const senderId = idToString(item.senderId);
+  const cached = useUserStore.getState().getUser(senderId);
   return {
     clientMsgId: item.clientMsgId || `${idToString(item.convId)}:${idToString(item.seq)}`,
     serverMsgId: idToString(item.serverMsgId),
     seq: idToString(item.seq),
     convId: idToString(item.convId),
     sender: {
-      userId: idToString(item.senderId),
-      nickname: `用户 ${idToString(item.senderId)}`,
+      userId: senderId,
+      nickname: cached?.nickname ?? `用户 ${senderId}`,
+      avatar: cached?.avatar,
     },
     content:
       item.status === 2
@@ -52,7 +61,9 @@ export function historyItemToChatMessage(item: MessageItemResponse): ChatMessage
   };
 }
 
-export function protoContentToMessageContent(content: any): MessageContent {
+export function protoContentToMessageContent(
+  content: im.common.v1.IMsgContent | null,
+): MessageContent {
   if (!content) {
     return { kind: 'notification', eventType: 'message.empty' };
   }
@@ -106,7 +117,7 @@ export function protoContentToMessageContent(content: any): MessageContent {
   return { kind: 'notification', eventType: 'message.unsupported' };
 }
 
-function senderToInfo(sender: any): SenderInfo {
+function senderToInfo(sender: im.body.v1.ISenderInfo | null | undefined): SenderInfo {
   return {
     userId: idToString(sender?.userId),
     nickname: sender?.nickname || `用户 ${idToString(sender?.userId)}`,

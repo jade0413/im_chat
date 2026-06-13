@@ -14,6 +14,7 @@ import com.im.user.dto.RegisterRequest;
 import com.im.user.dto.TokenResponse;
 import com.im.user.dto.UserProfileResponse;
 import com.im.user.dto.UserPublicProfileResponse;
+import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -103,6 +104,37 @@ public class AuthService {
    */
   public UserProfileResponse getProfile(long userId) {
     return toProfile(loadCurrentUser(userId));
+  }
+
+  /**
+   * 按关键字搜索用户（昵称/账号前缀），排除自身。最多 20 条。
+   */
+  public List<UserPublicProfileResponse> searchUsers(long selfUserId, String keyword) {
+    long tenantId = TenantContext.requiredTenantId();
+    String safeKeyword = keyword == null ? "" : keyword.trim();
+    if (safeKeyword.isEmpty()) {
+      return List.of();
+    }
+    return userMapper.searchUsers(tenantId, safeKeyword, selfUserId)
+        .stream()
+        .map(u -> new UserPublicProfileResponse(
+            u.getId(), u.getNickname(), u.getAvatar(), u.getUserType(), u.getVerifiedType()))
+        .toList();
+  }
+
+  /**
+   * 批量查询用户公开资料（历史消息昵称填充用）。调用方控制 ids 大小（≤50）。
+   */
+  public List<UserPublicProfileResponse> batchGetUsers(List<Long> ids) {
+    if (ids == null || ids.isEmpty()) {
+      return List.of();
+    }
+    long tenantId = TenantContext.requiredTenantId();
+    return userMapper.findByIds(tenantId, ids)
+        .stream()
+        .map(u -> new UserPublicProfileResponse(
+            u.getId(), u.getNickname(), u.getAvatar(), u.getUserType(), u.getVerifiedType()))
+        .toList();
   }
 
   /**

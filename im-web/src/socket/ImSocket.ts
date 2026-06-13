@@ -14,18 +14,25 @@ export class ImSocket {
   private reconnectTimer: number | null = null;
   private heartbeatTimer: number | null = null;
   private manualClose = false;
+  private generation = 0;
   private readonly backoff = new ReconnectBackoff();
 
   connect(token: string) {
+    const generation = ++this.generation;
     this.manualClose = false;
     this.clearReconnectTimer();
     this.closeSocket();
     useSocketStore.getState().setStatus('connecting');
 
-    this.ws = new WebSocket(WS_URL);
-    this.ws.binaryType = 'arraybuffer';
+    const ws = new WebSocket(WS_URL);
+    this.ws = ws;
+    ws.binaryType = 'arraybuffer';
 
-    this.ws.onopen = () => {
+    ws.onopen = () => {
+      if (!this.isActiveSocket(ws, generation)) {
+        ws.close();
+        return;
+      }
       const body = AuthReq.encode(
         AuthReq.create({
           token,
@@ -39,7 +46,10 @@ export class ImSocket {
       this.sendRaw(WsCmd.AUTH, body);
     };
 
-    this.ws.onmessage = (event) => {
+    ws.onmessage = (event) => {
+      if (!this.isActiveSocket(ws, generation)) {
+        return;
+      }
       try {
         const frame = decodeWsFrame(event.data);
         dispatchFrame(this, frame);
@@ -48,11 +58,17 @@ export class ImSocket {
       }
     };
 
-    this.ws.onerror = () => {
+    ws.onerror = () => {
+      if (!this.isActiveSocket(ws, generation)) {
+        return;
+      }
       useSocketStore.getState().setStatus('error', 'WebSocket 连接异常');
     };
 
-    this.ws.onclose = () => {
+    ws.onclose = () => {
+      if (!this.isActiveSocket(ws, generation)) {
+        return;
+      }
       this.stopHeartbeat();
       this.ws = null;
       if (!this.manualClose && useAuthStore.getState().accessToken) {
@@ -64,10 +80,12 @@ export class ImSocket {
   }
 
   disconnect(manual = true) {
+    this.generation += 1;
     this.manualClose = manual;
     this.clearReconnectTimer();
     this.stopHeartbeat();
     this.closeSocket();
+    useSocketStore.getState().setStatus('closed');
   }
 
   resetBackoff() {
@@ -169,9 +187,17 @@ export class ImSocket {
 
   private closeSocket() {
     if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
+      this.ws.onopen = null;
+      this.ws.onmessage = null;
+      this.ws.onerror = null;
+      this.ws.onclose = null;
       this.ws.close();
     }
     this.ws = null;
+  }
+
+  private isActiveSocket(ws: WebSocket, generation: number) {
+    return this.ws === ws && this.generation === generation;
   }
 }
 

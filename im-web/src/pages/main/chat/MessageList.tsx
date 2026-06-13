@@ -7,7 +7,16 @@ import { MessageBubble } from './MessageBubble';
 
 export function MessageList({ convId }: { convId: string }) {
   const parentRef = useRef<HTMLDivElement>(null);
-  const { messages, loadingHistory, loadHistory } = useMessages(convId);
+  const { messages, hasMore, loadingHistory, loadHistory } = useMessages(convId);
+
+  // F2：进入会话时若无消息则立即加载历史
+  useEffect(() => {
+    if (messages.length === 0 && hasMore) {
+      void loadHistory();
+    }
+    // convId 变化时重置滚动位置
+    parentRef.current?.scrollTo({ top: parentRef.current.scrollHeight });
+  }, [convId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const virtualizer = useVirtualizer({
     count: messages.length,
@@ -18,11 +27,17 @@ export function MessageList({ convId }: { convId: string }) {
 
   useInfiniteScroll(parentRef, loadHistory);
 
+  // 新消息/会话切换时滚动到底部。
+  // ⚠️ virtualizer 每次内部状态变化都是新引用，放进 deps 会死循环：
+  //    scrollToIndex → virtualizer 内部 setState → 新引用 → effect 重跑 → 无限循环。
+  //    改用 ref 持有最新实例，effect 只依赖 messages.length。
+  const virtualizerRef = useRef(virtualizer);
+  virtualizerRef.current = virtualizer;
   useEffect(() => {
     if (messages.length > 0) {
-      virtualizer.scrollToIndex(messages.length - 1, { align: 'end' });
+      virtualizerRef.current.scrollToIndex(messages.length - 1, { align: 'end' });
     }
-  }, [messages.length, virtualizer]);
+  }, [messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div ref={parentRef} className="message-list">
@@ -31,7 +46,7 @@ export function MessageList({ convId }: { convId: string }) {
           <Spin size="small" />
         </div>
       )}
-      {messages.length === 0 ? (
+      {messages.length === 0 && !loadingHistory ? (
         <div className="empty-state">
           <div className="empty-state-inner">
             <div className="empty-state-title">还没有消息</div>

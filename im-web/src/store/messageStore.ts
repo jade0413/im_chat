@@ -86,6 +86,14 @@ function upsertMessageBatch(source: Map<string, ChatMessage[]>, convId: string, 
   return messages;
 }
 
+/**
+ * Q2：统一用 clientMsgId 作为去重 key。
+ *
+ * serverMsgId 在 optimistic 消息阶段为 undefined，若优先用 serverMsgId，
+ * MSG_SEND_ACK 回来后 key 从 clientMsgId 变为 serverMsgId，导致同一条消息
+ * 在 byKey map 中出现两条记录（旧 key + 新 key），界面重复显示。
+ * clientMsgId 由客户端生成且全生命周期不变，是正确的稳定 key。
+ */
 function messageKey(message: ChatMessage): string {
-  return message.serverMsgId ?? `${message.convId}:${message.seq ?? message.clientMsgId}`;
+  return message.clientMsgId;
 }

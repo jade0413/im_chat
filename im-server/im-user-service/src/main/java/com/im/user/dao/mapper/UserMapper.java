@@ -35,4 +35,39 @@ public interface UserMapper extends BaseMapper<UserEntity> {
         AND status = 1
       """)
   List<Long> findOnlineAgentIds(@Param("tenantId") long tenantId);
+
+  /**
+   * 按关键字搜索用户（昵称或账号前缀匹配），排除自身（D17 开放式单聊）。
+   * 最多返回 20 条，避免全表扫描。
+   */
+  @Select("""
+      SELECT id, nickname, avatar, user_type, verified_type FROM `user`
+      WHERE tenant_id = #{tenantId}
+        AND status = 1
+        AND id != #{excludeUserId}
+        AND user_type = 1
+        AND (nickname LIKE CONCAT(#{keyword}, '%') OR account LIKE CONCAT(#{keyword}, '%'))
+      LIMIT 20
+      """)
+  List<UserEntity> searchUsers(
+      @Param("tenantId") long tenantId,
+      @Param("keyword") String keyword,
+      @Param("excludeUserId") long excludeUserId);
+
+  /**
+   * 批量查询用户公开资料（供历史消息填充昵称/头像）。
+   * 调用方控制列表大小（建议 ≤50）。
+   */
+  @Select("""
+      <script>
+      SELECT id, nickname, avatar, user_type, verified_type FROM `user`
+      WHERE tenant_id = #{tenantId} AND id IN
+        <foreach item='id' collection='ids' open='(' separator=',' close=')'>
+          #{id}
+        </foreach>
+      </script>
+      """)
+  List<UserEntity> findByIds(
+      @Param("tenantId") long tenantId,
+      @Param("ids") List<Long> ids);
 }

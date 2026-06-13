@@ -139,6 +139,8 @@
         <version>${spring-boot.version}</version>
         <configuration>
           <mainClass>com.im.bootstrap.ImApplication</mainClass>
+          <!-- 消除 JDK 21 的 ByteBuddy agent 动态加载警告和 CDS 警告 -->
+          <jvmArguments>-XX:+EnableDynamicAgentLoading -Xshare:off</jvmArguments>
         </configuration>
         <executions>
           <execution>

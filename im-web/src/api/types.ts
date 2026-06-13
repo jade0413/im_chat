@@ -38,6 +38,15 @@ export interface UserProfile {
 
 export type IdLike = string | number;
 
+/** 其他用户的公开资料（不含账号）。 */
+export interface UserPublicProfile {
+  id: IdLike;
+  nickname: string;
+  avatar?: string;
+  userType: number;
+  verifiedType: number;
+}
+
 export interface MessageHistoryResponse {
   convId: IdLike;
   readSeq: IdLike;
