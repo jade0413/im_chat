@@ -32,6 +32,8 @@ export interface UserProfile {
   avatar?: string;
   userType: number;
   verifiedType: number;
+  isAgent?: boolean;
+  agentStatus?: number;
   status: number;
   createdAt: string;
 }
@@ -127,4 +129,66 @@ export interface GroupMemberItem {
   /** 1=成员 2=管理员 3=群主 */
   role: number;
   joinedAt: string;
+}
+
+export interface CsConvItemResponse {
+  convId: IdLike;
+  /** 1=open 2=assigned 3=resolved */
+  csStatus: number;
+  agentId: IdLike;
+  visitorUserId: IdLike;
+  visitorName: string;
+  visitorOnline?: boolean;
+  visitorReadSeq?: IdLike;
+  lastMsgTimeMs: IdLike;
+  lastMsgAbstract: string;
+  maxSeq: IdLike;
+}
+
+export interface AgentConvListResponse {
+  convs: CsConvItemResponse[];
+  hasMore: boolean;
+}
+
+export interface CsInternalNoteResponse {
+  id: IdLike;
+  convId: IdLike;
+  agentId: IdLike;
+  content: string;
+  createdAtMs: IdLike;
+}
+
+export interface CsInternalNoteListResponse {
+  notes: CsInternalNoteResponse[];
+}
+
+export interface CreateCsInternalNoteRequest {
+  content: string;
+}
+
+export interface WidgetConfigResponse {
+  color: string;
+  welcomeMsg: string;
+  offlineMsg: string;
+  displayName: string;
+  position: 'bottom-right' | 'bottom-left' | string;
+  poweredBy: boolean;
+}
+
+export interface AgentAvailabilityResponse {
+  available: boolean;
+  onlineAgentCount: number;
+}
+
+export interface WidgetSessionResponse {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn: number;
+  conversationId: IdLike;
+  visitorId: IdLike;
+  displayName: string;
+  isNewConversation: boolean;
+  /** 1=open 2=assigned */
+  csStatus: number;
 }

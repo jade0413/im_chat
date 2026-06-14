@@ -2,6 +2,7 @@ package com.im.cs.agent.service;
 
 import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
+import com.im.cs.config.CsGrpcMetadata;
 import com.im.proto.rpc.CheckIsAgentReq;
 import com.im.proto.rpc.CheckIsAgentResp;
 import com.im.proto.rpc.UserRpcGrpc;
@@ -16,6 +17,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class CsAgentValidationService {
+
+  private static final int AGENT_STATUS_OFFLINE = 0;
 
   private final UserRpcGrpc.UserRpcBlockingStub userRpcStub;
 
@@ -32,10 +35,25 @@ public class CsAgentValidationService {
    * @throws ImException NO_PERMISSION 如果 is_agent=0
    */
   public void requireAgent(long userId) {
-    CheckIsAgentResp resp = userRpcStub.checkIsAgent(
-        CheckIsAgentReq.newBuilder().setUserId(userId).build());
+    CheckIsAgentResp resp = checkAgent(userId);
     if (!resp.getIsAgent()) {
       throw new ImException(ErrorCode.NO_PERMISSION, "当前用户无坐席权限，userId=" + userId);
     }
+  }
+
+  /** 认领会话要求坐席在岗（online 或 busy，D35）；offline 不能认领。 */
+  public void requireActiveAgent(long userId) {
+    CheckIsAgentResp resp = checkAgent(userId);
+    if (!resp.getIsAgent()) {
+      throw new ImException(ErrorCode.NO_PERMISSION, "当前用户无坐席权限，userId=" + userId);
+    }
+    if (resp.getAgentStatus() == AGENT_STATUS_OFFLINE) {
+      throw new ImException(ErrorCode.NO_PERMISSION, "当前坐席不在岗，无法认领会话");
+    }
+  }
+
+  private CheckIsAgentResp checkAgent(long userId) {
+    return CsGrpcMetadata.withMetadata(userRpcStub).checkIsAgent(
+        CheckIsAgentReq.newBuilder().setUserId(userId).build());
   }
 }

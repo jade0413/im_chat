@@ -42,7 +42,7 @@ public class GrpcConversationResolver implements ConversationResolver {
       throw new ImException(ErrorCode.INTERNAL_ERROR, "conversation resolver returned empty conv");
     }
     ConvType type = response.getConv().getType();
-    if (type != ConvType.C2C && type != ConvType.GROUP) {
+    if (type != ConvType.C2C && type != ConvType.GROUP && type != ConvType.CS_SESSION) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "unsupported conversation type");
     }
     return response.getConv();

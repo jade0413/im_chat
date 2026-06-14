@@ -53,6 +53,9 @@ class ConversationServiceTest {
   @Mock
   private ConversationCreator conversationCreator;
 
+  @Mock
+  private com.im.common.conversation.ConversationMemberCache memberCache;
+
   private ConversationService service;
 
   @BeforeEach
@@ -64,7 +67,8 @@ class ConversationServiceTest {
         userConvVersionMapper,
         userConvEventMapper,
         new C2cKeyGenerator(),
-        conversationCreator);
+        conversationCreator,
+        memberCache);
   }
 
   @Test

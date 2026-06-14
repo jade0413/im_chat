@@ -4,6 +4,7 @@ import { Spin } from 'antd';
 import { LoginPage } from './pages/auth/LoginPage';
 import { RegisterPage } from './pages/auth/RegisterPage';
 import { MainLayout } from './pages/main/MainLayout';
+import { VisitorPage } from './pages/visitor/VisitorPage';
 import { KickDialog } from './components/KickDialog';
 import { useAuthStore } from './store/authStore';
 
@@ -14,6 +15,7 @@ export function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/visitor" element={<VisitorPage />} />
           <Route
             path="/chat"
             element={

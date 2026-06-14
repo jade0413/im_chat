@@ -55,6 +55,12 @@ public final class RedisKeys {
     return "dedup:" + tenantId + ":" + clientMsgId;
   }
 
+  public static String convMembers(long tenantId, long convId) {
+    validatePositive("tenantId", tenantId);
+    validatePositive("convId", convId);
+    return "conv:members:" + tenantId + ":" + convId;
+  }
+
   public static String workerIdLease(long workerId) {
     if (workerId < 0) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "workerId must be non-negative");

@@ -11,13 +11,16 @@ export function ChatPanel({ convId }: { convId: string }) {
 
   // 进入/切换会话时：乐观消除未读红点 + 上报已读给服务端
   useEffect(() => {
+    if (conv?.type === 3 && conv.csStatus === '1') {
+      return;
+    }
     markRead(convId);
     // 发送已读上报，让服务端同步到其他端；maxSeq 可能尚未到位，取当前值
     const maxSeq = conv?.maxSeq;
     if (maxSeq && maxSeq !== '0') {
       imSocket.sendReadReport(convId, maxSeq);
     }
-  }, [convId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [convId, conv?.type, conv?.csStatus, conv?.maxSeq]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <section className="chat-shell">

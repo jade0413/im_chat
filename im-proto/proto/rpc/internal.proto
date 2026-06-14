@@ -49,7 +49,10 @@ message IssueVisitorTokenResp {
 }
 // 坐席身份校验（T35）
 message CheckIsAgentReq  { int64 user_id = 1; }
-message CheckIsAgentResp { bool is_agent = 1; }
+message CheckIsAgentResp {
+  bool  is_agent     = 1;
+  int32 agent_status = 2;  // 0=offline 1=online 2=busy
+}
 // 坐席在线状态切换（D35）
 message UpdateAgentStatusReq {
   int64 user_id      = 1;
@@ -158,6 +161,7 @@ message CsConvItem {
   int64  last_msg_time_ms  = 6;  // last_msg_time 毫秒时间戳
   string last_msg_abstract = 7;
   int64  max_seq           = 8;
+  int64  visitor_read_seq  = 9;  // 访客侧 read_seq，用于坐席端消息已读展示
 }
 // 取单个 CS 会话信息（坐席查看访客详情）
 message GetCsConvReq {

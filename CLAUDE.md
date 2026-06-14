@@ -54,6 +54,8 @@
 | D35 | 2026-06-13 | 坐席在线状态 = **`user.agent_status` DB 列**（0=offline/1=online/2=busy），坐席手动切换；推送路由只推 online/busy 坐席；widget 通过公开接口查询租户是否有坐席在线 | MVP 用 DB 列足够，避免引入实时 presence 复杂度；自动 offline（WS 断连联动）列为二阶段 |
 | D36 | 2026-06-13 | **离线留言 = 消息链路不变**，访客无论坐席是否在线均可发消息正常存库；坐席上线后查 open 未认领会话并 App 内通知；MVP 不做实时邮件通知 | 最简且可靠：不引入新消息类型，不依赖邮件服务；坐席上线主动拉取比服务端主动推更稳定 |
 | D37 | 2026-06-13 | Widget 配置存 `widget_config` 表（颜色/欢迎语/位置/powered_by 徽标）；企业获得一段 JS snippet 嵌入网站；`powered_by=1` 默认开启作为免费版病毒传播机制 | JS snippet 是 B 端 SaaS 标配嵌入方式；徽标是 Crisp/Intercom 早期核心增长手段 |
+| D38 | 2026-06-14 | **客服内部备注**：新增 `cs_internal_note` 表，仅"处理该会话的坐席本人"可读写（open 未认领不可、非本人坐席不可）；备注不进 message/outbox、不推访客。**修订 D31**：resolve 不再清空 `agent_id`，保留为"处理坐席"记录，使结单后本人仍可补充质检/交接备注（`listAgentCsConvs` 仍按 `cs_status IN(1,2)` 过滤，resolved 不污染工作台） | 质检/交接发生在结单后，需要知道处理坐席；保留 agent_id 是最小改动且无副作用（resolved 推送本就只发访客） |
+| D39 | 2026-06-14 | **重申 D35**：CS 推送扇出 + widget 可用性坐席范围 = **online+busy**（`agent_status IN(1,2)`，非仅 online）；**认领会话**要求坐席 active（online 或 busy），offline 不可认领。坐席工作台列表对访客资料/访客成员/在线状态做**批量查询**（消除 N+1） | busy 坐席仍需感知 open 待接待并可认领；批量化避免 limit×(DB+Redis) 放大 |
 
 ## 设计文档索引
 

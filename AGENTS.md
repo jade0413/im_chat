@@ -39,6 +39,7 @@
 | D26 | 2026-06-13 | seq 方案采纳 **MySQL conversation 行锁自增**：`UPDATE conversation SET max_seq=max_seq+1` 与 message/conversation/outbox 同事务；Redis seq 降级为高吞吐预留路径 | PR-1 审查 S7 补流程：实现偏离文档但技术方向更稳，同事务无空洞、回滚一致、少一个 Redis 故障依赖；流程教训记录在案：后续偏离文档必须先提 Open Question |
 | D27 | 2026-06-13 | `token_ver` 精确语义：REST 登录/注册按平台类递增 `token_ver` 并写入 JWT；`GatewayAuth.VerifyToken` 校验 token 内版本等于 Redis 当前版本；`ConnEvent.OnConnected` 只负责 KICK 旧连接并替换路由 | 避免 OnConnected 递增版本后把新连接 token 一并失效；仍满足同类互踢时旧 token 立即失效 |
 | D28 | 2026-06-13 | `need_ack` 下行确认使用 `Frame.req_id`：网关为每个目标连接分配非 0 `req_id`，客户端 `MSG_RECV_ACK` 回带同 `req_id`；业务 ack body 仍原样转发 Java | 网关不编译业务 body proto，仍能精确跟踪下行送达；10s 未 ack 主动断连并走 SYNC 补齐，不做服务端重推 |
+| D29 | 2026-06-14 | 客服工作台权限：**未认领只看队列摘要，认领后才可看完整消息记录和内部备注**；内部备注落 `cs_internal_note`，不进入消息流、不推访客 | 对齐客服系统最小权限边界；保留离线留言与后续转接/质检需要的协作记录，同时避免未认领坐席越权查看完整对话 |
 
 ## 设计文档索引
 
@@ -80,6 +81,7 @@
 - [ ] 消息全文搜索（ES vs 客户端 SQLite FTS）——二阶段
 - [ ] 好友申请流程 + friend_required 租户开关的交互细节——二阶段
 - [ ] 客服坐席分配策略（轮询/最少会话/技能组）——第二阶段细化
+- [ ] 客服转接：更新 `conversation.agent_id`、新增接手坐席成员关系，并明确原坐席是否保留历史访问权——第二阶段细化
 - [ ] 二阶段若括高群上限（>500）：推送降级为"脏通知+拉取"、@提及单独写扩散、成员列表懒加载
 - [ ] 认证审核流程（人工审核 or 对接企业资质 API）——管理后台二阶段
 

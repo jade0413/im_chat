@@ -95,6 +95,26 @@ class GatewayAuthGrpcServiceTest {
   }
 
   @Test
+  void verifiesVisitorTokenWithoutPlatformClass() {
+    when(userMapper.selectById(202L)).thenReturn(normalUser(202L, 1));
+    String token = jwtService.createAccessToken(1L, 202L);
+
+    VerifyTokenResp response = stub.verifyToken(VerifyTokenReq.newBuilder()
+        .setToken(token)
+        .setTenantId(1L)
+        .setDeviceId("visitor-device")
+        .setPlatform(5)
+        .setGwInstance("gw-1")
+        .build());
+
+    assertThat(response.getCode()).isEqualTo(ErrorCode.OK.code());
+    assertThat(response.getUserId()).isEqualTo(202L);
+    org.mockito.Mockito.verify(tokenVersionService, org.mockito.Mockito.never())
+        .ensureCurrent(org.mockito.Mockito.anyLong(), org.mockito.Mockito.anyLong(),
+            org.mockito.Mockito.anyString(), org.mockito.Mockito.anyLong());
+  }
+
+  @Test
   void returnsTokenInvalidForMalformedToken() {
     VerifyTokenResp response = stub.verifyToken(VerifyTokenReq.newBuilder()
         .setToken("bad-token")

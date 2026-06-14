@@ -1,4 +1,4 @@
-import { Badge } from 'antd';
+import { Badge, Tag } from 'antd';
 import { AppAvatar } from '../../../components/AppAvatar';
 import { useConvStore } from '../../../store/convStore';
 import { useUserStore } from '../../../store/userStore';
@@ -6,6 +6,7 @@ import type { Conversation } from '../../../store/types';
 import { formatChatTime } from '../../../utils/time';
 
 const CONV_TYPE_C2C = 1;
+const CONV_TYPE_CS = 3;
 
 export function ConvItem({ conv }: { conv: Conversation }) {
   const activeConvId = useConvStore((state) => state.activeConvId);
@@ -28,6 +29,10 @@ export function ConvItem({ conv }: { conv: Conversation }) {
       <div style={{ minWidth: 0 }}>
         <div className="conv-name-line">
           <span className="conv-name">{displayTitle}</span>
+          {conv.type === CONV_TYPE_CS && <Tag color={csStatusColor(conv.csStatus)}>{csStatusLabel(conv.csStatus)}</Tag>}
+          {conv.type === CONV_TYPE_CS && (
+            <Tag color={conv.visitorOnline ? 'green' : 'default'}>{conv.visitorOnline ? '访客在线' : '访客离线'}</Tag>
+          )}
           {conv.muted && <span style={{ color: '#9aa4b2', fontSize: 12 }}>免打扰</span>}
         </div>
         <div className="conv-preview">{conv.lastMsgAbstract || '暂无消息'}</div>
@@ -38,6 +43,24 @@ export function ConvItem({ conv }: { conv: Conversation }) {
       </div>
     </button>
   );
+}
+
+function csStatusLabel(status?: string): string {
+  switch (status) {
+    case '1': return '待接待';
+    case '2': return '接待中';
+    case '3': return '已结单';
+    default: return '客服';
+  }
+}
+
+function csStatusColor(status?: string): string {
+  switch (status) {
+    case '1': return 'orange';
+    case '2': return 'processing';
+    case '3': return 'default';
+    default: return 'blue';
+  }
 }
 
 function unreadCount(maxSeq: string, readSeq: string): number {

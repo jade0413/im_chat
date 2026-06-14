@@ -197,6 +197,10 @@ function handleSyncResp(body: Uint8Array) {
 
 function handleReadNotify(body: Uint8Array) {
   const notify = ReadNotify.decode(body);
+  const currentUserId = idToString(useAuthStore.getState().user?.id);
+  if (idToString(notify.readerUserId) === currentUserId) {
+    return;
+  }
   // READ_NOTIFY 来自对端的已读上报，记录对端已读位置（用于已读回执 UI）
   // 本端自己的已读位置由 markRead 维护，不在此处更新，避免混淆
   useConvStore.getState().updatePeerReadSeq(idToString(notify.convId), idToString(notify.readSeq));

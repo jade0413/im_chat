@@ -1,5 +1,12 @@
 import { useState } from 'react';
-import { LogoutOutlined, MessageOutlined, SettingOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons';
+import {
+  CustomerServiceOutlined,
+  LogoutOutlined,
+  MessageOutlined,
+  SettingOutlined,
+  TeamOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import { Tooltip } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { imSocket } from '../../../socket/ImSocket';
@@ -43,6 +50,7 @@ export function NavSidebar() {
         {tabBtn('chats', '消息', <MessageOutlined />)}
         {tabBtn('contacts', '联系人', <UserOutlined />)}
         {tabBtn('groups', '群组', <TeamOutlined />)}
+        {tabBtn('cs', '客服', <CustomerServiceOutlined />)}
       </nav>
       <div className="nav-bottom">
         <Tooltip title="个人资料" placement="right">

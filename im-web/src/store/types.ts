@@ -26,6 +26,8 @@ export interface Conversation {
   lastMsgAbstract: string;
   lastMsgTime?: string;
   csStatus?: string;
+  visitorOnline?: boolean;
+  visitorReadSeq?: string;
 }
 
 export interface SenderInfo {

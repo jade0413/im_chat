@@ -3,12 +3,18 @@ package com.im.cs.agent.rest;
 import com.im.common.auth.UserContext;
 import com.im.common.web.ApiResponse;
 import com.im.cs.agent.dto.AgentConvListResponse;
+import com.im.cs.agent.dto.CreateCsInternalNoteRequest;
 import com.im.cs.agent.dto.CsConvItemResponse;
+import com.im.cs.agent.dto.CsInternalNoteListResponse;
+import com.im.cs.agent.dto.CsInternalNoteResponse;
 import com.im.cs.agent.service.CsAgentService;
+import com.im.cs.agent.service.CsInternalNoteService;
 import com.im.cs.agent.service.CsAgentValidationService;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -31,11 +37,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class CsAgentController {
 
   private final CsAgentService csAgentService;
+  private final CsInternalNoteService noteService;
   private final CsAgentValidationService validationService;
 
   public CsAgentController(CsAgentService csAgentService,
+      CsInternalNoteService noteService,
       CsAgentValidationService validationService) {
     this.csAgentService = csAgentService;
+    this.noteService = noteService;
     this.validationService = validationService;
   }
 
@@ -76,7 +85,7 @@ public class CsAgentController {
    */
   @PostMapping("/{convId}/claim")
   public ApiResponse<Void> claim(@PathVariable long convId) {
-    long agentId = currentAgentId();
+    long agentId = currentActiveAgentId();
     csAgentService.claimConv(convId, agentId);
     return ApiResponse.ok(null);
   }
@@ -95,10 +104,31 @@ public class CsAgentController {
     return ApiResponse.ok(null);
   }
 
+  /** 查看当前已认领会话的内部备注。未认领会话不允许查看备注。 */
+  @GetMapping("/{convId}/notes")
+  public ApiResponse<CsInternalNoteListResponse> listNotes(@PathVariable long convId) {
+    long agentId = currentAgentId();
+    return ApiResponse.ok(noteService.listNotes(convId, agentId));
+  }
+
+  /** 添加内部备注。备注仅坐席侧可见，不推送给访客。 */
+  @PostMapping("/{convId}/notes")
+  public ApiResponse<CsInternalNoteResponse> createNote(@PathVariable long convId,
+      @Valid @RequestBody CreateCsInternalNoteRequest request) {
+    long agentId = currentAgentId();
+    return ApiResponse.ok(noteService.createNote(convId, agentId, request.content()));
+  }
+
   /** 获取当前请求的坐席 userId，并校验其 is_agent=1 权限。 */
   private long currentAgentId() {
     long userId = UserContext.requiredUserId();
     validationService.requireAgent(userId);
+    return userId;
+  }
+
+  private long currentActiveAgentId() {
+    long userId = UserContext.requiredUserId();
+    validationService.requireActiveAgent(userId);
     return userId;
   }
 }

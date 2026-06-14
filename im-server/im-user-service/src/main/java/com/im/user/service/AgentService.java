@@ -35,6 +35,14 @@ public class AgentService {
         && Integer.valueOf(1).equals(user.getIsAgent());
   }
 
+  public AgentInfo getAgentInfo(long userId) {
+    UserEntity user = userMapper.selectById(userId);
+    if (user == null || !Integer.valueOf(1).equals(user.getIsAgent())) {
+      return new AgentInfo(false, 0);
+    }
+    return new AgentInfo(true, user.getAgentStatus() == null ? 0 : user.getAgentStatus());
+  }
+
   /**
    * 检查租户内是否有坐席在线（online 或 busy）（D35）。
    * 用于 Widget availability API，结果精确到秒级（DB 列非实时 Redis）。
@@ -74,4 +82,6 @@ public class AgentService {
     update.setAgentStatus(agentStatus);
     userMapper.updateById(update);
   }
+
+  public record AgentInfo(boolean isAgent, int agentStatus) {}
 }

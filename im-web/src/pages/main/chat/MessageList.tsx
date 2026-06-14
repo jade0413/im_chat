@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { Spin } from 'antd';
+import { Alert, Spin } from 'antd';
 import { useMessages } from '../../../hooks/useMessages';
 import { useInfiniteScroll } from '../../../hooks/useInfiniteScroll';
 import { useConvStore } from '../../../store/convStore';
@@ -15,11 +15,19 @@ type ListItem =
 export function MessageList({ convId }: { convId: string }) {
   const parentRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
-  const { messages, hasMore, loadingHistory, loadHistory, loadLatest } = useMessages(convId);
-  const convMaxSeq = useConvStore((state) => state.conversations.get(convId)?.maxSeq ?? '0');
+  const conv = useConvStore((state) => state.conversations.get(convId));
+  const historyEnabled = !(conv?.type === 3 && conv.csStatus === '1');
+  const { messages, hasMore, loadingHistory, historyError, loadHistory, loadLatest } = useMessages(convId, {
+    enabled: historyEnabled,
+  });
+  const convMaxSeq = conv?.maxSeq ?? '0';
 
   // F2：进入会话时若无消息则加载历史；若本地消息落后于 convMaxSeq 则补齐
   useEffect(() => {
+    if (!historyEnabled) {
+      scrollToBottom('auto');
+      return;
+    }
     const localMaxSeq = messages.length > 0 ? (messages[messages.length - 1].seq ?? '0') : '0';
     const hasGap = compareIdLike(convMaxSeq, localMaxSeq) > 0;
     if (messages.length === 0 && hasMore) {
@@ -29,7 +37,7 @@ export function MessageList({ convId }: { convId: string }) {
     }
     // 切换会话时立即滚到底
     scrollToBottom('auto');
-  }, [convId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [convId, historyEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 在超过 5 分钟间隔的消息之间插入时间分割线
   const items = useMemo<ListItem[]>(() => {
@@ -63,7 +71,7 @@ export function MessageList({ convId }: { convId: string }) {
   }, [lastMessageSignature]);
 
   // 上拉加载更多历史
-  useInfiniteScroll(parentRef, loadHistory);
+  useInfiniteScroll(parentRef, historyEnabled ? loadHistory : () => undefined);
 
   function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
     const el = parentRef.current;
@@ -79,11 +87,30 @@ export function MessageList({ convId }: { convId: string }) {
           <Spin size="small" />
         </div>
       )}
+      {historyError && (
+        <Alert
+          className="message-list-alert"
+          type="warning"
+          showIcon
+          message="消息记录暂时不可用"
+          description={historyError}
+        />
+      )}
       {items.length === 0 && !loadingHistory ? (
         <div className="empty-state">
           <div className="empty-state-inner">
-            <div className="empty-state-title">还没有消息</div>
-            <div>发送第一条消息后，这里会开始展示会话记录。</div>
+            {historyEnabled ? (
+              <>
+                <div className="empty-state-title">还没有消息</div>
+                <div>发送第一条消息后，这里会开始展示会话记录。</div>
+              </>
+            ) : (
+              <>
+                <div className="empty-state-title">待接待会话</div>
+                <div>认领会话后可查看完整记录并回复访客。</div>
+                {conv?.lastMsgAbstract && <div className="empty-state-hint">最新消息：{conv.lastMsgAbstract}</div>}
+              </>
+            )}
           </div>
         </div>
       ) : (

@@ -46,6 +46,10 @@ export class ImSocket {
   private hasAuthAck = false;
   private lastFrameAt = 0;
   private lastFrameCmd = 0;
+  /** 当前心跳周期（ms），存活探测用 */
+  private heartbeatMs = 30_000;
+  /** 网络恢复/可见性监听只绑定一次 */
+  private netListenersBound = false;
   private readonly backoff = new ReconnectBackoff();
 
   /** 未收到服务端 ACK 的出站消息，重连后自动重发 */
@@ -60,6 +64,7 @@ export class ImSocket {
   // ─── 公开连接控制 ──────────────────────────────────────────────
 
   connect(token: string) {
+    this.bindNetworkListeners();
     const generation = ++this.generation;
     this.manualClose = false;
     this.connectStartedAt = Date.now();
@@ -258,8 +263,62 @@ export class ImSocket {
   startHeartbeat() {
     this.stopAuthAckTimer();
     this.stopHeartbeat();
-    const interval = Math.max(10, useSocketStore.getState().heartbeatIntervalSec) * 1000;
-    this.heartbeatTimer = window.setInterval(() => this.sendRaw(WsCmd.PING), interval);
+    this.heartbeatMs = Math.max(10, useSocketStore.getState().heartbeatIntervalSec) * 1000;
+    // 刚鉴权成功，重置存活基准，避免下一拍误判
+    this.lastFrameAt = Date.now();
+    this.heartbeatTimer = window.setInterval(() => {
+      // 存活探测：超过 2.5 个心跳周期没收到任何下行帧 → 判定半死链，主动断开并重连
+      // （兜底 TCP 半开/移动网络切换时浏览器 onclose 迟迟不触发的场景）
+      if (this.lastFrameAt > 0 && Date.now() - this.lastFrameAt > this.heartbeatMs * 2.5) {
+        console.warn('[im-web/ws] no frame within liveness window, forcing reconnect');
+        useSocketStore.getState().setEvent('心跳无响应，主动重连');
+        this.forceReconnect();
+        return;
+      }
+      this.sendRaw(WsCmd.PING);
+    }, this.heartbeatMs);
+  }
+
+  /** 半死链时主动断开并调度重连（closeSocket 已摘除 onclose，需手动调度）。 */
+  private forceReconnect() {
+    this.stopHeartbeat();
+    this.closeSocket();
+    if (!this.manualClose && useAuthStore.getState().accessToken) {
+      this.scheduleReconnect();
+    }
+  }
+
+  /** 绑定一次：网络恢复 / 标签页重新可见时立即重连，不必等退避计时器。 */
+  private bindNetworkListeners() {
+    if (this.netListenersBound) return;
+    this.netListenersBound = true;
+    window.addEventListener('online', () => this.reconnectNow('network online'));
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') this.reconnectNow('tab visible');
+    });
+  }
+
+  /** 网络/可见性恢复时的即时重连：已连接则探活，未连接则重置退避立刻重连。 */
+  private reconnectNow(reason: string) {
+    if (this.manualClose) return;
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+    if (this.ws) {
+      if (this.ws.readyState === WebSocket.OPEN) {
+        // 已连接：主动探活一次，半死链交给心跳看门狗兜底
+        this.sendRaw(WsCmd.PING);
+        return;
+      }
+      if (this.ws.readyState === WebSocket.CONNECTING) {
+        // 正在连接：交给 openTimer 处理，避免抖动
+        return;
+      }
+    }
+    console.info('[im-web/ws] immediate reconnect:', reason);
+    useSocketStore.getState().setEvent('网络恢复，立即重连', reason);
+    this.clearReconnectTimer();
+    this.backoff.reset();
+    this.connect(token);
   }
 
   // ─── 消息 ───────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.common.id.SnowflakeIdGenerator;
 import com.im.common.tenant.TenantContext;
+import com.im.cs.config.CsGrpcMetadata;
 import com.im.cs.visitor.dao.entity.VisitorProfileEntity;
 import com.im.cs.visitor.dao.mapper.VisitorProfileMapper;
 import com.im.cs.visitor.dto.WidgetSessionRequest;
@@ -87,14 +88,14 @@ public class VisitorSessionService {
     }
 
     // 3. 签发 JWT（每次进入都重新签发，保证 token 是新鲜的）
-    IssueVisitorTokenResp tokenResp = userRpcStub.issueVisitorToken(
+    IssueVisitorTokenResp tokenResp = CsGrpcMetadata.withMetadata(userRpcStub).issueVisitorToken(
         IssueVisitorTokenReq.newBuilder()
             .setTenantId(tenantId)
             .setUserId(visitorUserId)
             .build());
 
     // 4. 查找或创建 CS 会话
-    FindOrCreateCsConvResp convResp = conversationRpcStub.findOrCreateCsConv(
+    FindOrCreateCsConvResp convResp = CsGrpcMetadata.withMetadata(conversationRpcStub).findOrCreateCsConv(
         FindOrCreateCsConvReq.newBuilder()
             .setTenantId(tenantId)
             .setVisitorUserId(visitorUserId)
@@ -120,7 +121,7 @@ public class VisitorSessionService {
   // ---- private helpers ----
 
   private long provisionVisitorUser(long tenantId, String displayName) {
-    ProvisionVisitorUserResp resp = userRpcStub.provisionVisitorUser(
+    ProvisionVisitorUserResp resp = CsGrpcMetadata.withMetadata(userRpcStub).provisionVisitorUser(
         ProvisionVisitorUserReq.newBuilder()
             .setTenantId(tenantId)
             .setDisplayName(displayName)

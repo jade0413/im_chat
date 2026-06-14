@@ -49,12 +49,13 @@ public interface ConversationMapper extends BaseMapper<ConversationEntity> {
       @Param("agentId") long agentId);
 
   /**
-   * 坐席结单：cs_status assigned(2) → resolved(3)，清空 agent_id。
+   * 坐席结单：cs_status assigned(2) → resolved(3)。
+   * 保留 agent_id 作为「处理坐席」记录，供质检/交接及结单后内部备注权限判定使用。
    * 要求会话当前 agent_id == #{agentId}，防止越权结单。
    */
   @Update("""
       UPDATE conversation
-      SET cs_status = 3, agent_id = NULL
+      SET cs_status = 3
       WHERE tenant_id = #{tenantId}
         AND id = #{convId}
         AND cs_status = 2

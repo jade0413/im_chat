@@ -3,6 +3,7 @@ package com.im.group.service;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.im.common.conversation.ConversationMemberCache;
 import com.im.common.conversation.UserConvEventType;
 import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
@@ -68,6 +69,7 @@ public class GroupService {
   private final OutboxWriter outboxWriter;
   private final GroupUserConvEventRecorder userConvEventRecorder;
   private final ObjectMapper objectMapper;
+  private final ConversationMemberCache memberCache;
   private final Clock clock;
 
   @Autowired
@@ -80,10 +82,11 @@ public class GroupService {
       SnowflakeIdGenerator idGenerator,
       OutboxWriter outboxWriter,
       GroupUserConvEventRecorder userConvEventRecorder,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper,
+      ConversationMemberCache memberCache) {
     this(groupInfoMapper, groupMemberMapper, tenantConfigMapper, conversationMapper,
         conversationMemberMapper, messageMapper, idGenerator, outboxWriter, userConvEventRecorder, objectMapper,
-        Clock.systemUTC());
+        memberCache, Clock.systemUTC());
   }
 
   GroupService(GroupInfoMapper groupInfoMapper,
@@ -96,6 +99,7 @@ public class GroupService {
       OutboxWriter outboxWriter,
       GroupUserConvEventRecorder userConvEventRecorder,
       ObjectMapper objectMapper,
+      ConversationMemberCache memberCache,
       Clock clock) {
     this.groupInfoMapper = groupInfoMapper;
     this.groupMemberMapper = groupMemberMapper;
@@ -107,6 +111,7 @@ public class GroupService {
     this.outboxWriter = outboxWriter;
     this.userConvEventRecorder = userConvEventRecorder;
     this.objectMapper = objectMapper;
+    this.memberCache = memberCache;
     this.clock = clock;
   }
 
@@ -168,6 +173,7 @@ public class GroupService {
     }
     context.group().setMemberCount(nextCount);
     groupInfoMapper.updateById(context.group());
+    memberCache.evict(tenantId, context.conversationId());
     appendNotification(tenantId, context.conversationId(), groupId, operatorUserId,
         "group.member_added",
         payload("group_id", groupId, "operator", operatorUserId, "user_ids", toAdd),
@@ -202,6 +208,7 @@ public class GroupService {
     int nextCount = Math.max(context.group().getMemberCount() - 1, 0);
     context.group().setMemberCount(nextCount);
     groupInfoMapper.updateById(context.group());
+    memberCache.evict(tenantId, context.conversationId());
     appendNotification(tenantId, context.conversationId(), groupId, operatorUserId,
         "group.member_removed",
         payload("group_id", groupId, "operator", operatorUserId, "user_ids", List.of(userId)),

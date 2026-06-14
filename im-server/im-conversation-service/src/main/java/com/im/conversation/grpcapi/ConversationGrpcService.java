@@ -3,6 +3,7 @@ package com.im.conversation.grpcapi;
 import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.conversation.dao.entity.ConversationEntity;
+import com.im.conversation.dao.entity.ConversationMemberEntity;
 import com.im.conversation.service.ConversationListResult;
 import com.im.conversation.service.ConversationService;
 import com.im.conversation.service.CsConversationService;
@@ -31,6 +32,7 @@ import com.im.proto.rpc.ResolveConvResp;
 import io.grpc.stub.StreamObserver;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -195,7 +197,11 @@ public class ConversationGrpcService extends ConversationRpcGrpc.ConversationRpc
       int limit = request.getLimit() > 0 ? request.getLimit() : 20;
       List<ConversationEntity> convs = csConversationService.listAgentCsConvs(
           tenantId, request.getAgentId(), limit, request.getOffset());
-      List<CsConvItem> items = convs.stream().map(this::toCsConvItem).toList();
+      // 批量取访客成员，避免逐条查询（N+1）。
+      Map<Long, ConversationMemberEntity> visitors = csConversationService.getVisitorMembers(convs);
+      List<CsConvItem> items = convs.stream()
+          .map(conv -> toCsConvItem(conv, visitors.get(conv.getId())))
+          .toList();
       response = ListAgentCsConvsResp.newBuilder()
           .addAllConvs(items)
           .setHasMore(convs.size() == limit)
@@ -216,7 +222,7 @@ public class ConversationGrpcService extends ConversationRpcGrpc.ConversationRpc
       ConversationEntity conv = csConversationService.getCsConv(tenantId, request.getConvId());
       response = GetCsConvResp.newBuilder()
           .setCode(ErrorCode.OK.code())
-          .setConv(toCsConvItem(conv))
+          .setConv(toCsConvItem(conv, csConversationService.getVisitorMember(conv)))
           .build();
     } catch (ImException ex) {
       response = GetCsConvResp.newBuilder().setCode(ex.errorCode().code()).build();
@@ -227,17 +233,21 @@ public class ConversationGrpcService extends ConversationRpcGrpc.ConversationRpc
     responseObserver.onCompleted();
   }
 
-  private CsConvItem toCsConvItem(ConversationEntity conv) {
+  private CsConvItem toCsConvItem(ConversationEntity conv, ConversationMemberEntity visitor) {
     CsConvItem.Builder b = CsConvItem.newBuilder()
         .setConvId(conv.getId())
         .setCsStatus(conv.getCsStatus() != null ? conv.getCsStatus() : 0)
         .setAgentId(conv.getAgentId() != null ? conv.getAgentId() : 0L)
         .setMaxSeq(conv.getMaxSeq() != null ? conv.getMaxSeq() : 0L)
         .setLastMsgAbstract(conv.getLastMsgAbstract() != null ? conv.getLastMsgAbstract() : "");
+    if (visitor != null) {
+      b.setVisitorUserId(visitor.getUserId() != null ? visitor.getUserId() : 0L)
+          .setVisitorReadSeq(visitor.getReadSeq() != null ? visitor.getReadSeq() : 0L);
+    }
     if (conv.getLastMsgTime() != null) {
       b.setLastMsgTimeMs(conv.getLastMsgTime().toInstant(ZoneOffset.UTC).toEpochMilli());
     }
-    // visitor_user_id / visitor_name 由调用方按需补充（CS service 查 visitor_profile）
+    // visitor_name 由调用方按需补充（CS service 查 visitor_profile）
     return b.build();
   }
 }

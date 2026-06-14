@@ -96,8 +96,11 @@ public class UserRpcGrpcService extends UserRpcGrpc.UserRpcImplBase {
   @Override
   public void checkIsAgent(CheckIsAgentReq request,
       StreamObserver<CheckIsAgentResp> responseObserver) {
-    boolean isAgent = agentService.isAgent(request.getUserId());
-    responseObserver.onNext(CheckIsAgentResp.newBuilder().setIsAgent(isAgent).build());
+    AgentService.AgentInfo info = agentService.getAgentInfo(request.getUserId());
+    responseObserver.onNext(CheckIsAgentResp.newBuilder()
+        .setIsAgent(info.isAgent())
+        .setAgentStatus(info.agentStatus())
+        .build());
     responseObserver.onCompleted();
   }
 

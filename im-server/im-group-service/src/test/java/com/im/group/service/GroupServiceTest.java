@@ -79,6 +79,9 @@ class GroupServiceTest {
   @Mock
   private GroupUserConvEventRecorder userConvEventRecorder;
 
+  @Mock
+  private com.im.common.conversation.ConversationMemberCache memberCache;
+
   @Captor
   private ArgumentCaptor<GroupInfoEntity> groupCaptor;
 
@@ -112,6 +115,7 @@ class GroupServiceTest {
         outboxWriter,
         userConvEventRecorder,
         new ObjectMapper(),
+        memberCache,
         Clock.fixed(Instant.parse("2026-06-13T00:00:00Z"), ZoneOffset.UTC));
   }
 

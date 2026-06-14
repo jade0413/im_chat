@@ -22,3 +22,8 @@ export function batchGetUsers(ids: IdLike[]) {
     params: { ids: ids.join(',') },
   });
 }
+
+/** 坐席在线状态：0=离线 1=在线 2=忙碌。 */
+export function updateAgentStatus(agentStatus: number) {
+  return apiClient.patch<unknown, void>('/api/v1/users/me/agent-status', { agentStatus });
+}

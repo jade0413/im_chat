@@ -22,7 +22,7 @@ import org.springframework.stereotype.Service;
  *
  * <p>D33 CS 推送路由：
  * <ul>
- *   <li>open(1) — 推送给所有在线/busy 坐席 + 访客（open 状态需所有坐席知晓）</li>
+ *   <li>open(1) — 推送给所有 online/busy 坐席 + 访客（open 状态需坐席知晓）</li>
  *   <li>assigned(2) — 只推送给绑定坐席 + 访客（缩小范围避免打扰其他坐席）</li>
  *   <li>resolved(3) — 仅推送给访客（会话已结单，坐席无需感知新消息）</li>
  * </ul>

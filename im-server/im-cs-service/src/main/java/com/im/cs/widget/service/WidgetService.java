@@ -1,6 +1,7 @@
 package com.im.cs.widget.service;
 
 import com.im.common.tenant.TenantContext;
+import com.im.cs.config.CsGrpcMetadata;
 import com.im.cs.widget.CsConstants;
 import com.im.cs.widget.dao.entity.WidgetConfigEntity;
 import com.im.cs.widget.dao.mapper.WidgetConfigMapper;
@@ -60,11 +61,11 @@ public class WidgetService {
 
   /**
    * 检查租户是否有坐席在线（Widget 显示在线/离线状态用）。
-   * 通过 gRPC 查询 user-service 的 user.agent_status（D35）。
+   * 通过 gRPC 查询 user-service 的 user.agent_status in(online,busy) 坐席数（D35）。
    */
   public AgentAvailabilityResponse checkAvailability() {
     long tenantId = TenantContext.requiredTenantId();
-    CheckAgentAvailabilityResp resp = userRpcStub.checkAgentAvailability(
+    CheckAgentAvailabilityResp resp = CsGrpcMetadata.withMetadata(userRpcStub).checkAgentAvailability(
         CheckAgentAvailabilityReq.newBuilder().setTenantId(tenantId).build());
     return new AgentAvailabilityResponse(resp.getAvailable(), resp.getOnlineAgentCount());
   }

@@ -36,13 +36,20 @@ public class TokenVerifier {
     if (claims.tenantId() != tenantId) {
       throw new ImException(ErrorCode.TOKEN_INVALID);
     }
+    if (claims.platformClass() == null || claims.platformClass().isBlank()) {
+      return verifyTenantUser(tenantId, claims.userId());
+    }
     String platformClass = PlatformClass.fromPlatform(platform).key();
     if (!platformClass.equals(claims.platformClass())) {
       throw new ImException(ErrorCode.TOKEN_INVALID);
     }
     tokenVersionService.ensureCurrent(tenantId, claims.userId(), platformClass, claims.tokenVersion());
+    return verifyTenantUser(tenantId, claims.userId());
+  }
+
+  private VerifyTokenResult verifyTenantUser(long tenantId, long userId) {
     try {
-      return TenantContext.callWithTenant(tenantId, () -> verifyUser(claims.userId()));
+      return TenantContext.callWithTenant(tenantId, () -> verifyUser(userId));
     } catch (ImException ex) {
       throw ex;
     } catch (Exception ex) {

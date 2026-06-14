@@ -1,20 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Input, Tooltip, Upload, App as AntApp } from 'antd';
-import { AudioOutlined, FileOutlined, PictureOutlined, SendOutlined, LoadingOutlined } from '@ant-design/icons';
+import { AudioOutlined, FileOutlined, PictureOutlined, SendOutlined, LoadingOutlined, UserSwitchOutlined } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
+import { ApiError } from '../../../api/client';
+import { claimCsConversation, getCsConversation } from '../../../api/cs';
 import { EmojiPicker } from '../../../components/EmojiPicker';
 import { imSocket } from '../../../socket/ImSocket';
 import { useFileUpload } from '../../../hooks/useFileUpload';
 import { useRecorder } from '../../../hooks/useRecorder';
+import { useAuthStore } from '../../../store/authStore';
+import { useConvStore } from '../../../store/convStore';
+import { useUiStore } from '../../../store/uiStore';
+import { idToString } from '../../../utils/id';
 
 export function InputBar({ convId }: { convId: string }) {
+  const conv = useConvStore((state) => state.conversations.get(convId));
+  const agentStatus = useAuthStore((state) => Number(state.user?.agentStatus ?? 0));
   const [text, setText] = useState('');
   const inputRef = useRef<TextAreaRef | null>(null);
+  const upsertConv = useConvStore((state) => state.upsertConv);
+  const requestCsRefresh = useUiStore((state) => state.requestCsRefresh);
   const { message } = AntApp.useApp();
   const { upload, uploading, progress } = useFileUpload();
   const { recording, start: startRecord, stop: stopRecord } = useRecorder();
   const [sendingVoice, setSendingVoice] = useState(false);
+  const [claiming, setClaiming] = useState(false);
 
   // 图片粘贴发送
   const handlePaste = useCallback(
@@ -54,6 +65,37 @@ export function InputBar({ convId }: { convId: string }) {
     if (!value) return;
     imSocket.sendText(convId, value);
     setText('');
+  }
+
+  async function handleClaim() {
+    if (!conv || claiming) return;
+    setClaiming(true);
+    try {
+      await claimCsConversation(convId);
+      try {
+        const item = await getCsConversation(convId);
+        upsertConv({
+          ...conv,
+          title: item.visitorName || conv.title,
+          peerUserId: idToString(item.visitorUserId),
+          maxSeq: idToString(item.maxSeq),
+          lastMsgAbstract: item.lastMsgAbstract || conv.lastMsgAbstract,
+          lastMsgTime: idToString(item.lastMsgTimeMs),
+          csStatus: idToString(item.csStatus),
+          visitorOnline: item.visitorOnline,
+          visitorReadSeq: idToString(item.visitorReadSeq ?? 0),
+          peerReadSeq: idToString(item.visitorReadSeq ?? conv.peerReadSeq ?? 0),
+        });
+      } catch {
+        upsertConv({ ...conv, csStatus: '2' });
+      }
+      requestCsRefresh();
+      message.success('已认领会话');
+    } catch (error) {
+      message.error(readableError(error));
+    } finally {
+      setClaiming(false);
+    }
   }
 
   const imageUploadProps: UploadProps = {
@@ -132,6 +174,22 @@ export function InputBar({ convId }: { convId: string }) {
     }
   }
 
+  if (conv?.type === 3 && conv.csStatus !== '2') {
+    const canClaim = conv.csStatus === '1' && agentStatus === 1;
+    return (
+      <footer className="input-bar">
+        <div className="input-disabled-notice">
+          <span>{disabledNotice(conv.csStatus, agentStatus)}</span>
+          {conv.csStatus === '1' && (
+            <Button type="primary" icon={<UserSwitchOutlined />} loading={claiming} disabled={!canClaim} onClick={handleClaim}>
+              认领会话
+            </Button>
+          )}
+        </div>
+      </footer>
+    );
+  }
+
   return (
     <footer className="input-bar">
       <div className="input-tools">
@@ -186,4 +244,27 @@ export function InputBar({ convId }: { convId: string }) {
       </div>
     </footer>
   );
+}
+
+function disabledNotice(csStatus: string | undefined, agentStatus: number): string {
+  if (csStatus === '1') {
+    if (agentStatus === 1) {
+      return '认领会话后可查看记录并回复访客';
+    }
+    if (agentStatus === 2) {
+      return '当前忙碌中，切换为在线后可认领新访客';
+    }
+    return '当前离线，切换为在线后可认领新访客';
+  }
+  return '会话已结单，不能继续发送消息';
+}
+
+function readableError(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return '操作失败，请稍后重试';
 }
