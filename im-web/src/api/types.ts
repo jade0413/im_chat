@@ -116,5 +116,15 @@ export interface AddGroupMembersRequest {
 
 export interface GroupMemberChangeResponse {
   groupId: IdLike;
+  convId: IdLike;
   memberCount: number;
+  changedUserIds: IdLike[];
+}
+
+/** 群成员列表条目（GET /api/v1/groups/:groupId/members） */
+export interface GroupMemberItem {
+  userId: IdLike;
+  /** 1=成员 2=管理员 3=群主 */
+  role: number;
+  joinedAt: string;
 }

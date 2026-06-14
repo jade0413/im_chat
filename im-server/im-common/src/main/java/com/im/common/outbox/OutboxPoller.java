@@ -4,7 +4,6 @@ import com.im.common.mq.RabbitMqEvent;
 import com.im.common.mq.RabbitMqPublisher;
 import com.im.common.outbox.dao.entity.OutboxEntity;
 import com.im.common.outbox.dao.mapper.CommonOutboxMapper;
-import java.lang.management.ManagementFactory;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -197,6 +196,6 @@ public class OutboxPoller implements SmartLifecycle {
   }
 
   private static String defaultClaimOwner() {
-    return ManagementFactory.getRuntimeMXBean().getName() + "-" + UUID.randomUUID();
+    return ProcessHandle.current().pid() + "-" + UUID.randomUUID();
   }
 }

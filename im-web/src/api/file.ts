@@ -5,6 +5,10 @@ export function presignFile(request: PresignFileRequest) {
   return apiClient.post<PresignFileRequest, PresignFileResponse>('/api/v1/files/presign', request);
 }
 
+export function getDownloadUrl(objectKey: string): Promise<string> {
+  return apiClient.get<unknown, string>('/api/v1/files/download', { params: { key: objectKey } });
+}
+
 export function confirmFile(request: ConfirmFileRequest) {
   return apiClient.post<ConfirmFileRequest, FileMetaResponse>('/api/v1/files/confirm', request);
 }

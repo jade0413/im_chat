@@ -17,7 +17,10 @@ export interface Conversation {
   peerUserId?: string;
   groupId?: string;
   maxSeq: string;
+  /** 本端已读位置（用于未读角标计算） */
   readSeq: string;
+  /** 对端已读位置（用于已读回执展示）；READ_NOTIFY 更新 */
+  peerReadSeq?: string;
   pinned: boolean;
   muted: boolean;
   lastMsgAbstract: string;

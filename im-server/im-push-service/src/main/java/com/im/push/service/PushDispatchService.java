@@ -20,10 +20,14 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class PushDispatchService {
+
+  private static final Logger log = LoggerFactory.getLogger(PushDispatchService.class);
 
   private final OnlineRouteRepository routeRepository;
   private final GatewayPushPublisher gatewayPushPublisher;
@@ -73,6 +77,8 @@ public class PushDispatchService {
         routesByGateway.computeIfAbsent(route.gwInstance(), ignored -> new ArrayList<>()).add(route);
       }
     }
+    log.info("push dispatch resolved, tenant_id={}, cmd={}, target_users={}, online_routes={}, offline_users={}, gateways={}",
+        tenantId, cmd, targetUserIds.size(), onlineRoutes, offlineUsers, routesByGateway.keySet());
     publishGrouped(tenantId, cmd, body, needAck, routesByGateway);
     return new PushResult(onlineRoutes, offlineUsers);
   }

@@ -77,7 +77,7 @@ function upsertMessageBatch(source: Map<string, ChatMessage[]>, convId: string, 
   messages.set(
     convId,
     Array.from(byKey.values()).sort((a, b) => {
-      if (a.seq || b.seq) {
+      if (a.seq && b.seq) {
         return compareIdLike(a.seq, b.seq);
       }
       return Number(a.sendTime) - Number(b.sendTime);

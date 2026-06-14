@@ -1,5 +1,5 @@
 import { EmptyState } from '../../components/EmptyState';
-import { KickDialog } from '../../components/KickDialog';
+import { NetworkStatusBanner } from '../../components/NetworkStatusBanner';
 import { useSocket } from '../../hooks/useSocket';
 import { useConvStore } from '../../store/convStore';
 import { ChatPanel } from './chat/ChatPanel';
@@ -11,11 +11,13 @@ export function MainLayout() {
   const activeConvId = useConvStore((state) => state.activeConvId);
 
   return (
-    <div className={`main-shell ${activeConvId ? 'has-active-chat' : ''}`}>
-      <NavSidebar />
-      <ConvListPanel />
-      {activeConvId ? <ChatPanel convId={activeConvId} /> : <EmptyState />}
-      <KickDialog />
-    </div>
+    <>
+      <NetworkStatusBanner />
+      <div className={`main-shell ${activeConvId ? 'has-active-chat' : ''}`}>
+        <NavSidebar />
+        <ConvListPanel />
+        {activeConvId ? <ChatPanel convId={activeConvId} /> : <EmptyState />}
+      </div>
+    </>
   );
 }

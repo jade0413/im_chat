@@ -1,43 +1,76 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { Spin } from 'antd';
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { useMessages } from '../../../hooks/useMessages';
 import { useInfiniteScroll } from '../../../hooks/useInfiniteScroll';
+import { useConvStore } from '../../../store/convStore';
+import { compareIdLike } from '../../../utils/id';
 import { MessageBubble } from './MessageBubble';
+import { TimeDivider, TIME_GAP_MS } from './TimeDivider';
+import type { ChatMessage } from '../../../store/types';
+
+type ListItem =
+  | { type: 'message'; message: ChatMessage }
+  | { type: 'divider'; timestamp: string };
 
 export function MessageList({ convId }: { convId: string }) {
   const parentRef = useRef<HTMLDivElement>(null);
-  const { messages, hasMore, loadingHistory, loadHistory } = useMessages(convId);
+  const endRef = useRef<HTMLDivElement>(null);
+  const { messages, hasMore, loadingHistory, loadHistory, loadLatest } = useMessages(convId);
+  const convMaxSeq = useConvStore((state) => state.conversations.get(convId)?.maxSeq ?? '0');
 
-  // F2：进入会话时若无消息则立即加载历史
+  // F2：进入会话时若无消息则加载历史；若本地消息落后于 convMaxSeq 则补齐
   useEffect(() => {
+    const localMaxSeq = messages.length > 0 ? (messages[messages.length - 1].seq ?? '0') : '0';
+    const hasGap = compareIdLike(convMaxSeq, localMaxSeq) > 0;
     if (messages.length === 0 && hasMore) {
       void loadHistory();
+    } else if (hasGap) {
+      void loadLatest();
     }
-    // convId 变化时重置滚动位置
-    parentRef.current?.scrollTo({ top: parentRef.current.scrollHeight });
+    // 切换会话时立即滚到底
+    scrollToBottom('auto');
   }, [convId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const virtualizer = useVirtualizer({
-    count: messages.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 82,
-    overscan: 10,
-  });
+  // 在超过 5 分钟间隔的消息之间插入时间分割线
+  const items = useMemo<ListItem[]>(() => {
+    const result: ListItem[] = [];
+    let prevTime = 0;
+    for (const message of messages) {
+      const ts = Number(message.sendTime);
+      if (ts - prevTime > TIME_GAP_MS) {
+        result.push({ type: 'divider', timestamp: message.sendTime });
+      }
+      result.push({ type: 'message', message });
+      prevTime = ts;
+    }
+    return result;
+  }, [messages]);
 
+  const lastMessageSignature = useMemo(() => {
+    const last = messages[messages.length - 1];
+    if (!last) return '';
+    return `${messages.length}:${last.clientMsgId}`;
+  }, [messages]);
+
+  /**
+   * 只在“最后一条消息变化”时滚到底。
+   * 加载历史是往顶部 prepend，最后一条不变，不能把用户强行拉到底。
+   */
+  useLayoutEffect(() => {
+    if (lastMessageSignature) {
+      scrollToBottom('auto');
+    }
+  }, [lastMessageSignature]);
+
+  // 上拉加载更多历史
   useInfiniteScroll(parentRef, loadHistory);
 
-  // 新消息/会话切换时滚动到底部。
-  // ⚠️ virtualizer 每次内部状态变化都是新引用，放进 deps 会死循环：
-  //    scrollToIndex → virtualizer 内部 setState → 新引用 → effect 重跑 → 无限循环。
-  //    改用 ref 持有最新实例，effect 只依赖 messages.length。
-  const virtualizerRef = useRef(virtualizer);
-  virtualizerRef.current = virtualizer;
-  useEffect(() => {
-    if (messages.length > 0) {
-      virtualizerRef.current.scrollToIndex(messages.length - 1, { align: 'end' });
+  function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
+    const el = parentRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior });
     }
-  }, [messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }
 
   return (
     <div ref={parentRef} className="message-list">
@@ -46,7 +79,7 @@ export function MessageList({ convId }: { convId: string }) {
           <Spin size="small" />
         </div>
       )}
-      {messages.length === 0 && !loadingHistory ? (
+      {items.length === 0 && !loadingHistory ? (
         <div className="empty-state">
           <div className="empty-state-inner">
             <div className="empty-state-title">还没有消息</div>
@@ -54,25 +87,15 @@ export function MessageList({ convId }: { convId: string }) {
           </div>
         </div>
       ) : (
-        <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-          {virtualizer.getVirtualItems().map((item) => (
-            <div
-              key={item.key}
-              data-index={item.index}
-              ref={virtualizer.measureElement}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                transform: `translateY(${item.start}px)`,
-              }}
-            >
-              <MessageBubble message={messages[item.index]} />
-            </div>
-          ))}
-        </div>
+        items.map((item) =>
+          item.type === 'divider' ? (
+            <TimeDivider key={`d-${item.timestamp}`} timestamp={item.timestamp} />
+          ) : (
+            <MessageBubble key={item.message.clientMsgId} message={item.message} />
+          ),
+        )
       )}
+      <div ref={endRef} aria-hidden="true" />
     </div>
   );
 }

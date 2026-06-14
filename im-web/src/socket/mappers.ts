@@ -1,4 +1,5 @@
 import type { MessageItemResponse } from '../api/types';
+import { createUuid } from '../config';
 import { idToString } from '../utils/id';
 import type { ChatMessage, Conversation, MessageContent, SenderInfo } from '../store/types';
 import { useUserStore } from '../store/userStore';
@@ -24,7 +25,7 @@ export function convInfoToConversation(conv: im.body.v1.IConvInfo): Conversation
 
 export function msgPushToChatMessage(push: im.body.v1.IMsgPush): ChatMessage {
   return {
-    clientMsgId: push.clientMsgId || crypto.randomUUID(),
+    clientMsgId: push.clientMsgId || createUuid(),
     serverMsgId: idToString(push.serverMsgId),
     seq: idToString(push.seq),
     convId: idToString(push.convId),
@@ -55,10 +56,38 @@ export function historyItemToChatMessage(item: MessageItemResponse): ChatMessage
     content:
       item.status === 2
         ? { kind: 'notification', eventType: 'message.revoked' }
-        : { kind: 'text', text: item.text || '[暂不支持的历史消息]' },
+        : historyContent(item),
     sendTime: idToString(item.sendTime),
     status: item.status === 2 ? 'revoked' : 'sent',
   };
+}
+
+/**
+ * 将历史消息 REST 响应转为 MessageContent。
+ * 后端目前只返回 text 字段，对非文本消息按 msgType 生成占位内容。
+ * 后端补全 objectKey 等字段后，这里可直接解析富媒体。
+ */
+function historyContent(item: import('../api/types').MessageItemResponse): import('../store/types').MessageContent {
+  // 后端已返回 objectKey 等字段（未来）
+  const ext = item as unknown as Record<string, unknown>;
+  if (ext.objectKey) {
+    const mime = (ext.mime as string | undefined) ?? '';
+    if (ext.durationMs !== undefined) {
+      return { kind: 'voice', objectKey: ext.objectKey as string, durationMs: Number(ext.durationMs), size: Number(ext.size ?? 0) };
+    }
+    if (mime.startsWith('image/')) {
+      return { kind: 'image', objectKey: ext.objectKey as string, thumbKey: ext.thumbKey as string | undefined };
+    }
+    return { kind: 'file', objectKey: ext.objectKey as string, fileName: (ext.fileName as string | undefined) ?? '未命名文件', size: Number(ext.size ?? 0), mime };
+  }
+  // 按 msgType 展示占位（等待后端补全字段）
+  switch (item.msgType) {
+    case 1: return { kind: 'text', text: item.text || '' };
+    case 2: return { kind: 'notification', eventType: 'message.unsupported', payload: '图片消息（请在手机端查看）' };
+    case 3: return { kind: 'notification', eventType: 'message.unsupported', payload: '语音消息（请在手机端查看）' };
+    case 4: return { kind: 'notification', eventType: 'message.unsupported', payload: '文件消息（请在手机端查看）' };
+    default: return { kind: 'text', text: item.text || '' };
+  }
 }
 
 export function protoContentToMessageContent(
@@ -117,7 +146,7 @@ export function protoContentToMessageContent(
   return { kind: 'notification', eventType: 'message.unsupported' };
 }
 
-function senderToInfo(sender: im.body.v1.ISenderInfo | null | undefined): SenderInfo {
+function senderToInfo(sender: im.body.v1.ISender | null | undefined): SenderInfo {
   return {
     userId: idToString(sender?.userId),
     nickname: sender?.nickname || `用户 ${idToString(sender?.userId)}`,

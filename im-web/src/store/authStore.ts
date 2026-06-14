@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { bindAuthHandlers } from '../api/client';
+import { bindAuthHandlers, refreshTokenDirect } from '../api/client';
 import * as authApi from '../api/auth';
 import { getCurrentUser } from '../api/user';
 import { REFRESH_TOKEN_KEY } from '../config';
@@ -19,6 +19,8 @@ interface AuthState {
   logout: () => void;
   applyTokens: (tokens: TokenResponse) => void;
   loadCurrentUser: () => Promise<void>;
+  /** 资料更新后本地同步 session user */
+  setUser: (user: SessionUser) => void;
 }
 
 function normalizeUser(user: Awaited<ReturnType<typeof getCurrentUser>>): SessionUser {
@@ -27,6 +29,20 @@ function normalizeUser(user: Awaited<ReturnType<typeof getCurrentUser>>): Sessio
     id: idToString(user.id),
     tenantId: idToString(user.tenantId),
   };
+}
+
+/**
+ * refresh token 是否被明确拒绝（即 token 真正失效，需要重新登录）。
+ * 网络错误 / 服务器 5xx 不算——用户不应因为临时故障而丢失会话。
+ */
+function isTokenInvalid(error: unknown): boolean {
+  if (error && typeof error === 'object') {
+    // AxiosError：HTTP 401/403
+    const status = (error as { response?: { status?: number } }).response?.status;
+    if (status === 401 || status === 403) return true;
+  }
+  // 其余（网络超时、5xx）不视为 token 失效
+  return false;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -76,12 +92,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
     set({ loading: true });
     try {
-      const tokens = await authApi.refresh(refreshToken);
+      // 直连调用，绕开 apiClient 拦截器（避免 401 时再次触发 refresh → 死循环 + 双重 logout）
+      const tokens = await refreshTokenDirect(refreshToken);
       get().applyTokens(tokens);
       await get().loadCurrentUser();
       return true;
-    } catch {
-      get().logout();
+    } catch (error) {
+      if (isTokenInvalid(error)) {
+        // refresh token 被服务端明确拒绝（401/403）→ 真正登出
+        get().logout();
+      } else {
+        // 网络超时 / 服务器 5xx：不删除 refresh token，保留会话。
+        // 用户下次打开 App 或网络恢复后会自动重试。
+        set({ accessToken: null, user: null });
+      }
       return false;
     } finally {
       set({ loading: false, bootstrapped: true });
@@ -92,6 +116,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     window.localStorage.removeItem(REFRESH_TOKEN_KEY);
     set({ user: null, accessToken: null, refreshToken: null, bootstrapped: true });
   },
+
+  setUser: (user) => set({ user }),
 }));
 
 bindAuthHandlers({

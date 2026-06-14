@@ -73,14 +73,14 @@ im:
   gateway-auth:
     heartbeat-interval-sec: ${IM_GATEWAY_AUTH_HEARTBEAT_INTERVAL_SEC:30}
   outbox:
-    enabled: ${IM_OUTBOX_ENABLED:false}
+    enabled: ${IM_OUTBOX_ENABLED:true}
     batch-size: ${IM_OUTBOX_BATCH_SIZE:100}
     interval: ${IM_OUTBOX_INTERVAL:100ms}
     max-retries: ${IM_OUTBOX_MAX_RETRIES:16}
     confirm-timeout: ${IM_OUTBOX_CONFIRM_TIMEOUT:5s}
     claim-ttl: ${IM_OUTBOX_CLAIM_TTL:30s}
   push:
-    route-ttl: ${IM_PUSH_ROUTE_TTL:90s}
+    route-ttl: ${IM_PUSH_ROUTE_TTL:180s}
     event-dedup-ttl: ${IM_PUSH_EVENT_DEDUP_TTL:24h}
     gateway-queue-prefix: ${IM_PUSH_GATEWAY_QUEUE_PREFIX:push.gw.}
     msg-saved-queue: ${IM_PUSH_MSG_SAVED_QUEUE:im.push.msg.saved}

@@ -1,8 +1,16 @@
 import { apiClient } from './client';
-import type { AddGroupMembersRequest, CreateGroupRequest, GroupMemberChangeResponse, GroupResponse, IdLike } from './types';
+import type { AddGroupMembersRequest, CreateGroupRequest, GroupMemberChangeResponse, GroupMemberItem, GroupResponse, IdLike } from './types';
 
 export function createGroup(request: CreateGroupRequest) {
   return apiClient.post<CreateGroupRequest, GroupResponse>('/api/v1/groups', request);
+}
+
+export function getGroup(groupId: IdLike) {
+  return apiClient.get<unknown, GroupResponse>(`/api/v1/groups/${groupId}`);
+}
+
+export function getGroupMembers(groupId: IdLike) {
+  return apiClient.get<unknown, GroupMemberItem[]>(`/api/v1/groups/${groupId}/members`);
 }
 
 export function addGroupMembers(groupId: IdLike, request: AddGroupMembersRequest) {

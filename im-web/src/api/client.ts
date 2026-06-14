@@ -1,6 +1,7 @@
 import axios, { AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
 import JSONbig from 'json-bigint';
 import { API_BASE_URL, REFRESH_TOKEN_KEY, TENANT_ID } from '../config';
+import { useSocketStore } from '../store/socketStore';
 import type { ApiEnvelope, TokenResponse } from './types';
 
 export class ApiError extends Error {
@@ -23,6 +24,7 @@ let applyRefreshedToken: AccessTokenSetter = () => undefined;
 let handleAuthFailure: AuthFailureHandler = () => undefined;
 let refreshPromise: Promise<TokenResponse> | null = null;
 const json = JSONbig({ storeAsString: true });
+const requestStartedAt = new WeakMap<InternalAxiosRequestConfig, number>();
 
 export function bindAuthHandlers(options: {
   getAccessToken: AccessTokenGetter;
@@ -44,18 +46,38 @@ export const apiClient: AxiosInstance = axios.create({
 });
 
 apiClient.interceptors.request.use((config) => {
+  requestStartedAt.set(config, Date.now());
   const token = getAccessToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   config.headers['X-Tenant-Id'] = String(TENANT_ID);
+  useSocketStore.getState().addLog(
+    'info',
+    `HTTP 请求 ${String(config.method ?? 'GET').toUpperCase()} ${config.url ?? ''}`,
+    formatHttpPayload(config.params, config.data),
+  );
   return config;
 });
 
 apiClient.interceptors.response.use(
-  (response) => unwrapEnvelope(response.data),
+  (response) => {
+    const duration = response.config ? Date.now() - (requestStartedAt.get(response.config) ?? Date.now()) : 0;
+    useSocketStore.getState().addLog(
+      'info',
+      `HTTP 响应 ${response.status} ${String(response.config.method ?? 'GET').toUpperCase()} ${response.config.url ?? ''} ${duration}ms`,
+      formatHttpPayload(undefined, response.data),
+    );
+    return unwrapEnvelope(response.data);
+  },
   async (error: AxiosError<ApiEnvelope<unknown>>) => {
     const config = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
+    const duration = config ? Date.now() - (requestStartedAt.get(config) ?? Date.now()) : 0;
+    useSocketStore.getState().addLog(
+      'error',
+      `HTTP 错误 ${error.response?.status ?? 'NO_RESPONSE'} ${String(config?.method ?? 'GET').toUpperCase()} ${config?.url ?? ''} ${duration}ms`,
+      formatHttpPayload(config?.params, error.response?.data ?? error.message),
+    );
     if (error.response?.status === 401 && config && !config._retry) {
       config._retry = true;
       try {
@@ -64,7 +86,12 @@ apiClient.interceptors.response.use(
         config.headers.Authorization = `Bearer ${tokens.accessToken}`;
         return apiClient(config);
       } catch (refreshError) {
-        handleAuthFailure();
+        // 只有 refresh token 本身被明确拒绝（HTTP 401）才触发登出。
+        // 网络错误 / 服务器 5xx 不清除本地会话，让用户下次打开时自动重试。
+        const refreshStatus = (refreshError as AxiosError)?.response?.status;
+        if (refreshStatus === 401 || refreshStatus === 403) {
+          handleAuthFailure();
+        }
         throw refreshError;
       }
     }
@@ -108,6 +135,23 @@ async function refreshAccessToken(): Promise<TokenResponse> {
   return refreshPromise;
 }
 
+/**
+ * 直接调用 refresh 接口，绕开 apiClient 拦截器。
+ * authStore.refreshFromStorage 必须用这个，否则：
+ *   authApi.refresh → apiClient → 401 → 拦截器再次尝试 refresh → 死循环 + 双重 logout
+ */
+export async function refreshTokenDirect(refreshToken: string): Promise<TokenResponse> {
+  const response = await axios.post<ApiEnvelope<TokenResponse>>(
+    `${API_BASE_URL}/api/v1/auth/refresh`,
+    { refreshToken },
+    {
+      headers: { 'X-Tenant-Id': String(TENANT_ID) },
+      transformResponse: [parseJsonSafely],
+    },
+  );
+  return unwrapEnvelope(response.data) as TokenResponse;
+}
+
 function parseJsonSafely(data: unknown) {
   if (typeof data !== 'string' || data.length === 0) {
     return data;
@@ -116,5 +160,46 @@ function parseJsonSafely(data: unknown) {
     return json.parse(data);
   } catch {
     return data;
+  }
+}
+
+function formatHttpPayload(params: unknown, data: unknown) {
+  const payload = {
+    params: redact(params),
+    data: redact(data),
+  };
+  return safeStringify(payload);
+}
+
+function redact(value: unknown): unknown {
+  if (value == null) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    return value.length > 500 ? `${value.slice(0, 500)}...` : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(redact);
+  }
+  if (typeof value !== 'object') {
+    return value;
+  }
+  const source = value as Record<string, unknown>;
+  const output: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(source)) {
+    if (/token|password|authorization/i.test(key)) {
+      output[key] = '[REDACTED]';
+    } else {
+      output[key] = redact(item);
+    }
+  }
+  return output;
+}
+
+function safeStringify(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
   }
 }

@@ -11,7 +11,6 @@ export function useSocket() {
       return;
     }
     imSocket.connect(accessToken);
-    return () => imSocket.disconnect();
   }, [accessToken]);
 
   return imSocket;

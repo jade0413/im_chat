@@ -27,7 +27,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     sync::{mpsc, watch},
@@ -365,13 +365,18 @@ pub async fn ws_handler(
 
 async fn handle_socket(socket: WebSocket, state: AppState) {
     if let Err(err) = handle_socket_inner(socket, state).await {
-        warn!(?err, "websocket connection closed with error");
+        warn!(error = %format!("{err:#}"), "websocket connection closed with error");
     }
 }
 
 async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
     let (mut ws_sender, mut ws_receiver) = socket.split();
-    let first_frame = read_auth_frame(&mut ws_receiver, state.config.auth_timeout, state.config.max_frame_bytes).await?;
+    let first_frame = read_auth_frame(
+        &mut ws_receiver,
+        state.config.auth_timeout,
+        state.config.max_frame_bytes,
+    )
+    .await?;
     if first_frame.version < state.config.min_protocol_version {
         send_kick(&mut ws_sender, PROTO_TOO_OLD_REASON, "protocol too old").await?;
         return Ok(());
@@ -395,6 +400,7 @@ async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
         return Ok(());
     }
 
+    let verify_started = Instant::now();
     let verify = match state
         .rpc
         .verify_token(VerifyTokenReq {
@@ -408,7 +414,14 @@ async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
     {
         Ok(response) => response,
         Err(err) => {
-            warn!(?err, "verify token rpc failed");
+            warn!(
+                tenant_id = auth.tenant_id,
+                platform = auth.platform,
+                device_id = %auth.device_id,
+                elapsed_ms = verify_started.elapsed().as_millis(),
+                error = %format!("{err:#}"),
+                "verify token rpc failed"
+            );
             send_auth_resp(&mut ws_sender, TOKEN_INVALID, "token invalid", 0, 0).await?;
             return Ok(());
         }
@@ -447,8 +460,18 @@ async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
     let key = handle.key();
     state.registry.insert(handle.clone());
 
+    let on_connected_started = Instant::now();
     if let Err(err) = state.rpc.on_connected(ctx.clone()).await {
-        warn!(?err, "on_connected rpc failed");
+        warn!(
+            tenant_id = ctx.tenant_id,
+            user_id = ctx.user_id,
+            platform = ctx.platform,
+            device_id = %ctx.device_id,
+            conn_id = %ctx.conn_id,
+            elapsed_ms = on_connected_started.elapsed().as_millis(),
+            error = %format!("{err:#}"),
+            "on_connected rpc failed"
+        );
         state.registry.remove(&key);
         send_auth_resp(
             &mut ws_sender,
@@ -540,7 +563,17 @@ async fn read_loop(
         let message = message?;
         let payload = match message {
             Message::Binary(payload) => payload,
-            Message::Close(_) => break,
+            Message::Close(_) => {
+                if let Some(handle) = state.registry.get(
+                    key.tenant_id,
+                    key.user_id,
+                    key.platform,
+                    key.conn_id.as_str(),
+                ) {
+                    handle.close();
+                }
+                break;
+            }
             _ => continue,
         };
         let frame = frame_codec::decode_with_limit(&payload, state.config.max_frame_bytes)?;

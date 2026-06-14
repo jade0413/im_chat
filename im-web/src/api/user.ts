@@ -1,6 +1,10 @@
 import { apiClient } from './client';
 import type { IdLike, UserProfile, UserPublicProfile } from './types';
 
+export function updateProfile(data: { nickname?: string; avatar?: string }) {
+  return apiClient.put<typeof data, UserProfile>('/api/v1/users/me', data);
+}
+
 export function getCurrentUser() {
   return apiClient.get<unknown, UserProfile>('/api/v1/users/me');
 }

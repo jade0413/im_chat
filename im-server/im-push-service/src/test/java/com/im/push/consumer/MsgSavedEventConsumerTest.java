@@ -5,9 +5,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.im.proto.body.MsgPush;
+import com.im.proto.common.ConvType;
 import com.im.proto.events.MsgSavedEvent;
 import com.im.proto.ws.Cmd;
 import com.im.push.service.ConversationMemberClient;
+import com.im.push.service.ConversationMemberClient.ConvMembersResult;
 import com.im.push.service.OnlineAgentClient;
 import com.im.push.service.PushDispatchService;
 import com.im.push.service.PushEventDeduplicator;
@@ -36,7 +38,12 @@ class MsgSavedEventConsumerTest {
   void pushesSavedMessageToConversationMembersOnce() {
     MsgSavedEvent event = event();
     when(deduplicator.tryMark(1L, 10L)).thenReturn(true);
-    when(conversationMemberClient.getMemberUserIds(501L)).thenReturn(List.of(100L, 200L));
+    when(conversationMemberClient.getMembersResult(501L))
+        .thenReturn(new ConvMembersResult(
+            List.of(100L, 200L),
+            ConvType.C2C.getNumber(),
+            0,
+            0L));
 
     new MsgSavedEventConsumer(conversationMemberClient, onlineAgentClient, pushDispatchService, deduplicator)
         .handle(10L, event);
@@ -58,6 +65,7 @@ class MsgSavedEventConsumerTest {
         .handle(10L, event);
 
     verify(conversationMemberClient, never()).getMemberUserIds(org.mockito.Mockito.anyLong());
+    verify(conversationMemberClient, never()).getMembersResult(org.mockito.Mockito.anyLong());
     verify(pushDispatchService, never()).pushToUsers(
         org.mockito.Mockito.anyLong(),
         org.mockito.Mockito.anyCollection(),
