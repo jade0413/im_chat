@@ -2,6 +2,7 @@ package com.im.conversation.rest;
 
 import com.im.common.auth.UserContext;
 import com.im.common.web.ApiResponse;
+import com.im.conversation.service.ConversationRelationGuard;
 import com.im.conversation.service.ConversationService;
 import com.im.proto.body.ConvInfo;
 import com.im.proto.rpc.ResolveConvReq;
@@ -21,9 +22,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class ConversationController {
 
   private final ConversationService conversationService;
+  private final ConversationRelationGuard relationGuard;
 
-  public ConversationController(ConversationService conversationService) {
+  public ConversationController(ConversationService conversationService,
+      ConversationRelationGuard relationGuard) {
     this.conversationService = conversationService;
+    this.relationGuard = relationGuard;
   }
 
   /**
@@ -37,6 +41,8 @@ public class ConversationController {
   public ApiResponse<ConvInfoResponse> openC2c(
       @RequestParam @Positive long toUserId) {
     long selfUserId = UserContext.requiredUserId();
+    // 与发送链路同语义：被拉黑或好友制下非好友，直接拒绝开聊（不再"会话已建、发了才失败"）
+    relationGuard.ensureCanOpenC2c(selfUserId, toUserId);
     ResolveConvReq req = ResolveConvReq.newBuilder()
         .setFromUserId(selfUserId)
         .setToUserId(toUserId)

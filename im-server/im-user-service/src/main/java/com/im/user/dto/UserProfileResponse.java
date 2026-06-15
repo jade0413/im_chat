@@ -11,6 +11,10 @@ public record UserProfileResponse(
     int userType,
     int verifiedType,
     int status,
-    LocalDateTime createdAt
+    LocalDateTime createdAt,
+    String username,
+    int friendVerifyRequired,
+    boolean isAgent,
+    int agentStatus
 ) {
 }

@@ -97,10 +97,11 @@ public class PushDispatchService {
 
   public void onConnected(ConnCtx ctx) {
     OnlineRoute newRoute = OnlineRoute.from(ctx);
-    routeRepository.find(newRoute.tenantId(), newRoute.userId(), newRoute.platform())
+    // 原子写入新路由并拿回被顶替的旧路由：set 必然生效（新连接赢得路由键），
+    // 旧路由若是不同连接则踢线。避免"先 find 再 save"在同平台并发登录下的孤儿路由竞态（P2-2）。
+    routeRepository.saveReturningPrevious(newRoute, properties.routeTtl())
         .filter(oldRoute -> !oldRoute.sameConnection(newRoute))
         .ifPresent(oldRoute -> publishKick(oldRoute, KickNotify.Reason.NEW_DEVICE_LOGIN_VALUE));
-    routeRepository.save(newRoute, properties.routeTtl());
   }
 
   public void refreshRoute(ConnCtx ctx) {

@@ -14,12 +14,14 @@ import type { Conversation } from '../../../store/types';
 import { idToString } from '../../../utils/id';
 import { NewChatModal } from '../../../components/NewChatModal';
 import { CreateGroupModal } from '../../../components/CreateGroupModal';
+import { ContactsPanel } from '../contacts/ContactsPanel';
 import { ConvItem } from './ConvItem';
 
-// conv.type: 1=C2C, 2=GROUP, 3=CS
+// conv.type: 1=C2C, 2=GROUP, 3=CS, 4=SYSTEM
 const CONV_TYPE_C2C = 1;
 const CONV_TYPE_GROUP = 2;
 const CONV_TYPE_CS = 3;
+const CONV_TYPE_SYSTEM = 4;
 const CS_PAGE_SIZE = 30;
 
 export function ConvListPanel() {
@@ -111,8 +113,8 @@ export function ConvListPanel() {
     }
     return Array.from(conversationMap.values())
       .filter((conv) => {
-        // tab 过滤
-        if (activeTab === 'chats' && conv.type === CONV_TYPE_CS) return false;
+        // tab 过滤（SYSTEM 通知会话不进消息列表，由联系人「新的朋友」入口承载）
+        if (activeTab === 'chats' && (conv.type === CONV_TYPE_CS || conv.type === CONV_TYPE_SYSTEM)) return false;
         if (activeTab === 'contacts' && conv.type !== CONV_TYPE_C2C) return false;
         if (activeTab === 'groups' && conv.type !== CONV_TYPE_GROUP) return false;
         // 关键字过滤
@@ -149,6 +151,11 @@ export function ConvListPanel() {
     } finally {
       setAgentStatusLoading(false);
     }
+  }
+
+  // 联系人 tab 走独立的通讯录面板（好友列表 / 新的朋友 / 添加好友，D40）
+  if (activeTab === 'contacts') {
+    return <ContactsPanel />;
   }
 
   return (

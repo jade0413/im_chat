@@ -1,6 +1,7 @@
 package com.im.conversation.config;
 
 import com.im.proto.rpc.PushRpcGrpc;
+import com.im.proto.rpc.UserRpcGrpc;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -24,5 +25,20 @@ public class ConversationRpcClientConfig {
   public PushRpcGrpc.PushRpcBlockingStub conversationPushRpcBlockingStub(
       @Qualifier("conversationPushRpcChannel") ManagedChannel channel) {
     return PushRpcGrpc.newBlockingStub(channel);
+  }
+
+  @Bean(destroyMethod = "shutdownNow")
+  public ManagedChannel conversationUserRpcChannel(
+      @Value("${im.rpc.user.host:localhost}") String host,
+      @Value("${im.rpc.user.port:${im.grpc.port:9091}}") int port) {
+    return ManagedChannelBuilder.forAddress(host, port)
+        .usePlaintext()
+        .build();
+  }
+
+  @Bean
+  public UserRpcGrpc.UserRpcBlockingStub conversationUserRpcBlockingStub(
+      @Qualifier("conversationUserRpcChannel") ManagedChannel channel) {
+    return UserRpcGrpc.newBlockingStub(channel);
   }
 }

@@ -290,6 +290,37 @@ public class ConversationService {
     return toMemberConvInfo(userId, member);
   }
 
+  /** 找或建用户 SYSTEM 通知会话（D40）。借道 c2c_key="sys:"+userId 去重，与 resolveC2c 同并发模式。 */
+  public ConvInfo resolveSystemConv(long userId) {
+    TenantContext.requiredTenantId();
+    if (userId <= 0) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "user_id must be positive");
+    }
+    String systemKey = "sys:" + userId;
+    ConversationEntity existing = findByC2cKey(systemKey);
+    if (existing != null) {
+      return toSystemConvInfo(existing, userId);
+    }
+    try {
+      ConversationEntity created = conversationCreator.createSystem(systemKey, userId);
+      return toSystemConvInfo(created, userId);
+    } catch (DuplicateKeyException ex) {
+      ConversationEntity createdByRace = findByC2cKey(systemKey);
+      if (createdByRace == null) {
+        throw new ImException(ErrorCode.INTERNAL_ERROR, "duplicated system conversation but row not found", ex);
+      }
+      return toSystemConvInfo(createdByRace, userId);
+    }
+  }
+
+  private ConvInfo toSystemConvInfo(ConversationEntity conversation, long userId) {
+    ConversationMemberEntity member = findMember(conversation.getId(), userId);
+    if (member == null) {
+      throw new ImException(ErrorCode.INTERNAL_ERROR, "system conversation member not found");
+    }
+    return toConvInfo(conversation, 0L, member);
+  }
+
   private ConvInfo resolveC2c(long fromUserId, long toUserId) {
     String c2cKey = c2cKeyGenerator.generate(fromUserId, toUserId);
     ConversationEntity existing = findByC2cKey(c2cKey);
@@ -498,8 +529,8 @@ public class ConversationService {
     if (type == ConvType.C2C && peerUserId > 0) {
       return Long.toString(peerUserId);
     }
-    if (type == ConvType.GROUP) {
-      return "";
+    if (type == ConvType.SYSTEM) {
+      return "系统通知";
     }
     return "";
   }

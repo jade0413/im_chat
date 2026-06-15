@@ -47,6 +47,25 @@ public class ConversationCreator {
     return conversation;
   }
 
+  /**
+   * 找或建用户的 SYSTEM 通知会话（D40）。借道 c2c_key="sys:"+userId 保证每用户唯一，单成员。
+   */
+  @Transactional
+  public ConversationEntity createSystem(String c2cKey, long userId) {
+    long tenantId = TenantContext.requiredTenantId();
+    ConversationEntity conversation = new ConversationEntity();
+    conversation.setId(idGenerator.nextId());
+    conversation.setType(ConvType.SYSTEM.getNumber());
+    conversation.setC2cKey(c2cKey);
+    conversation.setMaxSeq(0L);
+    conversation.setLastMsgAbstract("");
+    conversationMapper.insert(conversation);
+
+    memberMapper.insert(member(conversation.getId(), userId));
+    userConvEventRecorder.record(tenantId, userId, conversation.getId(), UserConvEventType.CREATED);
+    return conversation;
+  }
+
   private ConversationMemberEntity member(long conversationId, long userId) {
     ConversationMemberEntity member = new ConversationMemberEntity();
     member.setConvId(conversationId);

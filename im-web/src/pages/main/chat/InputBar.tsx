@@ -174,6 +174,16 @@ export function InputBar({ convId }: { convId: string }) {
     }
   }
 
+  if (conv?.type === 4) {
+    return (
+      <footer className="input-bar">
+        <div className="input-disabled-notice">
+          <span>系统通知会话，不可回复</span>
+        </div>
+      </footer>
+    );
+  }
+
   if (conv?.type === 3 && conv.csStatus !== '2') {
     const canClaim = conv.csStatus === '1' && agentStatus === 1;
     return (

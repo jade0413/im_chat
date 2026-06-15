@@ -29,6 +29,8 @@ import com.im.proto.rpc.ResolveCsConvReq;
 import com.im.proto.rpc.ResolveCsConvResp;
 import com.im.proto.rpc.ResolveConvReq;
 import com.im.proto.rpc.ResolveConvResp;
+import com.im.proto.rpc.ResolveSystemConvReq;
+import com.im.proto.rpc.ResolveSystemConvResp;
 import io.grpc.stub.StreamObserver;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -62,6 +64,29 @@ public class ConversationGrpcService extends ConversationRpcGrpc.ConversationRpc
           .build();
     } catch (Exception ex) {
       response = ResolveConvResp.newBuilder()
+          .setCode(ErrorCode.INTERNAL_ERROR.code())
+          .build();
+    }
+    responseObserver.onNext(response);
+    responseObserver.onCompleted();
+  }
+
+  @Override
+  public void resolveSystemConv(ResolveSystemConvReq request,
+      StreamObserver<ResolveSystemConvResp> responseObserver) {
+    ResolveSystemConvResp response;
+    try {
+      ConvInfo conv = conversationService.resolveSystemConv(request.getUserId());
+      response = ResolveSystemConvResp.newBuilder()
+          .setCode(ErrorCode.OK.code())
+          .setConv(conv)
+          .build();
+    } catch (ImException ex) {
+      response = ResolveSystemConvResp.newBuilder()
+          .setCode(ex.errorCode().code())
+          .build();
+    } catch (Exception ex) {
+      response = ResolveSystemConvResp.newBuilder()
           .setCode(ErrorCode.INTERNAL_ERROR.code())
           .build();
     }

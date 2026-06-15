@@ -186,9 +186,7 @@ public class MessageQueryService {
   }
 
   private MsgPush toPush(MessageEntity entity, ConvType convType) {
-    if (convType == ConvType.GROUP) {
-      return assembler.toPush(entity, ConvType.GROUP);
-    }
-    return assembler.toPush(entity);
+    // 历史/SYNC 一律按真实会话类型回放，避免 SYSTEM/CS 被回退成 C2C（前端通知页渲染依赖 conv_type）
+    return assembler.toPush(entity, convType);
   }
 }

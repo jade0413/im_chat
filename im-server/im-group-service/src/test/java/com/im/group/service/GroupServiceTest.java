@@ -189,7 +189,7 @@ class GroupServiceTest {
   @Test
   void addMembersSkipsExistingMembersAndWritesNotification() throws Exception {
     GroupInfoEntity group = group(10L, "team", 100L, 2);
-    when(groupInfoMapper.selectById(10L)).thenReturn(group);
+    when(groupInfoMapper.selectByIdForUpdate(10L)).thenReturn(group);
     when(groupMemberMapper.selectOne(anyWrapper())).thenReturn(member(10L, 100L, 3));
     when(conversationMapper.selectOne(anyWrapper())).thenReturn(conversation(20L, 10L));
     when(groupMemberMapper.selectList(anyWrapper())).thenReturn(List.of(member(10L, 200L, 1)));
@@ -219,7 +219,7 @@ class GroupServiceTest {
 
   @Test
   void rejectsRemovingOwner() {
-    when(groupInfoMapper.selectById(10L)).thenReturn(group(10L, "team", 100L, 2));
+    when(groupInfoMapper.selectByIdForUpdate(10L)).thenReturn(group(10L, "team", 100L, 2));
     when(groupMemberMapper.selectOne(anyWrapper())).thenReturn(member(10L, 100L, 3));
     when(conversationMapper.selectOne(anyWrapper())).thenReturn(conversation(20L, 10L));
 
@@ -233,7 +233,7 @@ class GroupServiceTest {
   @Test
   void removeMemberSoftDeletesConversationMemberAndWritesNotification() throws Exception {
     GroupInfoEntity group = group(10L, "team", 100L, 3);
-    when(groupInfoMapper.selectById(10L)).thenReturn(group);
+    when(groupInfoMapper.selectByIdForUpdate(10L)).thenReturn(group);
     when(groupMemberMapper.selectOne(anyWrapper()))
         .thenReturn(member(10L, 100L, 3), member(10L, 200L, 1));
     when(conversationMapper.selectOne(anyWrapper())).thenReturn(conversation(20L, 10L));

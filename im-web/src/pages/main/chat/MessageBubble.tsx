@@ -6,6 +6,7 @@ import { useUserStore } from '../../../store/userStore';
 import { useMessageStore } from '../../../store/messageStore';
 import { useConvStore } from '../../../store/convStore';
 import { revokeMessage } from '../../../api/message';
+import { sendFriendRequest } from '../../../api/friend';
 import { imSocket } from '../../../socket/ImSocket';
 import { compareIdLike } from '../../../utils/id';
 import type { ChatMessage, MessageContent } from '../../../store/types';
@@ -24,6 +25,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
   const displayName = cachedProfile?.nickname || message.sender.nickname;
   const displayAvatar = cachedProfile?.avatar ?? message.sender.avatar;
   const peerReadSeq = useConvStore((state) => state.conversations.get(message.convId)?.peerReadSeq);
+  const peerUserId = useConvStore((state) => state.conversations.get(message.convId)?.peerUserId);
   const peerHasRead =
     isSelf &&
     message.status === 'sent' &&
@@ -37,6 +39,8 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
 
   const canRevoke = isSelf && message.status === 'sent' && message.seq;
   const isFailed = isSelf && message.status === 'failed';
+  const failReason = isFailed ? sendFailReason(message.failCode) : undefined;
+  const needAddFriend = isFailed && message.failCode === 2002 && !!peerUserId;
 
   const menuItems = [
     ...(message.content.kind === 'text'
@@ -88,7 +92,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
           {statusIcon(message.status, peerHasRead)}
           {isFailed && (
-            <Tooltip title="重试发送">
+            <Tooltip title={failReason ?? '重试发送'}>
               <Button
                 type="text"
                 size="small"
@@ -98,6 +102,23 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
                 onClick={() => imSocket.retryMessage(message.convId, message.clientMsgId)}
               />
             </Tooltip>
+          )}
+          {needAddFriend && (
+            <Button
+              type="link"
+              size="small"
+              style={{ padding: '0 2px', height: 'auto', lineHeight: 1, fontSize: 11 }}
+              onClick={async () => {
+                try {
+                  await sendFriendRequest(peerUserId!, '');
+                  void antMessage.success('好友申请已发送');
+                } catch {
+                  void antMessage.error('好友申请发送失败');
+                }
+              }}
+            >
+              加好友
+            </Button>
           )}
         </span>
       )}
@@ -117,6 +138,18 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
       </div>
     </Dropdown>
   );
+}
+
+/** 发送失败原因：把 MSG_SEND_ACK.code 映射成可读提示（对应后端 ErrorCode）。 */
+function sendFailReason(code?: number): string {
+  switch (code) {
+    case 2001:
+      return '对方已将你拉黑，消息无法送达';
+    case 2002:
+      return '需要先添加对方为好友才能发送';
+    default:
+      return '发送失败，点击重试';
+  }
 }
 
 /** 根据内容类型决定时间标签的渲染位置 */

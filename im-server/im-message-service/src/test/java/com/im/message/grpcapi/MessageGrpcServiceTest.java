@@ -9,6 +9,7 @@ import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.message.service.MessageQueryService;
 import com.im.message.service.MessageRevokeService;
+import com.im.message.service.SystemNotificationService;
 import com.im.proto.body.MsgPush;
 import com.im.proto.common.RevokeReason;
 import com.im.proto.rpc.PullMsgsReq;
@@ -31,6 +32,9 @@ class MessageGrpcServiceTest {
   @Mock
   private MessageRevokeService messageRevokeService;
 
+  @Mock
+  private SystemNotificationService systemNotificationService;
+
   @Test
   void pullsMessages() {
     PullMsgsReq request = PullMsgsReq.newBuilder()
@@ -44,7 +48,7 @@ class MessageGrpcServiceTest {
         MsgPush.newBuilder().setConvId(501L).setSeq(2L).build()));
 
     CapturingObserver<PullMsgsResp> observer = new CapturingObserver<>();
-    new MessageGrpcService(messageQueryService, messageRevokeService).pullMsgs(request, observer);
+    new MessageGrpcService(messageQueryService, messageRevokeService, systemNotificationService).pullMsgs(request, observer);
 
     assertThat(observer.value.getMsgsList()).extracting(MsgPush::getSeq).containsExactly(1L, 2L);
     assertThat(observer.completed).isTrue();
@@ -60,7 +64,7 @@ class MessageGrpcServiceTest {
         .build();
 
     CapturingObserver<RevokeMsgResp> observer = new CapturingObserver<>();
-    new MessageGrpcService(messageQueryService, messageRevokeService).revokeMsg(request, observer);
+    new MessageGrpcService(messageQueryService, messageRevokeService, systemNotificationService).revokeMsg(request, observer);
 
     assertThat(observer.value.getCode()).isEqualTo(ErrorCode.OK.code());
     assertThat(observer.completed).isTrue();
@@ -79,7 +83,7 @@ class MessageGrpcServiceTest {
         .when(messageRevokeService).revoke(501L, 3L, RevokeReason.BY_SENDER, 200L);
 
     CapturingObserver<RevokeMsgResp> observer = new CapturingObserver<>();
-    new MessageGrpcService(messageQueryService, messageRevokeService).revokeMsg(request, observer);
+    new MessageGrpcService(messageQueryService, messageRevokeService, systemNotificationService).revokeMsg(request, observer);
 
     assertThat(observer.value.getCode()).isEqualTo(ErrorCode.NO_PERMISSION.code());
     assertThat(observer.completed).isTrue();

@@ -56,11 +56,15 @@
 | D37 | 2026-06-13 | Widget 配置存 `widget_config` 表（颜色/欢迎语/位置/powered_by 徽标）；企业获得一段 JS snippet 嵌入网站；`powered_by=1` 默认开启作为免费版病毒传播机制 | JS snippet 是 B 端 SaaS 标配嵌入方式；徽标是 Crisp/Intercom 早期核心增长手段 |
 | D38 | 2026-06-14 | **客服内部备注**：新增 `cs_internal_note` 表，仅"处理该会话的坐席本人"可读写（open 未认领不可、非本人坐席不可）；备注不进 message/outbox、不推访客。**修订 D31**：resolve 不再清空 `agent_id`，保留为"处理坐席"记录，使结单后本人仍可补充质检/交接备注（`listAgentCsConvs` 仍按 `cs_status IN(1,2)` 过滤，resolved 不污染工作台） | 质检/交接发生在结单后，需要知道处理坐席；保留 agent_id 是最小改动且无副作用（resolved 推送本就只发访客） |
 | D39 | 2026-06-14 | **重申 D35**：CS 推送扇出 + widget 可用性坐席范围 = **online+busy**（`agent_status IN(1,2)`，非仅 online）；**认领会话**要求坐席 active（online 或 busy），offline 不可认领。坐席工作台列表对访客资料/访客成员/在线状态做**批量查询**（消除 N+1） | busy 坐席仍需感知 open 待接待并可认领；批量化避免 limit×(DB+Redis) 放大 |
+| D40 | 2026-06-15 | **好友申请验证流程**（提前 D17 标注的二阶段项，详见 docs/friend-service-design.md）：新增 `friend_request`（态机 pending→accepted/rejected/ignored，带 `note` 备注、`auto_accepted` 标记；每次申请留历史、同一 from→to 至多一条 pending）+ **复用 baseline 已有 `friend` 双向关系表（user_id/friend_user_id/remark，非新建 friendship）**；用户级设置 `user.friend_verify_required`（默认 1=需验证，**免验证开关默认关**）。对方免验证则申请直接 accepted+auto_accepted=1（仍留 row 与 `friend.added` 通知作历史）。通知**复用现有消息管道**：以 `NotificationContent`（新增 event_type `friend.request`/`friend.accepted`/`friend.added`）写入接收方 **SYSTEM 会话**，免费获得 seq/多端同步/离线增量；联系人"通知"入口 = 渲染 SYSTEM 会话历史。**状态唯一真相在 `friend_request` 表，通知只带 request_id，客户端按 id 查当前态渲染按钮**。黑名单→静默失败（不建 row、不通知）；拒绝/忽略不通知申请方、可再次申请、无冷却。好友/关系逻辑归 **user 模块**（与 `UserRpc.CheckRelation`/黑名单同域，不新建模块）。proto 仅新增内部 RPC `MessageRpc.SendSystemNotification`，**content.proto 零改动** | 现有 `ConvType.SYSTEM` + `NotificationContent.event_type` 三层（ConvType/oneof/event_type）已满足"主类型/子类型/体"，无需再加全局消息大类型（会与 cmd/ConvType/oneof 四维打架）；状态表与不可变消息流解耦，避免改写历史消息；复用消息管道直接拿到多端同步与离线补齐 |
+| D41 | 2026-06-15 | **跨租户好友只留配置位、不实现**：新增 `user.allow_cross_tenant_friend TINYINT(1) DEFAULT 0`（默认仅租户内），MVP 仅做租户内好友。跨租户实际打通（关系读取绕过 tenant 拦截器、跨租户会话 seq 归属、MQ/审核策略归属）与 D3/D21 隔离模型冲突，等同联邦，**推二阶段独立设计** | 不在加好友小功能里顺手改动整个多租户隔离模型，风险不成比例；自营 App 用户全在租户 1，租户内已覆盖 C 端社交图谱 |
+| D42 | 2026-06-15 | **新增唯一用户名 `user.username`**（自填、租户内唯一、可分享的"加我"标识，类 Telegram @username / 微信号）：`VARCHAR(32) NULL`，`UNIQUE(tenant_id, username)`，格式 `^[a-z][a-z0-9_]{5,31}$`（字母开头，小写字母/数字/下划线，6–32 位），设置后可改但加频率限制（具体频率实现期定）；visitor/agent 不分配。**加好友查找改为精确匹配 `username` 或完整手机号，收紧原 `account` 前缀模糊搜索**（`account`=登录凭证/手机号，前缀可枚举即隐私泄露）。`account`（登录/手机号）与 `username`（对外标识）职责分离 | 现有 `account` 唯一但等于登录凭证/手机号，不宜作对外加好友标识；昵称不唯一无法定位；标准 IM 均用独立可分享 handle |
 
 ## 设计文档索引
 
 - docs/architecture.md（总体架构）/ docs/protocol.md（协议）/ docs/im-server-design.md（Java 侧模块设计，2026-06-13 待 Jade 评审）
 - docs/cs-service-design.md（客服会话设计，2026-06-13 确定，待实现）
+- docs/friend-service-design.md（好友申请/关系设计，2026-06-15 确定，待实现，关联 D40/D41）
 - Java 根包名 `com.im`；模块依赖铁律：业务模块互相禁止依赖，跨模块走 in-process gRPC（enforcer 固化）
 
 ## 技术栈
@@ -97,7 +101,9 @@
 - [ ] 推送第三方通道选型（APNs/FCM/厂商通道）放第二阶段
 - [ ] 第三方内容安全 API 选型（阿里云内容安全/网易易盾/数美）——接口先抽象，MVP 可只接文本词库
 - [ ] 消息全文搜索（ES vs 客户端 SQLite FTS）——二阶段
-- [ ] 好友申请流程 + friend_required 租户开关的交互细节——二阶段
+- [x] 好友申请流程：**已定 D40**（per-user `friend_verify_required` 验证开关与 D17 tenant 级 `friend_required` 正交——前者管"加我要不要验证"、后者管"是否必须好友才能发消息"，由 `UserRpc.CheckRelation` 承载）
+- [ ] 跨租户好友打通（D41 已留配置位 `allow_cross_tenant_friend`）——二阶段独立设计：关系读取绕过拦截器、跨租户会话 seq 归属、MQ/审核策略归属
+- [ ] 好友列表/申请历史的分页与多端已读位（通知红点跨端同步）细节——实现期定
 - [ ] 客服坐席分配策略（轮询/最少会话/技能组）——第二阶段细化
 - [ ] 二阶段若括高群上限（>500）：推送降级为"脏通知+拉取"、@提及单独写扩散、成员列表懒加载
 - [ ] 认证审核流程（人工审核 or 对接企业资质 API）——管理后台二阶段

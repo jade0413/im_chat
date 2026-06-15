@@ -1760,7 +1760,7 @@
 
 ### T32 — CS 会话状态机 + 坐席认领/结束 API
 
-状态：PENDING
+状态：DONE（2026-06-15 审计补记：实现已落地，端点为 `/claim`（认领，D39）与 `/resolve`，见 `CsAgentController`+`CsAgentService`+`CsAgentValidationService`；并发认领走状态条件 UPDATE）
 
 目标：
 
@@ -1798,7 +1798,7 @@
 
 ### T33 — 坐席 inbox API + CS 消息推送路由
 
-状态：PENDING
+状态：DONE（2026-06-15 审计补记：`CsAgentController.listConvs`=inbox；`MsgSavedEventConsumer` 已含 CS 路由分支 open→全在线坐席 / assigned→绑定坐席 / resolved→仅访客，经 `OnlineAgentClient.getOnlineAgentIds`）
 
 目标：
 
@@ -1837,7 +1837,7 @@
 
 ### T34 — 坐席在线状态
 
-状态：PENDING
+状态：DONE（2026-06-15 审计补记：状态切换走 `UserController PATCH /api/v1/users/me/agent-status`→`AgentService.updateStatus`；可用性 `WidgetService.checkAvailability` + `VisitorSessionController GET /api/v1/cs/widget/availability`；推送按 online/busy 过滤。注：路径与原计划 `PUT /cs/agent/status` 不同，按实现为准）
 
 目标：
 
@@ -1874,7 +1874,7 @@
 
 ### T35 — 坐席上线通知（离线留言收口）
 
-状态：PENDING
+状态：DONE（2026-06-15，待 mvn 编译验证）：`PendingConvNotifier`（上线时统计 24h 内 open 未认领会话，>0 则经 D40 `SendSystemNotification` 发 `cs.pending` 系统通知进坐席 SYSTEM 会话）+ `CsAgentStatusController` PUT `/api/v1/cs/agent/status`（切状态→online 时触发提醒）+ CS gRPC 配置补 MessageRpc stub。无待处理不打扰；通知失败仅记日志不影响上线
 
 目标：
 
@@ -1906,7 +1906,7 @@
 
 ### T36 — Widget 配置接口
 
-状态：PENDING
+状态：PARTIAL（2026-06-15 审计：表 `widget_config`(V6)、公开 GET `/api/v1/cs/widget/config`、默认值回退、`powered_by` 默认 true 均已实现；**仍缺管理端 PUT `/config`（租户管理员更新）**。剩余只做 PUT + 鉴权 + 测试）
 
 目标：
 
@@ -1938,6 +1938,137 @@
 
 - `mvn -q -pl im-cs-service -am test`
 - `mvn -q verify`
+
+---
+
+### T35b — Widget 配置管理端 PUT（补 T36 缺口）
+
+状态：DONE（2026-06-15，待 mvn 编译验证）：`WidgetAdminController` PUT `/api/v1/cs/admin/widget/config`（认证路径，非公开 /widget/**）+ `WidgetAdminService` upsert + `UpdateWidgetConfigRequest` 校验；鉴权用 `CsAgentValidationService.requireAgent`
+
+目标：
+
+- 实现 `PUT /api/v1/cs/widget/config`：当前登录用户更新本租户 widget 配置（upsert）。
+- 鉴权：需登录；MVP 要求 `is_agent=true`（坐席/管理员），无独立 admin 角色前先用此门槛（实现期可收紧为租户管理员）。
+- 字段校验：color 形如 `#RRGGBB`；position ∈ {bottom-right, bottom-left}；文案长度上限。
+
+需要修改/新增的文件：
+
+- `im-cs-service/.../widget/dto/UpdateWidgetConfigRequest.java`（新建）
+- `im-cs-service/.../widget/service/WidgetService.java`（加 `updateConfig`，upsert）
+- `im-cs-service/.../widget/dao/mapper/WidgetConfigMapper.java`（加 upsert/insert）
+- `im-cs-service/.../config` 下新增或复用控制器暴露 PUT（建议新建 `WidgetAdminController`）
+- 测试：`im-cs-service/src/test/java/com/im/cs/**`
+
+验收标准：
+
+- 坐席可 PUT 更新并 GET 读回新值；非坐席 403；首次 PUT 自动 insert。
+
+测试方式：`mvn -q -pl im-cs-service -am test`
+
+---
+
+### T37 — 好友模块迁移 + username（D40/D42）
+
+状态：DONE（2026-06-15，待 mvn 编译验证）：`V8__friend.sql`（user 加 username/friend_verify_required/allow_cross_tenant_friend + uk_tenant_username；建 friend_request）；**关系表复用 baseline 已有 `friend`，未新建 friendship**；新增 `FriendRequestEntity`/`FriendEntity` + Mapper；`UserEntity` 补 3 列
+
+目标（详见 docs/friend-service-design.md §3）：
+
+- 新增 Flyway `V8__friend.sql`：建 `friend_request`、`friendship`；`user` 加列 `username`/`friend_verify_required`/`allow_cross_tenant_friend`，加 `UNIQUE(tenant_id, username)`。
+- 新增 Entity/Mapper：`FriendRequestEntity`、`FriendshipEntity` + Mapper；`UserEntity` 补 3 字段。
+
+需要修改/新增的文件：
+
+- `im-bootstrap/src/main/resources/db/migration/V8__friend.sql`
+- `im-user-service/.../dao/entity/FriendRequestEntity.java`、`FriendshipEntity.java`
+- `im-user-service/.../dao/mapper/FriendRequestMapper.java`、`FriendshipMapper.java`
+- `im-user-service/.../dao/entity/UserEntity.java`（补列）
+
+验收标准：迁移可执行；唯一约束生效；NULL username 不冲突。
+
+测试方式：`mvn -q -pl im-user-service -am test`
+
+---
+
+### T38 — SendSystemNotification 内部 RPC（系统通知进 SYSTEM 会话）
+
+状态：DONE（2026-06-15，待 mvn 编译验证 + 跑 proto 生成脚本）。落地：
+- proto：`MessageRpc.SendSystemNotification` + `ConversationRpc.ResolveSystemConv`（internal.proto，字段只增）。
+- conversation：`ConversationCreator.createSystem`（借道 c2c_key="sys:"+userId 单成员）+ `ConversationService.resolveSystemConv`（找或建，DuplicateKey 兜底）+ `ConversationGrpcService.resolveSystemConv`。
+- message：`SystemNotificationService`（resolve SYSTEM 会话→构造 NotificationContent→直接走 `MessagePersistService.persist`，**系统发送方 sender_id=0**，client_msg_id="sys:"+event+hash 经 `uk_client_msg` 幂等）+ `MessageGrpcService.sendSystemNotification`。
+- user：`UserGrpcClientConfig`（MessageRpc 出站 stub）+ `GrpcFriendNotificationPort` `@Primary` 覆盖占位 `LoggingFriendNotificationPort`，失败仅记日志不回滚好友事务。
+- 推送链路零改动：SYSTEM 会话单成员=接收方，`MsgSavedEventConsumer` 非 CS 分支天然送达 + 多端同步 + 离线增量。
+
+目标（详见 friend-service-design.md §5/§6.2）：
+
+- `rpc/internal.proto` `MessageRpc` 新增 `SendSystemNotification`（to_user_id/event_type/payload → 写接收方 SYSTEM 会话一条 `NotificationContent`，复用 message→outbox→seq 管道，返回 seq）。
+- message 模块实现：ResolveConv(SYSTEM, to_user) 懒建 + 追加消息（与文本发送同事务 seq 分配，D26）。
+
+需要修改的文件：
+
+- `im-proto/proto/rpc/internal.proto`（加 RPC + 2 message，字段号只增）
+- `im-message-service/.../grpcapi/MessageRpcGrpcService.java`（实现）
+- `im-message-service/.../service/**`（追加系统通知逻辑，复用现有 seq/outbox）
+- `im-conversation-service`（SYSTEM 会话 resolve/create）
+- 测试：`im-message-service/src/test/**`
+
+验收标准：调用后接收方 SYSTEM 会话产生一条带 seq 的 notification 消息，SYNC/历史可拉到；event_type/payload 原样保存。
+
+**build-ready 实现规格见 docs/friend-service-design.md §9**（SYSTEM 会话借道 c2c_key="sys:"+userId、系统发送方 sender_id=0、client_msg_id 幂等、gRPC Port 标 @Primary 覆盖占位）。
+
+测试方式：`mvn -q -pl im-message-service,im-conversation-service -am test`
+
+---
+
+### T39 — 好友申请/同意/拒绝/忽略 + 免验证 + 黑名单（D40）
+
+状态：DONE（2026-06-15，待 mvn 编译验证 + 单测）：`FriendService`（发起校验链/幂等 pending/免验证 auto_accepted/accept 建双向 friend/reject·ignore 条件流转/黑名单静默/删好友/备注/设置）+ `FriendController`（/api/v1/friend/**）+ DTO + `FriendNotificationPort`（占位实现）。通知实时下发依赖 T38
+
+目标（friend-service-design.md §4）：
+
+- REST：`POST /api/friend/requests`、`/{id}/accept`、`/{id}/reject`、`/{id}/ignore`、`GET /api/friend/requests`、`GET /api/friend/list`、`DELETE /api/friend/{friendId}`、`PUT /api/friend/{friendId}/remark`、`PUT /api/friend/settings`。
+- 服务层 `FriendService`：发起校验顺序（自加/类型/同租户/黑名单静默/已好友/已 pending 幂等）；按 `to.friend_verify_required` 走需验证 or 免验证(auto_accepted)；accept 建双向 friendship + 通知。
+- 复用 `RelationService`/`UserBlacklistMapper` 判黑名单；通知经 T38 `SendSystemNotification`（event_type friend.request/accepted/added）。
+- 状态唯一真相在 `friend_request`，通知只带 request_id。
+
+需要修改/新增的文件：
+
+- `im-user-service/.../service/FriendService.java`、`friend/rest/FriendController.java`、相关 DTO
+- 依赖 T37（表/实体）、T38（通知 RPC）
+
+验收标准：见设计文档 §4 各流程；并发 accept 幂等；黑名单静默；拒绝/忽略不通知申请方、可再申请。
+
+测试方式：`mvn -q -pl im-user-service -am test`
+
+---
+
+### T40 — 加好友查找收紧 + username 设置接口（D42）
+
+状态：DONE（2026-06-15，待 mvn 编译验证 + 单测）：`UsernameService` + PUT `/api/v1/users/me/username`（正则+租户唯一，频率限制留 TODO）；`UserMapper.searchUsers` 收紧——移除 account 前缀模糊，改 username 前缀 + nickname 前缀 + account 完整精确；`UserPublicProfileResponse` 加 username
+
+目标（friend-service-design.md §3.3/§4.0）：
+
+- `PUT /api/user/username`：格式 `^[a-z][a-z0-9_]{5,31}$` + 租户内唯一 + 频率限制（MVP 可先不限频，留 TODO）。
+- 收紧 `UserMapper.searchUsers`：移除 `account` 前缀模糊；改为 `username` 精确/前缀匹配 + 手机号（account）完整精确匹配；昵称前缀可保留。
+
+需要修改的文件：
+
+- `im-user-service/.../dao/mapper/UserMapper.java`（改 searchUsers SQL）
+- `im-user-service/.../service/AuthService.java` 或新 `UsernameService`、`UserController`（PUT username）
+- 测试覆盖：唯一冲突、格式校验、手机号需完整、account 不再可前缀枚举
+
+验收标准：username 唯一/格式生效；按 username 或完整手机号精确查到；account 前缀搜不到。
+
+测试方式：`mvn -q -pl im-user-service -am test`
+
+---
+
+### T41 — 好友通知前端入口（联系人"通知"页）
+
+状态：PENDING（前端，im-web / im-app，二阶段或随前端排期）
+
+目标：联系人页"通知"入口渲染 SYSTEM 会话历史（friend.request/accepted/added）；按 request_id 查 `GET /api/friend/requests` 当前态渲染"同意/已同意/已拒绝"按钮；红点用 SYSTEM 会话 `max_seq-read_seq`。
+
+验收标准：收到申请实时出现红点与条目；同意后双方可聊；多端状态一致。
 
 ---
 

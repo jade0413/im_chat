@@ -36,17 +36,52 @@ export interface UserProfile {
   agentStatus?: number;
   status: number;
   createdAt: string;
+  /** D42 可分享的对外标识 */
+  username?: string | null;
+  /** D40 加我是否需要验证：1=需验证(默认) 0=免验证 */
+  friendVerifyRequired?: number;
 }
 
 export type IdLike = string | number;
 
-/** 其他用户的公开资料（不含账号）。 */
+/** 其他用户的公开资料（不含账号）。username 是可分享的对外标识（D42）。 */
 export interface UserPublicProfile {
   id: IdLike;
   nickname: string;
   avatar?: string;
   userType: number;
   verifiedType: number;
+  username?: string | null;
+}
+
+/** 好友关系条目（GET /api/v1/friend/list）。 */
+export interface FriendItem {
+  userId: IdLike;
+  remark: string;
+  nickname: string;
+  avatar?: string;
+  username?: string | null;
+}
+
+/** 好友申请条目（GET /api/v1/friend/requests）。status: 0待处理 1已同意 2已拒绝 3已忽略。 */
+export interface FriendRequestItem {
+  requestId: IdLike;
+  fromUserId: IdLike;
+  toUserId: IdLike;
+  note: string;
+  status: number;
+  autoAccepted: boolean;
+  createTime: IdLike;
+  peerUserId: IdLike;
+  peerNickname: string;
+  peerAvatar?: string;
+  peerUsername?: string | null;
+}
+
+/** 发起申请结果（D40）。 */
+export interface SendFriendRequestResult {
+  result: 'pending' | 'accepted' | 'already_friend' | 'ok' | string;
+  requestId?: IdLike | null;
 }
 
 export interface MessageHistoryResponse {

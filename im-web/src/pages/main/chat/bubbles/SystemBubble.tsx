@@ -30,6 +30,27 @@ function systemText(content: MessageContent): string {
       return parseGroupNotification(content.payload, (p) =>
         p.new ? `群名称已改为「${p.new}」` : '群名称已更新',
       );
+    case 'friend.request':
+      return parseGroupNotification(content.payload, (p) => {
+        const name = (p.from_nickname as string) || '有人';
+        const note = (p.note as string) || '';
+        return note ? `${name} 请求加你为好友：${note}` : `${name} 请求加你为好友`;
+      });
+    case 'friend.accepted':
+      return parseGroupNotification(
+        content.payload,
+        (p) => `${(p.to_nickname as string) || '对方'} 已通过你的好友申请`,
+      );
+    case 'friend.added':
+      return parseGroupNotification(
+        content.payload,
+        (p) => `${(p.from_nickname as string) || '有人'} 已添加你为好友`,
+      );
+    case 'cs.pending':
+      return parseGroupNotification(content.payload, (p) => {
+        const count = Number(p.count ?? 0);
+        return count > 0 ? `你有 ${count} 个待接待会话` : '你有待接待会话';
+      });
     default:
       return '系统通知';
   }

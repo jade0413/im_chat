@@ -18,6 +18,7 @@ spring:
       port: ${IM_REDIS_PORT:6379}
       password:
   rabbitmq:
+    # 仅本地开发默认值；生产用 docker profile（application-docker.yml）从环境变量注入且无默认值（fail-fast）。
     host: ${IM_RABBITMQ_HOST:${RABBITMQ_HOST:103.45.65.84}}
     port: ${IM_RABBITMQ_PORT:${RABBITMQ_PORT:5672}}
     username: ${IM_RABBITMQ_USERNAME:${RABBITMQ_USER:admin}}
@@ -72,6 +73,13 @@ im:
       refresh-ttl: 30d
   gateway-auth:
     heartbeat-interval-sec: ${IM_GATEWAY_AUTH_HEARTBEAT_INTERVAL_SEC:30}
+  message:
+    retention:
+      # 消息保留清理作业（按 tenant_config.msg_retention_days 周期删除过期消息）。
+      enabled: ${IM_MSG_RETENTION_ENABLED:true}
+      scan-interval-millis: ${IM_MSG_RETENTION_SCAN_INTERVAL_MILLIS:3600000}
+      batch-size: ${IM_MSG_RETENTION_BATCH_SIZE:1000}
+      max-batches-per-cycle: ${IM_MSG_RETENTION_MAX_BATCHES:50}
   outbox:
     enabled: ${IM_OUTBOX_ENABLED:true}
     batch-size: ${IM_OUTBOX_BATCH_SIZE:100}
@@ -96,7 +104,7 @@ im:
       - conversation
       - conversation_member
       - message
-      - outbox_event
+      - outbox
     minio-config:
       endpoint: ${IM_MINIO_ENDPOINT:${MINIO_ENDPOINT:http://localhost:9000}}
       access-key: ${IM_MINIO_ACCESS_KEY:${MINIO_ROOT_USER:im_minio}}

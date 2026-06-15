@@ -73,7 +73,17 @@ message GetOnlineAgentIdsResp { repeated int64 agent_ids = 1; }
 service MessageRpc {
   rpc PullMsgs (PullMsgsReq) returns (PullMsgsResp);  // 按 seq 区间拉取（同步缺口/历史分页共用）
   rpc RevokeMsg (RevokeMsgReq) returns (RevokeMsgResp);
+  // 向指定用户 SYSTEM 会话追加一条系统通知（D40）：内部 resolve+append，复用消息管道获得 seq/多端/离线
+  rpc SendSystemNotification (SendSystemNotificationReq) returns (SendSystemNotificationResp);
 }
+// D40：好友等系统通知。写接收方 SYSTEM 会话一条 NotificationContent，event_type 区分子类型
+message SendSystemNotificationReq {
+  int64  tenant_id  = 1;
+  int64  to_user_id = 2;
+  string event_type = 3;  // friend.request / friend.accepted / friend.added / ...
+  string payload    = 4;  // JSON
+}
+message SendSystemNotificationResp { int32 code = 1; int64 seq = 2; }
 message PullMsgsReq  { int64 conv_id = 1; int64 begin_seq = 2; int64 end_seq = 3; int32 limit = 4; }
 message PullMsgsResp { repeated im.body.v1.MsgPush msgs = 1; }
 message RevokeMsgReq {
@@ -93,7 +103,11 @@ service ConversationRpc {
   rpc ResolveCsConv (ResolveCsConvReq) returns (ResolveCsConvResp); // 坐席结单 assigned → resolved（D31）
   rpc ListAgentCsConvs (ListAgentCsConvsReq) returns (ListAgentCsConvsResp); // 坐席工作台：open + 本人 assigned
   rpc GetCsConv (GetCsConvReq) returns (GetCsConvResp);             // 取单个 CS 会话元数据（坐席用）
+  rpc ResolveSystemConv (ResolveSystemConvReq) returns (ResolveSystemConvResp); // D40 找或建用户 SYSTEM 通知会话
 }
+// D40：每用户一个 SYSTEM 会话（懒创建），承载好友等系统通知
+message ResolveSystemConvReq  { int64 user_id = 1; }
+message ResolveSystemConvResp { int32 code = 1; im.body.v1.ConvInfo conv = 2; }
 message ResolveConvReq {
   oneof target { int64 to_user_id = 1; int64 group_id = 2; int64 conv_id = 3; }
   int64 from_user_id = 4;

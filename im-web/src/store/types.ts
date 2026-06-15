@@ -57,4 +57,6 @@ export interface ChatMessage {
   sendTime: string;
   status: MessageStatus;
   readSeq?: string;
+  /** 发送失败时服务端回带的 ErrorCode（MSG_SEND_ACK.code，非 0），用于展示失败原因 */
+  failCode?: number;
 }

@@ -7,6 +7,7 @@ import com.im.cs.visitor.service.VisitorSessionService;
 import com.im.cs.widget.dto.AgentAvailabilityResponse;
 import com.im.cs.widget.dto.WidgetConfigResponse;
 import com.im.cs.widget.service.WidgetService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -46,8 +47,24 @@ public class VisitorSessionController {
    */
   @PostMapping("/sessions")
   public ApiResponse<WidgetSessionResponse> enterWidget(
-      @Valid @RequestBody WidgetSessionRequest request) {
-    return ApiResponse.ok(visitorSessionService.enter(request));
+      @Valid @RequestBody WidgetSessionRequest request, HttpServletRequest httpRequest) {
+    return ApiResponse.ok(visitorSessionService.enter(request, clientIp(httpRequest)));
+  }
+
+  /**
+   * 解析真实来源 IP：优先取反代链首个 X-Forwarded-For，回退 remoteAddr。
+   * 仅用于频控键，不作为安全凭证。
+   */
+  private String clientIp(HttpServletRequest request) {
+    String forwarded = request.getHeader("X-Forwarded-For");
+    if (forwarded != null && !forwarded.isBlank()) {
+      int comma = forwarded.indexOf(',');
+      String first = (comma > 0 ? forwarded.substring(0, comma) : forwarded).trim();
+      if (!first.isBlank()) {
+        return first;
+      }
+    }
+    return request.getRemoteAddr();
   }
 
   /**

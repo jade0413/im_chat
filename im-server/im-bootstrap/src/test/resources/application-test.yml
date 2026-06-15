@@ -23,8 +23,13 @@ management:
       enabled: false
 
 im:
+  grpc:
+    port: 0
   id:
     lease:
+      enabled: false
+  message:
+    retention:
       enabled: false
   outbox:
     enabled: false

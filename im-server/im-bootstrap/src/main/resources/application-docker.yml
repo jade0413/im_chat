@@ -19,6 +19,11 @@ spring:
     password: ${RABBITMQ_PASSWORD}
 
 im:
+  auth:
+    jwt:
+      # 生产必须从环境注入；无默认值 → 未配置则启动即失败（fail-fast），
+      # 避免误用 application.yml 里的弱开发常量密钥导致 JWT 可被伪造。
+      secret: ${IM_AUTH_JWT_SECRET:${JWT_SECRET}}
   startup-check:
     enabled: ${IM_STARTUP_CHECK_ENABLED:true}
     minio-config:

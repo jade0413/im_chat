@@ -61,6 +61,13 @@ public final class RedisKeys {
     return "conv:members:" + tenantId + ":" + convId;
   }
 
+  /** 免鉴权 widget 访客接入端点的固定窗口频控键（按租户 + 来源 IP）。 */
+  public static String widgetSessionRate(long tenantId, String clientIp) {
+    validatePositive("tenantId", tenantId);
+    validateText("clientIp", clientIp);
+    return "ratelimit:widget:" + tenantId + ":" + clientIp;
+  }
+
   public static String workerIdLease(long workerId) {
     if (workerId < 0) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "workerId must be non-negative");

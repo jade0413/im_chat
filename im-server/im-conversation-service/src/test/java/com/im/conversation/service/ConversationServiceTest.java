@@ -3,6 +3,7 @@ package com.im.conversation.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -192,7 +193,7 @@ class ConversationServiceTest {
     when(userConvVersionMapper.selectVersion(1L, 100L)).thenReturn(9L);
     when(memberMapper.selectList(anyWrapper()))
         .thenReturn(List.of(member(501L, 100L)), List.of(member(501L, 100L), member(501L, 200L)));
-    when(conversationMapper.selectById(501L)).thenReturn(existing);
+    when(conversationMapper.selectBatchIds(anyList())).thenReturn(List.of(existing));
 
     AtomicReference<ConversationListResult> result = new AtomicReference<>();
     TenantContext.runWithTenant(1L, () -> result.set(service.listMemberConvs(100L, 100, 0L)));
@@ -214,9 +215,9 @@ class ConversationServiceTest {
     when(userConvVersionMapper.selectVersion(1L, 100L)).thenReturn(9L);
     when(userConvEventMapper.selectAfterVersion(1L, 100L, 7L, 101))
         .thenReturn(List.of(event(501L, 8L, "created")));
-    when(memberMapper.selectOne(anyWrapper())).thenReturn(member(501L, 100L));
-    when(conversationMapper.selectById(501L)).thenReturn(existing);
-    when(memberMapper.selectList(anyWrapper())).thenReturn(List.of(member(501L, 100L), member(501L, 200L)));
+    when(memberMapper.selectList(anyWrapper()))
+        .thenReturn(List.of(member(501L, 100L)), List.of(member(501L, 100L), member(501L, 200L)));
+    when(conversationMapper.selectBatchIds(anyList())).thenReturn(List.of(existing));
 
     AtomicReference<ConversationListResult> result = new AtomicReference<>();
     TenantContext.runWithTenant(1L, () -> result.set(service.listMemberConvs(100L, 100, 7L)));

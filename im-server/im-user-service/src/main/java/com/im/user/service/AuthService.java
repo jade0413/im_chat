@@ -118,7 +118,8 @@ public class AuthService {
     return userMapper.searchUsers(tenantId, safeKeyword, selfUserId)
         .stream()
         .map(u -> new UserPublicProfileResponse(
-            u.getId(), u.getNickname(), u.getAvatar(), u.getUserType(), u.getVerifiedType()))
+            u.getId(), u.getNickname(), u.getAvatar(), u.getUserType(), u.getVerifiedType(),
+            u.getUsername()))
         .toList();
   }
 
@@ -133,7 +134,8 @@ public class AuthService {
     return userMapper.findByIds(tenantId, ids)
         .stream()
         .map(u -> new UserPublicProfileResponse(
-            u.getId(), u.getNickname(), u.getAvatar(), u.getUserType(), u.getVerifiedType()))
+            u.getId(), u.getNickname(), u.getAvatar(), u.getUserType(), u.getVerifiedType(),
+            u.getUsername()))
         .toList();
   }
 
@@ -150,7 +152,8 @@ public class AuthService {
         user.getNickname(),
         user.getAvatar(),
         user.getUserType(),
-        user.getVerifiedType());
+        user.getVerifiedType(),
+        user.getUsername());
   }
 
   private UserEntity findByAccount(String account) {
@@ -213,7 +216,11 @@ public class AuthService {
         user.getUserType(),
         user.getVerifiedType(),
         user.getStatus(),
-        user.getCreatedAt());
+        user.getCreatedAt(),
+        user.getUsername(),
+        user.getFriendVerifyRequired() == null ? 1 : user.getFriendVerifyRequired(),
+        user.getIsAgent() != null && user.getIsAgent() == 1,
+        user.getAgentStatus() == null ? 0 : user.getAgentStatus());
   }
 
   private String normalizeAccount(String account) {

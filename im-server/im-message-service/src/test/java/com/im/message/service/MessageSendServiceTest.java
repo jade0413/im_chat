@@ -157,18 +157,22 @@ class MessageSendServiceTest {
   }
 
   @Test
-  void rejectsUnsupportedContent() {
+  void sendsCustomContentMessage() {
     MsgSend request = MsgSend.newBuilder()
         .setClientMsgId("client-1")
         .setToUserId(200L)
         .setContent(MsgContent.newBuilder()
             .setCustom(CustomContent.newBuilder().setCustomType("x").setPayload("{}")))
         .build();
+    MessageSendResult expected = new MessageSendResult(9002L, 501L, 4L, 1000L);
+    when(idempotencyService.findExisting("client-1")).thenReturn(null);
+    when(idempotencyService.tryAcquire(1L, "client-1")).thenReturn(true);
+    when(conversationResolver.resolve(ctx(), request)).thenReturn(conv());
+    when(persistService.persist(1L, ctx(), request, conv())).thenReturn(expected);
 
-    assertThatThrownBy(() -> sendWithTenant(request))
-        .isInstanceOf(ImException.class)
-        .extracting("errorCode")
-        .isEqualTo(ErrorCode.VALIDATION_FAILED);
+    MessageSendResult result = sendWithTenant(request);
+
+    assertThat(result).isSameAs(expected);
   }
 
   private MessageSendResult sendWithTenant(MsgSend request) {

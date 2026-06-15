@@ -3,16 +3,19 @@ package com.im.user.rest;
 import com.im.common.auth.UserContext;
 import com.im.common.web.ApiResponse;
 import com.im.user.dto.UpdateAgentStatusRequest;
+import com.im.user.dto.UpdateUsernameRequest;
 import com.im.user.dto.UserProfileResponse;
 import com.im.user.dto.UserPublicProfileResponse;
 import com.im.user.service.AgentService;
 import com.im.user.service.AuthService;
+import com.im.user.service.UsernameService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -24,10 +27,13 @@ public class UserController {
 
   private final AuthService authService;
   private final AgentService agentService;
+  private final UsernameService usernameService;
 
-  public UserController(AuthService authService, AgentService agentService) {
+  public UserController(AuthService authService, AgentService agentService,
+      UsernameService usernameService) {
     this.authService = authService;
     this.agentService = agentService;
+    this.usernameService = usernameService;
   }
 
   /** 当前登录用户完整资料（含账号）。 */
@@ -76,6 +82,21 @@ public class UserController {
   public ApiResponse<Void> updateAgentStatus(
       @Valid @RequestBody UpdateAgentStatusRequest request) {
     agentService.updateStatus(UserContext.requiredUserId(), request.agentStatus());
+    return ApiResponse.ok(null);
+  }
+
+  /**
+   * 设置/修改唯一用户名（D42，可分享的对外加好友标识）。
+   *
+   * <pre>
+   * PUT /api/v1/users/me/username
+   * Body: {"username": "jade_im"}   // ^[a-z][a-z0-9_]{5,31}$，租户内唯一
+   * </pre>
+   */
+  @PutMapping("/me/username")
+  public ApiResponse<Void> updateUsername(
+      @Valid @RequestBody UpdateUsernameRequest request) {
+    usernameService.setUsername(UserContext.requiredUserId(), request.username());
     return ApiResponse.ok(null);
   }
 }

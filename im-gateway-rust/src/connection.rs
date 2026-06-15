@@ -628,9 +628,16 @@ async fn read_loop(
                     acked,
                     "received push ack"
                 );
-                if let Err(err) = state.rpc.on_push_acked(ctx.clone(), frame.body).await {
-                    warn!(?err, "on_push_acked rpc failed");
-                }
+                // 送达回执转达 Java 为尽力而为：spawn 出去，避免每条 ACK 都让读循环
+                // 阻塞一个 gRPC 往返（高吞吐下会拖慢同连接后续上行帧的处理）。
+                let ack_rpc = state.rpc.clone();
+                let ack_ctx = ctx.clone();
+                let ack_body = frame.body;
+                tokio::spawn(async move {
+                    if let Err(err) = ack_rpc.on_push_acked(ack_ctx, ack_body).await {
+                        warn!(?err, "on_push_acked rpc failed");
+                    }
+                });
             }
             cmd if cmd == Cmd::Auth as i32 => {
                 warn!("duplicate AUTH frame, close connection");

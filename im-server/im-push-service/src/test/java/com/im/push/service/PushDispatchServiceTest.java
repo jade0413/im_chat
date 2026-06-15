@@ -106,7 +106,10 @@ class PushDispatchServiceTest {
   void connectedRouteKicksPreviousConnectionOfSamePlatformClassThenSavesNewRoute() throws Exception {
     OnlineRoute oldRoute = route(100L, "gw-a", "old-conn");
     ConnCtx newCtx = ctx("new-conn", "gw-b");
-    when(routeRepository.find(1L, 100L, 1)).thenReturn(Optional.of(oldRoute));
+    when(routeRepository.saveReturningPrevious(
+        org.mockito.Mockito.argThat(route -> route.connId().equals("new-conn")),
+        org.mockito.Mockito.eq(Duration.ofSeconds(90))))
+        .thenReturn(Optional.of(oldRoute));
 
     service.onConnected(newCtx);
 
@@ -116,8 +119,6 @@ class PushDispatchServiceTest {
     assertThat(envelope.getCmd()).isEqualTo(Cmd.KICK_VALUE);
     KickNotify kick = KickNotify.parseFrom(envelope.getBody());
     assertThat(kick.getReason()).isEqualTo(KickNotify.Reason.NEW_DEVICE_LOGIN);
-    verify(routeRepository).save(org.mockito.Mockito.argThat(route -> route.connId().equals("new-conn")),
-        org.mockito.Mockito.eq(Duration.ofSeconds(90)));
   }
 
   @Test

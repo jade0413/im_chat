@@ -4,6 +4,7 @@ import com.im.common.grpc.GrpcMetadataKeys;
 import com.im.common.tenant.TenantContext;
 import com.im.common.trace.TraceContext;
 import com.im.proto.rpc.ConversationRpcGrpc;
+import com.im.proto.rpc.MessageRpcGrpc;
 import com.im.proto.rpc.UserRpcGrpc;
 import io.grpc.Metadata;
 import io.grpc.stub.MetadataUtils;
@@ -29,6 +30,11 @@ public final class CsGrpcMetadata {
 
   public static ConversationRpcGrpc.ConversationRpcBlockingStub withMetadata(
       ConversationRpcGrpc.ConversationRpcBlockingStub stub) {
+    return stub.withInterceptors(MetadataUtils.newAttachHeadersInterceptor(metadata()));
+  }
+
+  public static MessageRpcGrpc.MessageRpcBlockingStub withMetadata(
+      MessageRpcGrpc.MessageRpcBlockingStub stub) {
     return stub.withInterceptors(MetadataUtils.newAttachHeadersInterceptor(metadata()));
   }
 

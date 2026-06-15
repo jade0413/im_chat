@@ -81,7 +81,7 @@ export function NewChatModal({ open, onClose }: NewChatModalProps) {
       destroyOnClose
     >
       <Input.Search
-        placeholder="搜索用户昵称或账号"
+        placeholder="输入用户名或完整手机号"
         value={keyword}
         onChange={(e) => setKeyword(e.target.value)}
         onSearch={handleSearch}
@@ -97,7 +97,7 @@ export function NewChatModal({ open, onClose }: NewChatModalProps) {
       ) : (
         <List
           dataSource={results}
-          locale={{ emptyText: keyword ? '未找到匹配用户' : '输入昵称或账号搜索' }}
+          locale={{ emptyText: keyword ? '未找到匹配用户' : '按用户名或完整手机号精确查找' }}
           renderItem={(user) => {
             const userId = idToString(user.id);
             return (

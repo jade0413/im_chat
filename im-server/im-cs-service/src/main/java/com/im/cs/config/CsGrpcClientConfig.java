@@ -1,6 +1,7 @@
 package com.im.cs.config;
 
 import com.im.proto.rpc.ConversationRpcGrpc;
+import com.im.proto.rpc.MessageRpcGrpc;
 import com.im.proto.rpc.UserRpcGrpc;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
@@ -48,5 +49,22 @@ public class CsGrpcClientConfig {
   public ConversationRpcGrpc.ConversationRpcBlockingStub csConversationRpcBlockingStub(
       @Qualifier("csConversationRpcChannel") ManagedChannel channel) {
     return ConversationRpcGrpc.newBlockingStub(channel);
+  }
+
+  // --- MessageRpc channel（T35 坐席上线提醒：发系统通知，复用 D40 SendSystemNotification）---
+
+  @Bean(name = "csMessageRpcChannel", destroyMethod = "shutdownNow")
+  public ManagedChannel csMessageRpcChannel(
+      @Value("${im.rpc.message.host:localhost}") String host,
+      @Value("${im.rpc.message.port:${im.grpc.port:9091}}") int port) {
+    return ManagedChannelBuilder.forAddress(host, port)
+        .usePlaintext()
+        .build();
+  }
+
+  @Bean
+  public MessageRpcGrpc.MessageRpcBlockingStub csMessageRpcBlockingStub(
+      @Qualifier("csMessageRpcChannel") ManagedChannel channel) {
+    return MessageRpcGrpc.newBlockingStub(channel);
   }
 }

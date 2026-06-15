@@ -34,6 +34,13 @@ public class RedisOnlineRouteRepository implements OnlineRouteRepository {
       return 0
       """, Long.class);
 
+  // 原子"取旧值并写新值(带 PX TTL)"：返回旧路由 JSON（无则返回 nil）。
+  private static final DefaultRedisScript<String> SET_RETURNING_PREVIOUS = new DefaultRedisScript<>("""
+      local prev = redis.call('get', KEYS[1])
+      redis.call('set', KEYS[1], ARGV[1], 'PX', ARGV[2])
+      return prev
+      """, String.class);
+
   private final StringRedisTemplate redisTemplate;
   private final ObjectMapper objectMapper;
 
@@ -45,6 +52,15 @@ public class RedisOnlineRouteRepository implements OnlineRouteRepository {
   @Override
   public void save(OnlineRoute route, Duration ttl) {
     redisTemplate.opsForValue().set(key(route), encode(route), ttl);
+  }
+
+  @Override
+  public Optional<OnlineRoute> saveReturningPrevious(OnlineRoute route, Duration ttl) {
+    String previous = redisTemplate.execute(SET_RETURNING_PREVIOUS,
+        Collections.singletonList(key(route)),
+        encode(route),
+        Long.toString(ttl.toMillis()));
+    return previous == null || previous.isBlank() ? Optional.empty() : Optional.of(decode(previous));
   }
 
   @Override

@@ -169,6 +169,9 @@ function convSubtitle(conv: import('../../../store/types').Conversation) {
   if (conv.type === 3) {
     return `客服会话 · ${csStatusLabel(conv.csStatus)} · ${conv.visitorOnline ? '访客在线' : '访客离线'}`;
   }
+  if (conv.type === 4) {
+    return '系统通知';
+  }
   return '单聊';
 }
 

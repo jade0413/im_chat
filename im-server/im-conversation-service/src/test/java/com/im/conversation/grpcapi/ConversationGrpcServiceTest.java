@@ -72,12 +72,15 @@ class ConversationGrpcServiceTest {
 
   @Test
   void returnsMembers() {
-    when(conversationService.getMemberUserIds(501L)).thenReturn(List.of(100L, 200L));
+    when(conversationService.getMembersResult(501L))
+        .thenReturn(new ConversationService.MembersResult(
+            List.of(100L, 200L), ConvType.C2C.getNumber(), 0, 0L));
 
     CapturingObserver<GetMembersResp> observer = new CapturingObserver<>();
     service().getMembers(GetMembersReq.newBuilder().setConvId(501L).build(), observer);
 
     assertThat(observer.value.getUserIdsList()).containsExactly(100L, 200L);
+    assertThat(observer.value.getConvType()).isEqualTo(ConvType.C2C.getNumber());
     assertThat(observer.completed).isTrue();
   }
 

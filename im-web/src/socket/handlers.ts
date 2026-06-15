@@ -139,6 +139,8 @@ function handleMsgSendAck(socket: ImSocket, body: Uint8Array) {
     serverMsgId: idToString(ack.serverMsgId),
     seq: idToString(ack.seq),
     status: ack.code === 0 ? 'sent' : 'failed',
+    // 失败时存下服务端 code，供 UI 展示具体原因（2002=需先加好友、2001=被对方拉黑）
+    failCode: ack.code === 0 ? undefined : ack.code,
   });
   if (ack.code === 0) {
     const existing = useConvStore.getState().conversations.get(convId);

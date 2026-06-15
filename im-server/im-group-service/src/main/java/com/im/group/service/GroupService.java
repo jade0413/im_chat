@@ -360,7 +360,8 @@ public class GroupService {
   }
 
   private GroupContext loadAuthorizedGroup(long operatorUserId, long groupId) {
-    GroupInfoEntity group = loadGroup(groupId);
+    // 成员变更走行锁加载，串行化同群并发变更（member_count 读改写一致、人数上限不被并发越过）。
+    GroupInfoEntity group = loadGroupForUpdate(groupId);
     GroupMemberEntity operatorMember = findGroupMember(groupId, operatorUserId);
     if (operatorMember == null) {
       throw new ImException(ErrorCode.NOT_GROUP_MEMBER);
@@ -380,6 +381,18 @@ public class GroupService {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "group_id must be positive");
     }
     GroupInfoEntity group = groupInfoMapper.selectById(groupId);
+    if (group == null || !Integer.valueOf(GROUP_STATUS_NORMAL).equals(group.getStatus())) {
+      throw new ImException(ErrorCode.GROUP_NOT_FOUND);
+    }
+    return group;
+  }
+
+  /** 行锁加载正常状态的群（仅供成员变更事务使用，必须在 @Transactional 内）。 */
+  private GroupInfoEntity loadGroupForUpdate(long groupId) {
+    if (groupId <= 0) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "group_id must be positive");
+    }
+    GroupInfoEntity group = groupInfoMapper.selectByIdForUpdate(groupId);
     if (group == null || !Integer.valueOf(GROUP_STATUS_NORMAL).equals(group.getStatus())) {
       throw new ImException(ErrorCode.GROUP_NOT_FOUND);
     }

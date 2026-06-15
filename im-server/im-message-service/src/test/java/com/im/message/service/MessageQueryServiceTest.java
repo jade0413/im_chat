@@ -65,8 +65,8 @@ class MessageQueryServiceTest {
         .setReadSeq(1L)
         .build());
     when(messageMapper.selectList(anyWrapper())).thenReturn(List.of(first, second));
-    when(assembler.toPush(first)).thenReturn(push(2L));
-    when(assembler.toPush(second)).thenReturn(push(3L));
+    when(assembler.toPush(first, ConvType.C2C)).thenReturn(push(2L));
+    when(assembler.toPush(second, ConvType.C2C)).thenReturn(push(3L));
 
     SyncResp response = syncWithTenant(100L, SyncReq.newBuilder()
         .setConvListVersion(10L)
@@ -95,8 +95,8 @@ class MessageQueryServiceTest {
         .setReadSeq(1L)
         .build()), false, 7L));
     when(messageMapper.selectList(anyWrapper())).thenReturn(List.of(first, second));
-    when(assembler.toPush(first)).thenReturn(push(1L));
-    when(assembler.toPush(second)).thenReturn(push(2L));
+    when(assembler.toPush(first, ConvType.C2C)).thenReturn(push(1L));
+    when(assembler.toPush(second, ConvType.C2C)).thenReturn(push(2L));
 
     SyncResp response = syncWithTenant(100L, SyncReq.getDefaultInstance());
 
@@ -195,8 +195,8 @@ class MessageQueryServiceTest {
         .setReadSeq(4L)
         .build());
     when(messageMapper.selectList(anyWrapper())).thenReturn(List.of(newest, older, extra));
-    when(assembler.toPush(newest)).thenReturn(push(5L));
-    when(assembler.toPush(older)).thenReturn(push(4L));
+    when(assembler.toPush(newest, ConvType.CONV_TYPE_UNSPECIFIED)).thenReturn(push(5L));
+    when(assembler.toPush(older, ConvType.CONV_TYPE_UNSPECIFIED)).thenReturn(push(4L));
 
     MessagePage page = historyWithTenant(100L, 501L, null, 2);
 
