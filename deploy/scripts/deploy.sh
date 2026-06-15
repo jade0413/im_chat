@@ -17,10 +17,11 @@ set -euo pipefail
 # ║  ① 需要你自己配置的参数 —— 部署前改这里                                  ║
 # ╚═══════════════════════════════════════════════════════════════════════╝
 
-# 【必改】Web 前端域名，用于 WebSocket Origin 白名单；多个用英文逗号隔开。
-#   生产示例：https://im.example.com
-#   纯联调可填：http://localhost,http://127.0.0.1
-ALLOWED_ORIGINS="https://im.example.com"
+# WebSocket Origin 白名单；多个用英文逗号隔开。
+#   "*"                    = 放行所有来源（当前用 IP 直连/无域名阶段用这个）
+#   https://im.example.com = 上线正式域名后改成它，收紧到只放行自己的站点
+#   说明：App/IP 直连等非浏览器客户端不带 Origin 头，无论此项如何都放行。
+ALLOWED_ORIGINS="*"
 
 # 【建议 yes】中间件端口是否只绑本机 127.0.0.1（安全红线：不暴露公网）。
 #   yes = MySQL/Redis/RabbitMQ/MinIO 仅本机可达；要连管理台用 SSH 隧道。
