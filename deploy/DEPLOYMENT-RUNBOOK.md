@@ -223,7 +223,7 @@ docker compose --profile obs up -d
 
 ## 9. 升级与发版
 
-- **业务发版（im-server / 网关 / web）**：改代码后 `docker compose --profile app up -d --build`，compose 滚动重建对应容器。im-server 无长连接负担，可随意重启；网关重启会断开其上连接，客户端自动重连 + 增量同步补齐，不丢消息（architecture §4 网关无状态）。建议低峰发版网关。
+- **业务发版（im-server / 网关 / web）**：改代码后 `docker compose --profile app up -d --build`，compose 滚动重建对应容器。im-server 无长连接负担，可随意重启；网关重启会断开其上连接，客户端自动重连 + 增量同步补齐，不丢消息（architecture §4 网关无状态）。生产网关发版应先让 LB 通过 `/ready` 摘流，进程收到 SIGINT/SIGTERM 后会进入 drain：拒绝新 WS、关闭现有连接并等待 `IM_GATEWAY_DRAIN_TIMEOUT_SEC`。建议低峰发版网关。
 - **表结构演进**：走 Flyway，**不要**改 `01-schema.sql` 或删库重建。
 - **中间件大版本升级**：单独操作，先备份卷、读 release note，逐个来，别和应用发版混在一起。
 
@@ -234,10 +234,10 @@ docker compose --profile obs up -d
 | 现象 | 排查方向 |
 |---|---|
 | im-server 起不来 | `docker compose logs im-server`，看启动自检哪项失败（表/Redis/MQ/bucket/workerId） |
-| 客户端连不上 WS | 前置 nginx `/ws` 是否指向宿主机 `${GATEWAY_PORT:-8082}` 或 Docker 内网 `im-gateway:8080`；`ALLOWED_ORIGINS` 是否含来源域名；fd 是否打满 |
+| 客户端连不上 WS | 前置 nginx `/ws` 是否指向宿主机 `${GATEWAY_PORT:-8082}` 或 Docker 内网 `im-gateway:8080`；`ALLOWED_ORIGINS` 是否含来源域名；`/ready` 是否 503（drain 中）；fd 是否打满 |
 | 连接数上不去/到几千就掉 | sysctl `somaxconn`、容器 `nofile` ulimit |
 | 消息发出去对端收不到 | 查 Redis 路由表 `route:{tenant}:{uid}:{platform_class}`、RabbitMQ `push.gw.{instance}` 队列是否积压、网关 ack 超时断连指标 |
-| 握手被限流 | 网关 `IM_GATEWAY_HANDSHAKE_RATE_LIMIT_*`，大规模重连风暴时按需调高 |
+| 握手被限流 | 网关 `IM_GATEWAY_HANDSHAKE_RATE_LIMIT_*` 或 `IM_GATEWAY_PER_IP_HANDSHAKE_RATE_LIMIT_*`，大规模重连风暴时按需调高；若只有单个来源被挡，优先查 per-IP 指标 |
 | workerId 租约失败 | Redis 中已有同 ID 租约（多实例时见第 11 节），需为每个 im-server 实例分配唯一 workerId |
 
 ---
@@ -256,6 +256,7 @@ docker compose --profile obs up -d
 
 - **每个实例必须有唯一 `GW_INSTANCE_ID`**：它决定下行队列 `push.gw.{instance}`，重复会导致推送串到错误实例。
 - 前置 nginx/SLB 做四层或七层负载均衡分发 WS 连接。**无需会话粘性**：连接落在哪个网关，push 模块就把该用户路由写成哪个实例，下行精准投递。实例扩缩容只影响其上连接重连，客户端自动重连 + 增量同步兜底，不丢消息。
+- LB 健康检查：`/health` 只表示进程活着；`/ready` 才用于接流。网关进入 drain 时 `/ready` 返回 503，LB 应停止分配新连接。
 - 扩容公式参考：单网关稳态承载几万连接，按目标在线数 ÷ 单机承载 + 冗余，决定实例数。
 
 ### 11.3 im-server（Java 模块化单体）——可多实例，但有三个前提

@@ -11,6 +11,14 @@ pub struct Metrics {
     push_delivered: Arc<AtomicU64>,
     push_failed: Arc<AtomicU64>,
     ack_timeout_disconnects: Arc<AtomicU64>,
+    slow_consumer_disconnects: Arc<AtomicU64>,
+    handshake_rejected_draining: Arc<AtomicU64>,
+    handshake_rejected_rate_limit: Arc<AtomicU64>,
+    handshake_rejected_per_ip_rate_limit: Arc<AtomicU64>,
+    handshake_rejected_origin: Arc<AtomicU64>,
+    dispatch_ok: Arc<AtomicU64>,
+    dispatch_failed: Arc<AtomicU64>,
+    dispatch_duration_ms_sum: Arc<AtomicU64>,
 }
 
 impl Metrics {
@@ -50,8 +58,50 @@ impl Metrics {
         self.ack_timeout_disconnects.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn render_prometheus(&self) -> String {
+    pub fn slow_consumer_disconnect(&self) {
+        self.slow_consumer_disconnects
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn handshake_rejected_draining(&self) {
+        self.handshake_rejected_draining
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn handshake_rejected_rate_limit(&self) {
+        self.handshake_rejected_rate_limit
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn handshake_rejected_per_ip_rate_limit(&self) {
+        self.handshake_rejected_per_ip_rate_limit
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn handshake_rejected_origin(&self) {
+        self.handshake_rejected_origin
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn dispatch_completed(&self, ok: bool, duration_ms: u64) {
+        if ok {
+            self.dispatch_ok.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.dispatch_failed.fetch_add(1, Ordering::Relaxed);
+        }
+        self.dispatch_duration_ms_sum
+            .fetch_add(duration_ms, Ordering::Relaxed);
+    }
+
+    pub fn render_prometheus(&self, registry_connections: usize, pending_acks: usize) -> String {
         let mut output = String::new();
+        output.push_str("# TYPE im_gateway_registry_connections gauge\n");
+        output.push_str(&format!(
+            "im_gateway_registry_connections {}\n",
+            registry_connections
+        ));
+        output.push_str("# TYPE im_gateway_pending_acks gauge\n");
+        output.push_str(&format!("im_gateway_pending_acks {}\n", pending_acks));
         output.push_str("# TYPE im_gateway_online_connections gauge\n");
         let mut tenants = self
             .online_connections
@@ -95,6 +145,43 @@ impl Metrics {
             "im_gateway_ack_timeout_disconnects_total {}\n",
             self.ack_timeout_disconnects.load(Ordering::Relaxed)
         ));
+        output.push_str("# TYPE im_gateway_slow_consumer_disconnects_total counter\n");
+        output.push_str(&format!(
+            "im_gateway_slow_consumer_disconnects_total {}\n",
+            self.slow_consumer_disconnects.load(Ordering::Relaxed)
+        ));
+        output.push_str("# TYPE im_gateway_handshake_rejected_total counter\n");
+        output.push_str(&format!(
+            "im_gateway_handshake_rejected_total{{reason=\"draining\"}} {}\n",
+            self.handshake_rejected_draining.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "im_gateway_handshake_rejected_total{{reason=\"instance_rate_limit\"}} {}\n",
+            self.handshake_rejected_rate_limit.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "im_gateway_handshake_rejected_total{{reason=\"per_ip_rate_limit\"}} {}\n",
+            self.handshake_rejected_per_ip_rate_limit
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "im_gateway_handshake_rejected_total{{reason=\"origin\"}} {}\n",
+            self.handshake_rejected_origin.load(Ordering::Relaxed)
+        ));
+        output.push_str("# TYPE im_gateway_dispatch_total counter\n");
+        output.push_str(&format!(
+            "im_gateway_dispatch_total{{result=\"ok\"}} {}\n",
+            self.dispatch_ok.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "im_gateway_dispatch_total{{result=\"failed\"}} {}\n",
+            self.dispatch_failed.load(Ordering::Relaxed)
+        ));
+        output.push_str("# TYPE im_gateway_dispatch_duration_ms_sum counter\n");
+        output.push_str(&format!(
+            "im_gateway_dispatch_duration_ms_sum {}\n",
+            self.dispatch_duration_ms_sum.load(Ordering::Relaxed)
+        ));
         output
     }
 }
@@ -111,12 +198,24 @@ mod tests {
         metrics.push_delivered();
         metrics.push_failed();
         metrics.ack_timeout_disconnect();
+        metrics.handshake_rejected_draining();
+        metrics.handshake_rejected_rate_limit();
+        metrics.handshake_rejected_per_ip_rate_limit();
+        metrics.handshake_rejected_origin();
+        metrics.dispatch_completed(true, 12);
+        metrics.dispatch_completed(false, 7);
 
-        let rendered = metrics.render_prometheus();
+        let rendered = metrics.render_prometheus(1, 2);
+        assert!(rendered.contains("im_gateway_registry_connections 1"));
+        assert!(rendered.contains("im_gateway_pending_acks 2"));
         assert!(rendered.contains("im_gateway_online_connections{tenant_id=\"1\"} 1"));
         assert!(rendered.contains("im_gateway_uplink_frames_total{cmd=\"10\"} 1"));
         assert!(rendered.contains("im_gateway_push_delivered_total 1"));
         assert!(rendered.contains("im_gateway_push_failed_total 1"));
         assert!(rendered.contains("im_gateway_ack_timeout_disconnects_total 1"));
+        assert!(rendered.contains("im_gateway_handshake_rejected_total{reason=\"draining\"} 1"));
+        assert!(rendered.contains("im_gateway_dispatch_total{result=\"ok\"} 1"));
+        assert!(rendered.contains("im_gateway_dispatch_total{result=\"failed\"} 1"));
+        assert!(rendered.contains("im_gateway_dispatch_duration_ms_sum 19"));
     }
 }

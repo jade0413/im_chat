@@ -11,6 +11,7 @@ pub fn encode(frame: &Frame) -> Vec<u8> {
 }
 
 /// 用默认帧大小限制解码（`DEFAULT_MAX_FRAME_BYTES`）。
+#[cfg(test)]
 pub fn decode(payload: &[u8]) -> Result<Frame> {
     decode_with_limit(payload, DEFAULT_MAX_FRAME_BYTES)
 }

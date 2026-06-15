@@ -6,7 +6,7 @@ use crate::{
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use lapin::{
-    options::{BasicAckOptions, BasicConsumeOptions, QueueDeclareOptions},
+    options::{BasicAckOptions, BasicConsumeOptions, BasicQosOptions, QueueDeclareOptions},
     types::FieldTable,
     Connection, ConnectionProperties,
 };
@@ -43,6 +43,13 @@ async fn run_push_consumer_once(state: AppState) -> Result<()> {
         .create_channel()
         .await
         .context("failed to create rabbitmq channel")?;
+    channel
+        .basic_qos(
+            state.config.rabbitmq_prefetch_count.max(1),
+            BasicQosOptions::default(),
+        )
+        .await
+        .context("failed to configure rabbitmq prefetch")?;
 
     channel
         .queue_declare(
@@ -158,6 +165,7 @@ async fn disconnect_slow_consumer(
     handle.close();
     if state.registry.remove(&handle.key()).is_some() {
         state.metrics.connection_closed(tenant_id);
+        state.metrics.slow_consumer_disconnect();
         if let Err(err) = state.rpc.on_disconnected(handle.ctx()).await {
             warn!(?err, "failed to report disconnected for slow consumer");
         }

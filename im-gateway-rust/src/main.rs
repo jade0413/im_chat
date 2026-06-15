@@ -11,15 +11,15 @@ mod state;
 use crate::{
     config::Config,
     connection::{ConnectionRegistry, PendingAcks},
-    handshake_limiter::HandshakeLimiter,
+    handshake_limiter::{HandshakeLimiter, IpHandshakeLimiter},
     metrics::Metrics,
     rpc::RpcClients,
-    state::AppState,
+    state::{AppState, Lifecycle},
 };
 use anyhow::Result;
-use axum::{routing::get, Router};
+use axum::{http::StatusCode, routing::get, Router};
 use std::sync::Arc;
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, time};
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -38,6 +38,12 @@ async fn main() -> Result<()> {
             config.handshake_rate_limit_per_sec,
             config.handshake_rate_limit_burst,
         ),
+        ip_handshake_limiter: IpHandshakeLimiter::new(
+            config.per_ip_handshake_rate_limit_per_sec,
+            config.per_ip_handshake_rate_limit_burst,
+            config.per_ip_handshake_limiter_idle_ttl,
+        ),
+        lifecycle: Lifecycle::default(),
         metrics: Metrics::default(),
     };
 
@@ -48,9 +54,10 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .route("/health", get(health))
+        .route("/ready", get(ready))
         .route("/metrics", get(metrics))
         .route("/ws", get(connection::ws_handler))
-        .with_state(state);
+        .with_state(state.clone());
 
     let listener = TcpListener::bind(config.ws_bind).await?;
     let queue_name = config.push_queue_name();
@@ -65,7 +72,7 @@ async fn main() -> Result<()> {
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
+    .with_graceful_shutdown(shutdown_signal(state.clone()))
     .await?;
     push_task.abort();
     Ok(())
@@ -75,11 +82,21 @@ async fn health() -> &'static str {
     "OK"
 }
 
-async fn metrics(axum::extract::State(state): axum::extract::State<AppState>) -> String {
-    state.metrics.render_prometheus()
+async fn ready(axum::extract::State(state): axum::extract::State<AppState>) -> StatusCode {
+    if state.lifecycle.is_ready() {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    }
 }
 
-async fn shutdown_signal() {
+async fn metrics(axum::extract::State(state): axum::extract::State<AppState>) -> String {
+    state
+        .metrics
+        .render_prometheus(state.registry.len(), state.pending_acks.len())
+}
+
+async fn shutdown_signal(state: AppState) {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
             .await
@@ -101,6 +118,13 @@ async fn shutdown_signal() {
         _ = ctrl_c => {},
         _ = terminate => {},
     }
+    state.lifecycle.start_draining();
+    let closed = state.registry.close_all();
+    info!(
+        drain_timeout_ms = state.config.drain_timeout.as_millis(),
+        closed, "gateway entering drain mode"
+    );
+    time::sleep(state.config.drain_timeout).await;
 }
 
 fn init_tracing() {

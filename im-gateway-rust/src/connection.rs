@@ -120,6 +120,23 @@ impl ConnectionRegistry {
     pub fn remove(&self, key: &ConnKey) -> Option<ConnectionHandle> {
         self.inner.remove(key).map(|(_, value)| value)
     }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn close_all(&self) -> usize {
+        let handles = self
+            .inner
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect::<Vec<_>>();
+        let count = handles.len();
+        for handle in handles {
+            handle.close();
+        }
+        count
+    }
 }
 
 #[derive(Clone)]
@@ -341,6 +358,10 @@ impl PendingAcks {
     pub fn cancel_connection(&self, conn: &ConnKey) {
         self.inner.retain(|key, _| &key.conn != conn);
     }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
 }
 
 pub async fn ws_handler(
@@ -349,14 +370,26 @@ pub async fn ws_handler(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
+    if !state.lifecycle.is_ready() {
+        state.metrics.handshake_rejected_draining();
+        warn!(%peer_addr, "websocket handshake rejected because gateway is draining");
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     if !state.handshake_limiter.allow() {
+        state.metrics.handshake_rejected_rate_limit();
         warn!(%peer_addr, "websocket handshake rejected by rate limit");
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    }
+    if !state.ip_handshake_limiter.allow(peer_addr.ip()) {
+        state.metrics.handshake_rejected_per_ip_rate_limit();
+        warn!(%peer_addr, "websocket handshake rejected by per-ip rate limit");
         return StatusCode::TOO_MANY_REQUESTS.into_response();
     }
     if !origin_allowed(
         headers.get(ORIGIN).and_then(|value| value.to_str().ok()),
         &state.config.allowed_origins,
     ) {
+        state.metrics.handshake_rejected_origin();
         warn!(%peer_addr, "websocket handshake rejected by origin policy");
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -499,6 +532,7 @@ async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
         user_id = ctx.user_id,
         platform = ctx.platform,
         conn_id = ctx.conn_id,
+        trace_id = ctx.trace_id,
         "websocket authenticated"
     );
 
@@ -646,12 +680,17 @@ async fn read_loop(
             cmd if cmd >= 0 => {
                 let cmd = cmd as u32;
                 state.metrics.uplink_frame(cmd);
+                let dispatch_started = Instant::now();
                 match state
                     .rpc
                     .dispatch(ctx.clone(), cmd, frame.body, frame.req_id)
                     .await
                 {
                     Ok(response) => {
+                        state.metrics.dispatch_completed(
+                            true,
+                            dispatch_started.elapsed().as_millis() as u64,
+                        );
                         if let Some(handle) = state.registry.get(
                             key.tenant_id,
                             key.user_id,
@@ -666,11 +705,16 @@ async fn read_loop(
                         }
                     }
                     Err(err) => {
+                        state.metrics.dispatch_completed(
+                            false,
+                            dispatch_started.elapsed().as_millis() as u64,
+                        );
                         warn!(
                             ?err,
                             tenant_id = ctx.tenant_id,
                             user_id = ctx.user_id,
                             conn_id = ctx.conn_id,
+                            trace_id = ctx.trace_id,
                             cmd,
                             req_id = frame.req_id,
                             "dispatch failed"

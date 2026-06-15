@@ -1,3 +1,4 @@
+use crate::frame_codec::DEFAULT_MAX_FRAME_BYTES;
 use anyhow::{Context, Result};
 use std::{env, net::SocketAddr, time::Duration};
 
@@ -11,6 +12,9 @@ pub struct Config {
     pub allowed_origins: Vec<String>,
     pub handshake_rate_limit_per_sec: u32,
     pub handshake_rate_limit_burst: u32,
+    pub per_ip_handshake_rate_limit_per_sec: u32,
+    pub per_ip_handshake_rate_limit_burst: u32,
+    pub per_ip_handshake_limiter_idle_ttl: Duration,
     pub auth_timeout: Duration,
     pub auth_replay_window: Duration,
     pub push_ack_timeout: Duration,
@@ -20,6 +24,8 @@ pub struct Config {
     pub outbound_queue_size: usize,
     pub outbound_queue_full_disconnect_threshold: u64,
     pub route_renew_heartbeat_interval: u64,
+    pub drain_timeout: Duration,
+    pub rabbitmq_prefetch_count: u16,
     pub min_protocol_version: u32,
     /// 单帧最大字节数，超过则拒绝解码（防恶意超大帧 OOM）
     pub max_frame_bytes: usize,
@@ -54,6 +60,22 @@ impl Config {
             handshake_rate_limit_burst: read_env(&["IM_GATEWAY_HANDSHAKE_RATE_LIMIT_BURST"], "400")
                 .parse()
                 .context("invalid handshake rate limit burst")?,
+            per_ip_handshake_rate_limit_per_sec: read_env(
+                &["IM_GATEWAY_PER_IP_HANDSHAKE_RATE_LIMIT_PER_SEC"],
+                "20",
+            )
+            .parse()
+            .context("invalid per-ip handshake rate limit per second")?,
+            per_ip_handshake_rate_limit_burst: read_env(
+                &["IM_GATEWAY_PER_IP_HANDSHAKE_RATE_LIMIT_BURST"],
+                "40",
+            )
+            .parse()
+            .context("invalid per-ip handshake rate limit burst")?,
+            per_ip_handshake_limiter_idle_ttl: read_duration_secs(
+                &["IM_GATEWAY_PER_IP_HANDSHAKE_LIMITER_IDLE_TTL_SEC"],
+                600,
+            ),
             auth_timeout: read_duration_secs(&["IM_GATEWAY_AUTH_TIMEOUT_SEC"], 5),
             auth_replay_window: read_duration_secs(&["IM_GATEWAY_AUTH_REPLAY_WINDOW_SEC"], 300),
             push_ack_timeout: read_duration_secs(&["IM_GATEWAY_PUSH_ACK_TIMEOUT_SEC"], 10),
@@ -72,12 +94,19 @@ impl Config {
             route_renew_heartbeat_interval: read_env(&["IM_GATEWAY_ROUTE_RENEW_HEARTBEATS"], "3")
                 .parse()
                 .context("invalid route renew heartbeat interval")?,
+            drain_timeout: read_duration_secs(&["IM_GATEWAY_DRAIN_TIMEOUT_SEC"], 10),
+            rabbitmq_prefetch_count: read_env(&["IM_GATEWAY_RABBITMQ_PREFETCH_COUNT"], "256")
+                .parse()
+                .context("invalid rabbitmq prefetch count")?,
             min_protocol_version: read_env(&["IM_GATEWAY_MIN_PROTOCOL_VERSION"], "1")
                 .parse()
                 .context("invalid min protocol version")?,
-            max_frame_bytes: read_env(&["IM_GATEWAY_MAX_FRAME_BYTES"], "65536")
-                .parse()
-                .context("invalid max frame bytes")?,
+            max_frame_bytes: read_env(
+                &["IM_GATEWAY_MAX_FRAME_BYTES"],
+                &DEFAULT_MAX_FRAME_BYTES.to_string(),
+            )
+            .parse()
+            .context("invalid max frame bytes")?,
         })
     }
 
@@ -125,6 +154,9 @@ mod tests {
             allowed_origins: vec!["*".to_string()],
             handshake_rate_limit_per_sec: 200,
             handshake_rate_limit_burst: 400,
+            per_ip_handshake_rate_limit_per_sec: 20,
+            per_ip_handshake_rate_limit_burst: 40,
+            per_ip_handshake_limiter_idle_ttl: std::time::Duration::from_secs(600),
             auth_timeout: std::time::Duration::from_secs(5),
             auth_replay_window: std::time::Duration::from_secs(300),
             push_ack_timeout: std::time::Duration::from_secs(10),
@@ -134,6 +166,8 @@ mod tests {
             outbound_queue_size: 256,
             outbound_queue_full_disconnect_threshold: 3,
             route_renew_heartbeat_interval: 3,
+            drain_timeout: std::time::Duration::from_secs(10),
+            rabbitmq_prefetch_count: 256,
             min_protocol_version: 1,
             max_frame_bytes: 65536,
         };

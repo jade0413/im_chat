@@ -115,10 +115,11 @@ CS_SESSION 语义精确化（D23）：它是**带生命周期状态机的会话*
 
 1. WS 握手：读取 `token` + `tenant_id` + `device_id` + `platform`，gRPC 调 user 模块校验 token 中的平台类和 `token_ver`，失败即断
 2. 连接注册：本地 ConnMap（DashMap<conn_key, conn>），调用 `ConnEvent.OnConnected`；Java push 模块按 D27 负责 KICK 旧连接并写 Redis 路由表 `route:{tenant}:{uid}:{platform_class}`
-3. 帧编解码：1 个 WebSocket Binary Message = 1 个 protobuf `Frame`（见 protocol.md §1），心跳 PING/PONG（30s，2 次超时踢线）；网关收到 PING 后异步调用一次幂等 `ConnEvent.OnConnected` 刷新路由 TTL
+3. 帧编解码：1 个 WebSocket Binary Message = 1 个 protobuf `Frame`（见 protocol.md §1），心跳 PING/PONG（默认 30s，服务端按 heartbeat * 3 idle timeout 清理）；网关按配置每 N 次 PING 异步调用 `ConnEvent.RefreshRoute` 刷新路由 TTL
 4. 上行：业务帧 → gRPC `Uplink.Dispatch(cmd, bytes)` → 把返回的 `cmd/body` 包成同 `req_id` 的 `Frame` 回写
 5. 下行：消费 `push.gw.{self}` 队列 → 查本地 ConnMap → 写 WS；`need_ack=true` 时按 D28 分配 `req_id` 等客户端 `MSG_RECV_ACK`，10s 超时主动断连，不重推
 6. 断线：清理 ConnMap + 通知 `ConnEvent.OnDisconnected`，Java push 模块用当前连接比较删除 Redis 路由
+7. 治理：实例级 + per-IP 握手限流、Origin 白名单、最大帧限制、`/health`/`/ready`、Prometheus `/metrics`、SIGINT/SIGTERM drain（先拒绝新连接，再关闭现有连接并等待 drain 窗口）
 
 技术栈：tokio + axum ws + tonic + prost + lapin(RabbitMQ)。
 无状态：路由信息全在 Redis，实例扩缩容只影响其上连接重连（客户端自动重连+增量同步兜底，不丢消息）。
