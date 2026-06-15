@@ -113,7 +113,7 @@ if [[ "$ALLOWED_ORIGINS" == "https://im.example.com" ]]; then
   warn "ALLOWED_ORIGINS 还是示例域名 https://im.example.com —— 生产请改成真实域名！"
 fi
 
-# ---- 2. 自动修复 im-web/nginx.conf 的 /ws 反代（指向错误：im-gateway-rust:9090 → im-gateway:8080）----
+# ---- 2. 自动修复 im-web/nginx.conf 的 /ws 反代（历史错误：im-gateway-rust:9090 → im-gateway:8080）----
 NGINX_CONF="$REPO_ROOT/im-web/nginx.conf"
 if [[ -f "$NGINX_CONF" ]] && grep -q "im-gateway-rust:9090" "$NGINX_CONF"; then
   cp "$NGINX_CONF" "$NGINX_CONF.bak"

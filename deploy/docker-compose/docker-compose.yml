@@ -142,7 +142,7 @@ services:
       IM_GATEWAY_HANDSHAKE_RATE_LIMIT_PER_SEC: ${IM_GATEWAY_HANDSHAKE_RATE_LIMIT_PER_SEC:-200}
       IM_GATEWAY_HANDSHAKE_RATE_LIMIT_BURST: ${IM_GATEWAY_HANDSHAKE_RATE_LIMIT_BURST:-400}
     ports:
-      - "8080:8080"    # WSS 由前置 nginx/SLB 卸载 TLS，容器内明文
+      - "${GATEWAY_PORT:-8082}:8080"    # 宿主机端口可避开 8080；容器内仍是 8080
     depends_on:
       im-server: { condition: service_healthy }
 

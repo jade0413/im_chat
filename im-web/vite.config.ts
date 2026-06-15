@@ -4,7 +4,7 @@ import { defineConfig, loadEnv } from 'vite';
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const apiTarget = env.VITE_DEV_API_PROXY ?? 'http://192.168.1.53:8081';
-  const wsTarget = env.VITE_DEV_WS_PROXY ?? 'ws://192.168.1.53:9090';
+  const wsTarget = env.VITE_DEV_WS_PROXY ?? 'ws://192.168.1.53:8082';
 
   return {
     plugins: [react()],

@@ -14,14 +14,14 @@ npm run dev
 默认开发代理：
 
 - REST：`/api` -> `http://localhost:8081`
-- WS：`/ws` -> `ws://localhost:9090`
+- WS：`/ws` -> `ws://localhost:8082`
 - 租户：`VITE_TENANT_ID=1`
 
 可用环境变量覆盖：
 
 ```bash
 VITE_API_BASE_URL=http://localhost:8081
-VITE_WS_URL=ws://localhost:9090/ws
+VITE_WS_URL=ws://localhost:8082/ws
 VITE_TENANT_ID=1
 VITE_APP_VERSION=0.1.0-web
 ```
