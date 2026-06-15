@@ -26,6 +26,14 @@ public class RedisOnlineRouteRepository implements OnlineRouteRepository {
       return 0
       """, Long.class);
 
+  private static final DefaultRedisScript<Long> REFRESH_IF_CURRENT = new DefaultRedisScript<>("""
+      if redis.call('get', KEYS[1]) == ARGV[1] then
+        redis.call('pexpire', KEYS[1], ARGV[2])
+        return 1
+      end
+      return 0
+      """, Long.class);
+
   private final StringRedisTemplate redisTemplate;
   private final ObjectMapper objectMapper;
 
@@ -37,6 +45,15 @@ public class RedisOnlineRouteRepository implements OnlineRouteRepository {
   @Override
   public void save(OnlineRoute route, Duration ttl) {
     redisTemplate.opsForValue().set(key(route), encode(route), ttl);
+  }
+
+  @Override
+  public boolean refreshIfCurrent(OnlineRoute route, Duration ttl) {
+    Long refreshed = redisTemplate.execute(REFRESH_IF_CURRENT,
+        Collections.singletonList(key(route)),
+        encode(route),
+        Long.toString(ttl.toMillis()));
+    return Long.valueOf(1L).equals(refreshed);
   }
 
   @Override

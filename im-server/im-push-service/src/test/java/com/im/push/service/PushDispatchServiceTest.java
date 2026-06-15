@@ -1,6 +1,7 @@
 package com.im.push.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -128,6 +129,17 @@ class PushDispatchServiceTest {
     assertThat(result.onlineCount()).isEqualTo(1);
     verify(tokenVersionService).nextVersion(1L, 100L, "mobile");
     verify(gatewayPushPublisher).publish(org.mockito.Mockito.eq("gw-a"), org.mockito.Mockito.any());
+  }
+
+  @Test
+  void refreshRouteOnlyRenewsCurrentRouteTtl() {
+    ConnCtx ctx = ctx("conn-a", "gw-a");
+
+    service.refreshRoute(ctx);
+
+    verify(routeRepository).refreshIfCurrent(org.mockito.Mockito.argThat(route -> route.connId().equals("conn-a")),
+        org.mockito.Mockito.eq(Duration.ofSeconds(90)));
+    verify(gatewayPushPublisher, never()).publish(org.mockito.Mockito.anyString(), org.mockito.Mockito.any());
   }
 
   private OnlineRoute route(long userId, String gwInstance, String connId) {

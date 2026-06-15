@@ -170,6 +170,21 @@ class MessageQueryServiceTest {
   }
 
   @Test
+  void rejectsSyncWithTooManyConversationVersions() {
+    SyncReq.Builder request = SyncReq.newBuilder().setConvListVersion(1L);
+    for (int i = 0; i < 501; i++) {
+      request.addConvVersions(SyncReq.ConvVersion.newBuilder()
+          .setConvId(1000L + i)
+          .setLocalMaxSeq(1L));
+    }
+
+    assertThatThrownBy(() -> syncWithTenant(100L, request.build()))
+        .isInstanceOf(ImException.class)
+        .extracting("errorCode")
+        .isEqualTo(ErrorCode.VALIDATION_FAILED);
+  }
+
+  @Test
   void historyReturnsDescendingPageAndHasMore() {
     MessageEntity newest = message(5L);
     MessageEntity older = message(4L);

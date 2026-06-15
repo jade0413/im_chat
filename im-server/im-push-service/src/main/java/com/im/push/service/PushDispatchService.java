@@ -103,6 +103,10 @@ public class PushDispatchService {
     routeRepository.save(newRoute, properties.routeTtl());
   }
 
+  public void refreshRoute(ConnCtx ctx) {
+    routeRepository.refreshIfCurrent(OnlineRoute.from(ctx), properties.routeTtl());
+  }
+
   public void onDisconnected(ConnCtx ctx) {
     routeRepository.deleteIfCurrent(OnlineRoute.from(ctx));
   }

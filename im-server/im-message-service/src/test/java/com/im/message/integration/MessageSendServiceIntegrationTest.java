@@ -6,6 +6,8 @@ import com.im.common.id.SnowflakeIdGenerator;
 import com.im.common.mybatis.MybatisPlusConfig;
 import com.im.common.mybatis.TenantLineHandlerConfig;
 import com.im.common.outbox.OutboxWriter;
+import com.im.common.sequence.ConversationSequenceService;
+import com.im.common.sequence.dao.mapper.ConversationSequenceMapper;
 import com.im.common.tenant.TenantContext;
 import com.im.common.test.IntegrationTestSupport;
 import com.im.message.dao.entity.MessageEntity;
@@ -21,7 +23,6 @@ import com.im.message.service.MessagePersistService;
 import com.im.message.service.MessageSendResult;
 import com.im.message.service.MessageSendService;
 import com.im.message.service.MsgSavedEventFactory;
-import com.im.message.service.SequenceService;
 import com.im.proto.body.ConvInfo;
 import com.im.proto.body.MsgSend;
 import com.im.proto.common.ConvType;
@@ -60,11 +61,12 @@ import org.testcontainers.utility.DockerImageName;
     MessageAssembler.class,
     MessageIdempotencyService.class,
     MessageFileReferenceValidator.class,
-    SequenceService.class,
+    ConversationSequenceService.class,
     OutboxWriter.class,
     MsgSavedEventFactory.class,
     MessagePersistService.class,
     MessageSendService.class,
+    ConversationSequenceMapper.class,
     ConversationProgressMapper.class,
     MessageSendServiceIntegrationTest.TestConfig.class
 })

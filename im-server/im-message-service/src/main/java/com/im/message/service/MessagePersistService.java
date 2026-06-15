@@ -3,6 +3,7 @@ package com.im.message.service;
 import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.common.outbox.OutboxWriter;
+import com.im.common.sequence.ConversationSequenceService;
 import com.im.message.dao.entity.MessageEntity;
 import com.im.message.dao.mapper.ConversationProgressMapper;
 import com.im.message.dao.mapper.MessageMapper;
@@ -18,14 +19,14 @@ public class MessagePersistService {
 
   private final MessageMapper messageMapper;
   private final ConversationProgressMapper conversationProgressMapper;
-  private final SequenceService sequenceService;
+  private final ConversationSequenceService sequenceService;
   private final OutboxWriter outboxWriter;
   private final MessageAssembler assembler;
   private final MsgSavedEventFactory msgSavedEventFactory;
 
   public MessagePersistService(MessageMapper messageMapper,
       ConversationProgressMapper conversationProgressMapper,
-      SequenceService sequenceService,
+      ConversationSequenceService sequenceService,
       OutboxWriter outboxWriter,
       MessageAssembler assembler,
       MsgSavedEventFactory msgSavedEventFactory) {

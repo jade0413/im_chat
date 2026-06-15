@@ -40,6 +40,8 @@
 | D27 | 2026-06-13 | `token_ver` 精确语义：REST 登录/注册按平台类递增 `token_ver` 并写入 JWT；`GatewayAuth.VerifyToken` 校验 token 内版本等于 Redis 当前版本；`ConnEvent.OnConnected` 只负责 KICK 旧连接并替换路由 | 避免 OnConnected 递增版本后把新连接 token 一并失效；仍满足同类互踢时旧 token 立即失效 |
 | D28 | 2026-06-13 | `need_ack` 下行确认使用 `Frame.req_id`：网关为每个目标连接分配非 0 `req_id`，客户端 `MSG_RECV_ACK` 回带同 `req_id`；业务 ack body 仍原样转发 Java | 网关不编译业务 body proto，仍能精确跟踪下行送达；10s 未 ack 主动断连并走 SYNC 补齐，不做服务端重推 |
 | D29 | 2026-06-14 | 客服工作台权限：**未认领只看队列摘要，认领后才可看完整消息记录和内部备注**；内部备注落 `cs_internal_note`，不进入消息流、不推访客 | 对齐客服系统最小权限边界；保留离线留言与后续转接/质检需要的协作记录，同时避免未认领坐席越权查看完整对话 |
+| D30 | 2026-06-15 | 会话 seq 分配收口到 **im-common `ConversationSequenceService`**：全系统只有该服务/mapper 能执行 `UPDATE conversation SET max_seq=max_seq+1`；`nextSeq` 必须在外层事务内调用（`Propagation.MANDATORY`） | 固化 D26 的同事务、无空洞、回滚一致语义，避免 message/group 等模块复制 allocator 造成实现漂移 |
+| D31 | 2026-06-15 | 网关心跳续路由使用 **ConnEvent.RefreshRoute**，只在 Redis 当前 route 与连接上下文完全匹配时刷新 TTL；`OnConnected` 只用于首次上线/同端踢旧 | 降低几十万在线心跳续期对 Java/Redis 的额外读与踢旧逻辑耦合，防止旧连接心跳覆盖新连接路由 |
 
 ## 设计文档索引
 

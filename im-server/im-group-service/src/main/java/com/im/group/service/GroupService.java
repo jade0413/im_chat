@@ -9,6 +9,7 @@ import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.common.id.SnowflakeIdGenerator;
 import com.im.common.outbox.OutboxWriter;
+import com.im.common.sequence.ConversationSequenceService;
 import com.im.common.tenant.TenantContext;
 import com.im.group.dao.entity.GroupConversationEntity;
 import com.im.group.dao.entity.GroupConversationMemberEntity;
@@ -65,6 +66,7 @@ public class GroupService {
   private final GroupConversationMapper conversationMapper;
   private final GroupConversationMemberMapper conversationMemberMapper;
   private final GroupMessageMapper messageMapper;
+  private final ConversationSequenceService sequenceService;
   private final SnowflakeIdGenerator idGenerator;
   private final OutboxWriter outboxWriter;
   private final GroupUserConvEventRecorder userConvEventRecorder;
@@ -79,14 +81,15 @@ public class GroupService {
       GroupConversationMapper conversationMapper,
       GroupConversationMemberMapper conversationMemberMapper,
       GroupMessageMapper messageMapper,
+      ConversationSequenceService sequenceService,
       SnowflakeIdGenerator idGenerator,
       OutboxWriter outboxWriter,
       GroupUserConvEventRecorder userConvEventRecorder,
       ObjectMapper objectMapper,
       ConversationMemberCache memberCache) {
     this(groupInfoMapper, groupMemberMapper, tenantConfigMapper, conversationMapper,
-        conversationMemberMapper, messageMapper, idGenerator, outboxWriter, userConvEventRecorder, objectMapper,
-        memberCache, Clock.systemUTC());
+        conversationMemberMapper, messageMapper, sequenceService, idGenerator, outboxWriter,
+        userConvEventRecorder, objectMapper, memberCache, Clock.systemUTC());
   }
 
   GroupService(GroupInfoMapper groupInfoMapper,
@@ -95,6 +98,7 @@ public class GroupService {
       GroupConversationMapper conversationMapper,
       GroupConversationMemberMapper conversationMemberMapper,
       GroupMessageMapper messageMapper,
+      ConversationSequenceService sequenceService,
       SnowflakeIdGenerator idGenerator,
       OutboxWriter outboxWriter,
       GroupUserConvEventRecorder userConvEventRecorder,
@@ -107,6 +111,7 @@ public class GroupService {
     this.conversationMapper = conversationMapper;
     this.conversationMemberMapper = conversationMemberMapper;
     this.messageMapper = messageMapper;
+    this.sequenceService = sequenceService;
     this.idGenerator = idGenerator;
     this.outboxWriter = outboxWriter;
     this.userConvEventRecorder = userConvEventRecorder;
@@ -303,11 +308,7 @@ public class GroupService {
 
   private void appendNotification(long tenantId, long conversationId, long groupId,
       long operatorUserId, String eventType, String payload, String abstractText) {
-    int incremented = conversationMapper.incrementMaxSeq(conversationId);
-    if (incremented != 1) {
-      throw new ImException(ErrorCode.INTERNAL_ERROR, "conversation seq update failed");
-    }
-    long seq = currentMaxSeq(conversationId);
+    long seq = sequenceService.nextSeq(conversationId);
     LocalDateTime createdAt = now();
     MsgContent content = MsgContent.newBuilder()
         .setNotification(NotificationContent.newBuilder()
@@ -441,11 +442,7 @@ public class GroupService {
   }
 
   private long currentMaxSeq(long conversationId) {
-    Long maxSeq = conversationMapper.selectMaxSeq(conversationId);
-    if (maxSeq == null) {
-      throw new ImException(ErrorCode.CONV_NOT_FOUND);
-    }
-    return maxSeq;
+    return sequenceService.currentSeq(conversationId);
   }
 
   private List<Long> initialMembers(long ownerId, List<Long> rawUserIds) {

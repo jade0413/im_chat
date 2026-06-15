@@ -16,6 +16,7 @@ import com.im.common.error.ErrorCode;
 import com.im.common.error.ImException;
 import com.im.common.id.SnowflakeIdGenerator;
 import com.im.common.outbox.OutboxWriter;
+import com.im.common.sequence.ConversationSequenceService;
 import com.im.common.tenant.TenantContext;
 import com.im.group.dao.entity.GroupConversationEntity;
 import com.im.group.dao.entity.GroupConversationMemberEntity;
@@ -71,6 +72,9 @@ class GroupServiceTest {
   private GroupMessageMapper messageMapper;
 
   @Mock
+  private ConversationSequenceService sequenceService;
+
+  @Mock
   private SnowflakeIdGenerator idGenerator;
 
   @Mock
@@ -111,6 +115,7 @@ class GroupServiceTest {
         conversationMapper,
         conversationMemberMapper,
         messageMapper,
+        sequenceService,
         idGenerator,
         outboxWriter,
         userConvEventRecorder,
@@ -123,8 +128,7 @@ class GroupServiceTest {
   void createsGroupConversationMembersAndNotificationInOneCall() throws Exception {
     when(idGenerator.nextId()).thenReturn(10L, 20L, 30L, 40L);
     when(tenantConfigMapper.selectById(1L)).thenReturn(config(500));
-    when(conversationMapper.incrementMaxSeq(20L)).thenReturn(1);
-    when(conversationMapper.selectMaxSeq(20L)).thenReturn(1L);
+    when(sequenceService.nextSeq(20L)).thenReturn(1L);
     when(conversationMapper.updateLastMessage(eq(20L), eq(1L), any(), any())).thenReturn(1);
 
     GroupResponse response = withTenant(() -> service.createGroup(
@@ -190,8 +194,8 @@ class GroupServiceTest {
     when(conversationMapper.selectOne(anyWrapper())).thenReturn(conversation(20L, 10L));
     when(groupMemberMapper.selectList(anyWrapper())).thenReturn(List.of(member(10L, 200L, 1)));
     when(tenantConfigMapper.selectById(1L)).thenReturn(config(500));
-    when(conversationMapper.selectMaxSeq(20L)).thenReturn(5L, 6L);
-    when(conversationMapper.incrementMaxSeq(20L)).thenReturn(1);
+    when(sequenceService.currentSeq(20L)).thenReturn(5L);
+    when(sequenceService.nextSeq(20L)).thenReturn(6L);
     when(conversationMapper.updateLastMessage(eq(20L), eq(6L), any(), any())).thenReturn(1);
     when(conversationMemberMapper.selectOne(anyWrapper())).thenReturn(null);
     when(idGenerator.nextId()).thenReturn(30L, 40L);
@@ -233,8 +237,7 @@ class GroupServiceTest {
     when(groupMemberMapper.selectOne(anyWrapper()))
         .thenReturn(member(10L, 100L, 3), member(10L, 200L, 1));
     when(conversationMapper.selectOne(anyWrapper())).thenReturn(conversation(20L, 10L));
-    when(conversationMapper.incrementMaxSeq(20L)).thenReturn(1);
-    when(conversationMapper.selectMaxSeq(20L)).thenReturn(7L);
+    when(sequenceService.nextSeq(20L)).thenReturn(7L);
     when(conversationMapper.updateLastMessage(eq(20L), eq(7L), any(), any())).thenReturn(1);
     when(idGenerator.nextId()).thenReturn(30L, 40L);
 

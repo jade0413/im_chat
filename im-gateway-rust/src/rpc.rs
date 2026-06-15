@@ -80,6 +80,15 @@ impl RpcClients {
         )
     }
 
+    pub async fn refresh_route(&self, ctx: ConnCtx) -> Result<Empty> {
+        let mut client = self.conn_event.clone();
+        Ok(
+            time::timeout(self.timeouts.conn_event, client.refresh_route(ctx))
+                .await??
+                .into_inner(),
+        )
+    }
+
     pub async fn on_disconnected(&self, ctx: ConnCtx) -> Result<Empty> {
         let mut client = self.conn_event.clone();
         Ok(

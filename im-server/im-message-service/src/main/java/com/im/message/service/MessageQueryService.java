@@ -1,6 +1,8 @@
 package com.im.message.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.im.common.error.ErrorCode;
+import com.im.common.error.ImException;
 import com.im.common.tenant.TenantContext;
 import com.im.message.dao.entity.MessageEntity;
 import com.im.message.dao.mapper.ConversationProgressMapper;
@@ -23,6 +25,7 @@ public class MessageQueryService {
 
   private static final int DEFAULT_LIMIT = 20;
   private static final int MAX_LIMIT = 100;
+  private static final int MAX_SYNC_CONV_VERSIONS = 500;
 
   private final MessageMapper messageMapper;
   private final ConversationProgressMapper conversationProgressMapper;
@@ -41,6 +44,9 @@ public class MessageQueryService {
 
   public SyncResp sync(long userId, SyncReq request) {
     TenantContext.requiredTenantId();
+    if (request.getConvVersionsCount() > MAX_SYNC_CONV_VERSIONS) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "too many conversation versions in one sync request");
+    }
     ConversationListPage convList = memberClient.listMemberConvs(userId, request.getConvListVersion());
     SyncResp.Builder response = SyncResp.newBuilder()
         .setFullSync(convList.hasMore())

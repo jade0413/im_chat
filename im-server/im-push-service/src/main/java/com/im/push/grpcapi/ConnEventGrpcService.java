@@ -25,6 +25,12 @@ public class ConnEventGrpcService extends ConnEventGrpc.ConnEventImplBase {
   }
 
   @Override
+  public void refreshRoute(ConnCtx request, StreamObserver<Empty> responseObserver) {
+    TenantContext.runWithTenant(request.getTenantId(), () -> pushDispatchService.refreshRoute(request));
+    complete(responseObserver);
+  }
+
+  @Override
   public void onDisconnected(ConnCtx request, StreamObserver<Empty> responseObserver) {
     TenantContext.runWithTenant(request.getTenantId(), () -> pushDispatchService.onDisconnected(request));
     complete(responseObserver);

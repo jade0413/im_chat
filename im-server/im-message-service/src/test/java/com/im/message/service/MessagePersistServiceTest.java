@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.im.common.id.SnowflakeIdGenerator;
 import com.im.common.outbox.OutboxWriter;
+import com.im.common.sequence.ConversationSequenceService;
 import com.im.message.dao.entity.MessageEntity;
 import com.im.message.dao.mapper.ConversationProgressMapper;
 import com.im.message.dao.mapper.MessageMapper;
@@ -40,7 +41,7 @@ class MessagePersistServiceTest {
   private ConversationProgressMapper conversationProgressMapper;
 
   @Mock
-  private SequenceService sequenceService;
+  private ConversationSequenceService sequenceService;
 
   @Mock
   private OutboxWriter outboxWriter;

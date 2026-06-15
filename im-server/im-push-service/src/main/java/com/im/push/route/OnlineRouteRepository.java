@@ -9,6 +9,8 @@ public interface OnlineRouteRepository {
 
   void save(OnlineRoute route, Duration ttl);
 
+  boolean refreshIfCurrent(OnlineRoute route, Duration ttl);
+
   Optional<OnlineRoute> find(long tenantId, long userId, int platform);
 
   List<OnlineRoute> findAll(long tenantId, long userId);

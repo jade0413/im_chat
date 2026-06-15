@@ -43,6 +43,7 @@ message UplinkResp { uint32 cmd = 1; bytes body = 2; }  // 原样包成 Frame{re
 // ---- 网关 -> Java：连接生命周期事件（push 模块在线状态用）----
 service ConnEvent {
   rpc OnConnected    (ConnCtx) returns (Empty);
+  rpc RefreshRoute   (ConnCtx) returns (Empty);  // 心跳续路由 TTL：只在连接仍匹配时刷新，不触发同端踢旧
   rpc OnDisconnected (ConnCtx) returns (Empty);
   rpc OnPushAcked    (PushAckReq) returns (Empty);  // 客户端 MSG_RECV_ACK 转达
 }

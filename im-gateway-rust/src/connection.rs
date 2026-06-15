@@ -611,7 +611,7 @@ async fn read_loop(
                         let rpc = state.rpc.clone();
                         let heartbeat_ctx = ctx.clone();
                         tokio::spawn(async move {
-                            if let Err(err) = rpc.on_connected(heartbeat_ctx).await {
+                            if let Err(err) = rpc.refresh_route(heartbeat_ctx).await {
                                 warn!(?err, "failed to refresh route on heartbeat");
                             }
                         });
