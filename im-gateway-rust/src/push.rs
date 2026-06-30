@@ -13,7 +13,7 @@ use lapin::{
 use prost::Message as _;
 use std::time::Instant;
 use tokio::time::{sleep, Duration};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 const INITIAL_RECONNECT_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_RECONNECT_BACKOFF: Duration = Duration::from_secs(30);
@@ -144,7 +144,8 @@ async fn handle_push_delivery(state: &AppState, payload: &[u8]) -> Result<()> {
             }
         }
     }
-    info!(
+    // P3：每条下行都打日志在高吞吐下量很大，降到 debug；异常路径仍各自 warn。
+    debug!(
         tenant_id = envelope.tenant_id,
         cmd = envelope.cmd,
         targets = target_count,
@@ -166,9 +167,15 @@ async fn disconnect_slow_consumer(
     if state.registry.remove(&handle.key()).is_some() {
         state.metrics.connection_closed(tenant_id);
         state.metrics.slow_consumer_disconnect();
-        if let Err(err) = state.rpc.on_disconnected(handle.ctx()).await {
-            warn!(?err, "failed to report disconnected for slow consumer");
-        }
+        // C-7：断连回报 gRPC spawn 出去——本地 remove/close 已同步生效，
+        // 不让一次慢消费者断连阻塞整条下行消费管线一个 gRPC 往返。
+        let rpc = state.rpc.clone();
+        let ctx = handle.ctx();
+        tokio::spawn(async move {
+            if let Err(err) = rpc.on_disconnected(ctx).await {
+                warn!(?err, "failed to report disconnected for slow consumer");
+            }
+        });
     }
 }
 

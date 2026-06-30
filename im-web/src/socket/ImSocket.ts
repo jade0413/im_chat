@@ -8,6 +8,7 @@ import { useMessageStore } from '../store/messageStore';
 import { useSocketStore } from '../store/socketStore';
 import { useUiStore } from '../store/uiStore';
 import { idToLong } from '../utils/id';
+import { resolveLocalSyncSeq } from '../utils/seq';
 import { dispatchFrame, buildRecvAck } from './handlers';
 import { ReconnectBackoff } from './reconnect';
 
@@ -330,7 +331,7 @@ export class ImSocket {
         convListVersion: idToLong(convState.convListVersion),
         convVersions: Array.from(convState.conversations.values()).map((conv) => ({
           convId: idToLong(conv.convId),
-          localMaxSeq: idToLong(conv.maxSeq),
+          localMaxSeq: idToLong(this.localSyncSeq(conv.convId, conv.syncSeq)),
         })),
       }),
     ).finish();
@@ -418,9 +419,11 @@ export class ImSocket {
     }
   }
 
-  /** 收到 MSG_SEND_ACK 后移除 pending 记录 */
-  dequeue(clientMsgId: string) {
+  /** 收到 MSG_SEND_ACK 后移除 pending 记录，并返回原始会话 ID 供失败 ACK 回填 */
+  dequeue(clientMsgId: string): string | undefined {
+    const entry = this.pendingMap.get(clientMsgId);
     this.pendingMap.delete(clientMsgId);
+    return entry?.convId;
   }
 
   /** 重连成功 AUTH_ACK 后补发所有 pending 消息 */
@@ -475,6 +478,10 @@ export class ImSocket {
       `reqId=${reqId?.toString?.() ?? 'auto'}\nbodyBytes=${body?.byteLength ?? 0}`,
     );
     return true;
+  }
+
+  private localSyncSeq(convId: string, storedSyncSeq?: string): string {
+    return resolveLocalSyncSeq(storedSyncSeq, useMessageStore.getState().messages.get(convId));
   }
 
   private scheduleReconnect() {

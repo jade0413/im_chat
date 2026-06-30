@@ -1,8 +1,11 @@
 package com.im.user.grpcapi;
 
 import com.im.common.error.ErrorCode;
+import com.im.proto.body.Sender;
 import com.im.proto.rpc.CheckAgentAvailabilityReq;
 import com.im.proto.rpc.CheckAgentAvailabilityResp;
+import com.im.proto.rpc.GetUsersReq;
+import com.im.proto.rpc.GetUsersResp;
 import com.im.proto.rpc.GetOnlineAgentIdsReq;
 import com.im.proto.rpc.GetOnlineAgentIdsResp;
 import com.im.proto.rpc.CheckIsAgentReq;
@@ -17,7 +20,9 @@ import com.im.proto.rpc.UpdateAgentStatusReq;
 import com.im.proto.rpc.UpdateAgentStatusResp;
 import com.im.proto.rpc.UserRpcGrpc;
 import com.im.user.dto.TokenResponse;
+import com.im.user.dto.UserPublicProfileResponse;
 import com.im.user.service.AgentService;
+import com.im.user.service.AuthService;
 import com.im.user.service.RelationService;
 import com.im.user.service.RelationService.RelationCheckResult;
 import com.im.user.service.VisitorUserService;
@@ -30,13 +35,16 @@ public class UserRpcGrpcService extends UserRpcGrpc.UserRpcImplBase {
   private final RelationService relationService;
   private final VisitorUserService visitorUserService;
   private final AgentService agentService;
+  private final AuthService authService;
 
   public UserRpcGrpcService(RelationService relationService,
       VisitorUserService visitorUserService,
-      AgentService agentService) {
+      AgentService agentService,
+      AuthService authService) {
     this.relationService = relationService;
     this.visitorUserService = visitorUserService;
     this.agentService = agentService;
+    this.authService = authService;
   }
 
   @Override
@@ -48,6 +56,26 @@ public class UserRpcGrpcService extends UserRpcGrpc.UserRpcImplBase {
         .setBlocked(result.blockedByPeer())
         .setFriendRequiredUnmet(result.friendRequiredUnmet())
         .build());
+    responseObserver.onCompleted();
+  }
+
+  /**
+   * 批量取用户公开资料组装 Sender（D-5：会话列表填充 C2C 对端昵称/头像）。
+   * TenantContext 由 gRPC metadata 拦截器注入；batchGetUsers 内按租户隔离查询。
+   */
+  @Override
+  public void getUsers(GetUsersReq request, StreamObserver<GetUsersResp> responseObserver) {
+    GetUsersResp.Builder resp = GetUsersResp.newBuilder();
+    for (UserPublicProfileResponse u : authService.batchGetUsers(request.getUserIdsList())) {
+      resp.addUsers(Sender.newBuilder()
+          .setUserId(u.id())
+          .setNickname(u.nickname() == null ? "" : u.nickname())
+          .setAvatar(u.avatar() == null ? "" : u.avatar())
+          .setVerifiedTypeValue(u.verifiedType())
+          .setUserTypeValue(u.userType())
+          .build());
+    }
+    responseObserver.onNext(resp.build());
     responseObserver.onCompleted();
   }
 

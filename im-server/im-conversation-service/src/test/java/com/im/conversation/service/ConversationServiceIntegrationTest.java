@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @SpringBootTest(classes = {
@@ -42,6 +43,10 @@ class ConversationServiceIntegrationTest extends IntegrationTestSupport {
 
   @Autowired
   private ConversationService conversationService;
+
+  // D-5：ConversationService 现依赖 UserProfileClient（跨服务 gRPC），本切片不起 gRPC 栈，mock 之。
+  @MockBean
+  private UserProfileClient userProfileClient;
 
   @Autowired
   private ConversationMapper conversationMapper;

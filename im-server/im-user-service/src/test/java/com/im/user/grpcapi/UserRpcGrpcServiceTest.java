@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 import com.im.proto.rpc.CheckRelationReq;
 import com.im.proto.rpc.CheckRelationResp;
 import com.im.user.service.AgentService;
+import com.im.user.service.AuthService;
 import com.im.user.service.RelationService;
 import com.im.user.service.RelationService.RelationCheckResult;
 import com.im.user.service.VisitorUserService;
@@ -27,13 +28,16 @@ class UserRpcGrpcServiceTest {
   @Mock
   private AgentService agentService;
 
+  @Mock
+  private AuthService authService;
+
   @Test
   void returnsRelationCheckResult() {
     when(relationService.check(100L, 200L))
         .thenReturn(new RelationCheckResult(true, false));
 
     CapturingObserver<CheckRelationResp> observer = new CapturingObserver<>();
-    new UserRpcGrpcService(relationService, visitorUserService, agentService).checkRelation(CheckRelationReq.newBuilder()
+    new UserRpcGrpcService(relationService, visitorUserService, agentService, authService).checkRelation(CheckRelationReq.newBuilder()
         .setFromUserId(100L)
         .setToUserId(200L)
         .build(), observer);

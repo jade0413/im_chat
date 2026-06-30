@@ -31,8 +31,9 @@ public class ConversationSequenceService {
     if (updated != 1) {
       throw new ImException(ErrorCode.CONV_NOT_FOUND, "conversation not found when allocating seq");
     }
-    Long seq = sequenceMapper.selectMaxSeq(conversationId);
-    if (seq == null || seq <= 0) {
+    // updated==1 保证 LAST_INSERT_ID() 反映本次自增值，无需再回表 SELECT 热点会话行（C-2）。
+    long seq = sequenceMapper.selectAllocatedSeq();
+    if (seq <= 0) {
       throw new ImException(ErrorCode.INTERNAL_ERROR, "failed to allocate conversation seq");
     }
     return seq;

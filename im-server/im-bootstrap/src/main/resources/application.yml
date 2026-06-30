@@ -14,19 +14,24 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
   data:
     redis:
-      host: ${IM_REDIS_HOST:localhost}
+      host: ${IM_REDIS_HOST:103.45.65.84}
       port: ${IM_REDIS_PORT:6379}
-      password:
+      password: imchatjade
   rabbitmq:
     # 仅本地开发默认值；生产用 docker profile（application-docker.yml）从环境变量注入且无默认值（fail-fast）。
     host: ${IM_RABBITMQ_HOST:${RABBITMQ_HOST:103.45.65.84}}
     port: ${IM_RABBITMQ_PORT:${RABBITMQ_PORT:5672}}
     username: ${IM_RABBITMQ_USERNAME:${RABBITMQ_USER:admin}}
-    password: ${IM_RABBITMQ_PASSWORD:${RABBITMQ_PASSWORD:admin123}}
+    password: ${IM_RABBITMQ_PASSWORD:${RABBITMQ_PASSWORD:admin123sfg}}
     publisher-confirm-type: correlated
     listener:
       simple:
         auto-startup: ${IM_RABBITMQ_LISTENER_AUTO_STARTUP:true}
+        # D-2 推送扇出是全系统实时下行入口，默认单消费者会成为吞吐瓶颈。
+        # 并发消费配合 dedup+幂等（server_msg_id）安全；prefetch 控制每消费者预取量。
+        concurrency: ${IM_RABBITMQ_LISTENER_CONCURRENCY:4}
+        max-concurrency: ${IM_RABBITMQ_LISTENER_MAX_CONCURRENCY:16}
+        prefetch: ${IM_RABBITMQ_LISTENER_PREFETCH:32}
   flyway:
     baseline-on-migrate: true
     baseline-version: 1
@@ -54,7 +59,7 @@ management:
 
 im:
   id:
-    worker-id: ${IM_WORKER_ID:1}
+    worker-id: ${IM_WORKER_ID:2}
     lease:
       enabled: ${IM_WORKER_ID_LEASE_ENABLED:true}
       ttl: ${IM_WORKER_ID_LEASE_TTL:30s}

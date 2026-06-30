@@ -54,7 +54,8 @@ public class MessagePersistService {
     }
 
     MsgPush push = assembler.toPush(ctx, request, conv, message);
-    MsgSavedEventFactory.MsgSavedOutboxEvent event = msgSavedEventFactory.create(tenantId, push);
+    MsgSavedEventFactory.MsgSavedOutboxEvent event =
+        msgSavedEventFactory.create(tenantId, push, ctx.getConnId());
     outboxWriter.write(tenantId, event.eventType(), event.routingKey(), event.payload());
     return assembler.toResult(message);
   }

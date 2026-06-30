@@ -77,7 +77,8 @@ public class PushDispatchService {
         routesByGateway.computeIfAbsent(route.gwInstance(), ignored -> new ArrayList<>()).add(route);
       }
     }
-    log.info("push dispatch resolved, tenant_id={}, cmd={}, target_users={}, online_routes={}, offline_users={}, gateways={}",
+    // P3：每条推送都打日志在高吞吐下量很大，降到 debug。
+    log.debug("push dispatch resolved, tenant_id={}, cmd={}, target_users={}, online_routes={}, offline_users={}, gateways={}",
         tenantId, cmd, targetUserIds.size(), onlineRoutes, offlineUsers, routesByGateway.keySet());
     publishGrouped(tenantId, cmd, body, needAck, routesByGateway);
     return new PushResult(onlineRoutes, offlineUsers);

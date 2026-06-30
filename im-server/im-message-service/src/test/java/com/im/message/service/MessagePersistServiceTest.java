@@ -96,10 +96,11 @@ class MessagePersistServiceTest {
     assertThat(event.getConvId()).isEqualTo(501L);
     assertThat(event.getSeq()).isEqualTo(8L);
     assertThat(event.getServerMsgId()).isEqualTo(9001L);
+    assertThat(event.getSenderConnId()).isEqualTo("conn-100");
   }
 
   private ConnCtx ctx() {
-    return ConnCtx.newBuilder().setTenantId(1L).setUserId(100L).build();
+    return ConnCtx.newBuilder().setTenantId(1L).setUserId(100L).setConnId("conn-100").build();
   }
 
   private ConvInfo conv() {

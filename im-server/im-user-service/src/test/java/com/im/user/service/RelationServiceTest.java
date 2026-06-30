@@ -44,8 +44,21 @@ class RelationServiceTest {
   }
 
   @Test
-  void allowsOpenC2cWhenNotBlacklisted() {
+  void requiresFriendByDefaultWhenNotConfigured() {
     when(blacklistMapper.selectCount(any())).thenReturn(0L);
+    when(tenantConfigMapper.selectFriendRequired()).thenReturn(null);
+    when(friendMapper.selectCount(any())).thenReturn(0L);
+
+    RelationService.RelationCheckResult result = checkWithTenant(100L, 200L);
+
+    assertThat(result.blockedByPeer()).isFalse();
+    assertThat(result.friendRequiredUnmet()).isTrue();
+  }
+
+  @Test
+  void allowsOpenC2cWhenTenantSwitchOffAndNotBlacklisted() {
+    when(blacklistMapper.selectCount(any())).thenReturn(0L);
+    when(tenantConfigMapper.selectFriendRequired()).thenReturn(0);
 
     RelationService.RelationCheckResult result = checkWithTenant(100L, 200L);
 

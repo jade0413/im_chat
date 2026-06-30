@@ -21,11 +21,14 @@ import com.im.proto.rpc.ResolveConvReq;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
@@ -40,6 +43,13 @@ public class ConversationService {
   private final C2cKeyGenerator c2cKeyGenerator;
   private final ConversationCreator conversationCreator;
   private final ConversationMemberCache memberCache;
+  private final UserProfileClient userProfileClient;
+
+  // C-3：会话 type 不可变，缓存后非 CS 会话扇出可跳过实时读会话行。
+  // 值不可变 → 用无锁 ConcurrentHashMap；超过上限直接 clear 重建（极少触发）。
+  private static final int CONV_TYPE_CACHE_MAX = 100_000;
+  private static final int CONV_TYPE_CS = ConvType.CS_SESSION.getNumber();
+  private final ConcurrentMap<Long, Integer> convTypeCache = new ConcurrentHashMap<>();
 
   public ConversationService(ConversationMapper conversationMapper,
       ConversationMemberMapper memberMapper,
@@ -48,7 +58,8 @@ public class ConversationService {
       ConversationUserConvEventMapper userConvEventMapper,
       C2cKeyGenerator c2cKeyGenerator,
       ConversationCreator conversationCreator,
-      ConversationMemberCache memberCache) {
+      ConversationMemberCache memberCache,
+      UserProfileClient userProfileClient) {
     this.conversationMapper = conversationMapper;
     this.memberMapper = memberMapper;
     this.groupInfoMapper = groupInfoMapper;
@@ -57,6 +68,7 @@ public class ConversationService {
     this.c2cKeyGenerator = c2cKeyGenerator;
     this.conversationCreator = conversationCreator;
     this.memberCache = memberCache;
+    this.userProfileClient = userProfileClient;
   }
 
   public ConvInfo resolve(ResolveConvReq request) {
@@ -110,11 +122,23 @@ public class ConversationService {
     if (conversationId <= 0) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "conv_id must be positive");
     }
-    // 会话行（type/cs_status/agent_id 会频繁变动）始终实时读，保证 CS 路由新鲜
+    // C-3：非 CS 会话扇出不需要 cs_status/agent_id，且 type 不可变——命中类型缓存即可跳过实时读会话行。
+    Integer cachedType = convTypeCache.get(conversationId);
+    if (cachedType != null && cachedType != CONV_TYPE_CS) {
+      return new MembersResult(cachedMemberUserIds(tenantId, conversationId), cachedType, 0, 0L);
+    }
+
+    // 类型未知或为 CS：实时读会话行（CS 的 cs_status/agent_id 会频繁变动，必须新鲜）
     ConversationEntity conv = conversationMapper.selectById(conversationId);
     int convType = conv != null && conv.getType() != null ? conv.getType() : 0;
     int csStatus = (conv != null && conv.getCsStatus() != null) ? conv.getCsStatus() : 0;
     long agentId  = (conv != null && conv.getAgentId() != null)  ? conv.getAgentId()  : 0L;
+    if (convType > 0) {
+      if (convTypeCache.size() >= CONV_TYPE_CACHE_MAX) {
+        convTypeCache.clear();
+      }
+      convTypeCache.putIfAbsent(conversationId, convType);
+    }
 
     // 成员列表变动很少，走缓存（变更处显式失效 + 60s 兜底 TTL）
     List<Long> userIds = cachedMemberUserIds(tenantId, conversationId);
@@ -152,14 +176,22 @@ public class ConversationService {
     return new ConversationListResult(convs, false, currentVersion);
   }
 
+  /** 单次全量扫描的会话上限：兜底防止超大会话用户一次拉爆，正常用户远不及此。 */
+  private static final int MAX_SCAN_MEMBERSHIPS = 1000;
+
   private List<ConvInfo> listActiveMemberConvs(long userId, int effectiveLimit) {
+    // D-4：先取活跃会话（带安全上限），装配后按会话 last_msg_time 在内存排序再截断。
+    // 修正原"按 member.created_at 排 + LIMIT"——会把"很久前加入但最近很活跃"的会话挤出首屏
+    // （不是排序问题，是数据根本没返回，前端无法补救）。
     List<ConversationMemberEntity> memberships = memberMapper.selectList(
         Wrappers.lambdaQuery(ConversationMemberEntity.class)
             .eq(ConversationMemberEntity::getUserId, userId)
             .isNull(ConversationMemberEntity::getDeletedAt)
             .orderByDesc(ConversationMemberEntity::getCreatedAt)
-            .last("LIMIT " + effectiveLimit));
-    return buildConvInfos(userId, memberships);
+            .last("LIMIT " + MAX_SCAN_MEMBERSHIPS));
+    List<ConvInfo> convs = new ArrayList<>(buildConvInfos(userId, memberships));
+    convs.sort(Comparator.comparingLong(ConvInfo::getLastMsgTime).reversed());
+    return convs.size() > effectiveLimit ? new ArrayList<>(convs.subList(0, effectiveLimit)) : convs;
   }
 
   /**
@@ -177,6 +209,8 @@ public class ConversationService {
     Map<Long, ConversationEntity> convById = batchLoadConversations(convIds);
     Map<Long, Long> peerByConv = batchLoadC2cPeers(userId, convById);
     Map<Long, GroupInfoEntity> groupById = batchLoadGroups(convById);
+    // D-5：批量取 C2C 对端昵称/头像，填充会话列表展示信息（缺失则回退 peerUserId 文案）
+    Map<Long, UserProfileClient.PeerProfile> peerProfiles = loadPeerProfiles(peerByConv);
 
     List<ConvInfo> result = new ArrayList<>(memberships.size());
     for (ConversationMemberEntity member : memberships) {
@@ -194,9 +228,20 @@ public class ConversationService {
         }
       }
       long peerUserId = type == ConvType.C2C ? peerByConv.getOrDefault(conv.getId(), 0L) : 0L;
-      result.add(buildConvInfo(conv, peerUserId, member, group));
+      UserProfileClient.PeerProfile peerProfile =
+          type == ConvType.C2C ? peerProfiles.get(peerUserId) : null;
+      result.add(buildConvInfo(conv, peerUserId, member, group, peerProfile));
     }
     return result;
+  }
+
+  /** D-5：批量取对端资料；客户端缺失或异常时返回空 map，列表降级为 peerUserId 文案（不阻断列表）。 */
+  private Map<Long, UserProfileClient.PeerProfile> loadPeerProfiles(Map<Long, Long> peerByConv) {
+    if (peerByConv.isEmpty()) {
+      return Map.of();
+    }
+    Map<Long, UserProfileClient.PeerProfile> profiles = userProfileClient.batchGet(peerByConv.values());
+    return profiles == null ? Map.of() : profiles;
   }
 
   /** 增量事件 → ConvInfo（批量），保持事件顺序；缺失会话/成员按已删除处理。 */
@@ -475,12 +520,15 @@ public class ConversationService {
     GroupInfoEntity group = convType(conversation) == ConvType.GROUP
         ? loadGroupInfo(conversation.getGroupId())
         : null;
-    return buildConvInfo(conversation, peerUserId, member, group);
+    // 单条路径暂不补对端资料（C2C 标题回退 peerUserId，客户端可用本地用户缓存补齐）；
+    // 列表路径已批量填充（D-5）。
+    return buildConvInfo(conversation, peerUserId, member, group, null);
   }
 
-  /** 不查库的 ConvInfo 装配：群信息由调用方预取传入。 */
+  /** 不查库的 ConvInfo 装配：群信息、C2C 对端资料由调用方预取传入。 */
   private ConvInfo buildConvInfo(ConversationEntity conversation, long peerUserId,
-      ConversationMemberEntity member, GroupInfoEntity group) {
+      ConversationMemberEntity member, GroupInfoEntity group,
+      UserProfileClient.PeerProfile peerProfile) {
     ConvType type = convType(conversation);
     ConvInfo.Builder builder = ConvInfo.newBuilder()
         .setConvId(conversation.getId())
@@ -495,6 +543,13 @@ public class ConversationService {
         .setLastMsgAbstract(nullToBlank(conversation.getLastMsgAbstract()));
     if (conversation.getLastMsgTime() != null) {
       builder.setLastMsgTime(conversation.getLastMsgTime().toInstant(ZoneOffset.UTC).toEpochMilli());
+    }
+    // D-5：C2C 用对端昵称/头像填充展示信息；昵称缺失则保留 peerUserId 文案回退
+    if (type == ConvType.C2C && peerProfile != null) {
+      if (peerProfile.nickname() != null && !peerProfile.nickname().isBlank()) {
+        builder.setTitle(peerProfile.nickname());
+      }
+      builder.setAvatar(nullToBlank(peerProfile.avatar()));
     }
     if (type == ConvType.GROUP) {
       if (group == null) {

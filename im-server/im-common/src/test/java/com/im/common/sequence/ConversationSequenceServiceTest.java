@@ -21,7 +21,7 @@ class ConversationSequenceServiceTest {
   @Test
   void incrementsConversationSeqInDatabase() {
     when(sequenceMapper.incrementMaxSeq(501L)).thenReturn(1);
-    when(sequenceMapper.selectMaxSeq(501L)).thenReturn(3L);
+    when(sequenceMapper.selectAllocatedSeq()).thenReturn(3L);
 
     long seq = new ConversationSequenceService(sequenceMapper).nextSeq(501L);
 
@@ -48,9 +48,9 @@ class ConversationSequenceServiceTest {
   }
 
   @Test
-  void rejectsNullDatabaseResultAfterAllocate() {
+  void rejectsNonPositiveResultAfterAllocate() {
     when(sequenceMapper.incrementMaxSeq(501L)).thenReturn(1);
-    when(sequenceMapper.selectMaxSeq(501L)).thenReturn(null);
+    when(sequenceMapper.selectAllocatedSeq()).thenReturn(0L);
 
     assertThatThrownBy(() -> new ConversationSequenceService(sequenceMapper).nextSeq(501L))
         .isInstanceOf(ImException.class)

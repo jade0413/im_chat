@@ -18,6 +18,7 @@ message MsgSavedEvent {
   int64 server_msg_id = 4;
   int64 sender_id = 5;
   im.body.v1.MsgPush push_ready = 6;  // 预组装好的推送体，push 消费方免二次查询
+  string sender_conn_id = 7;          // 发起连接 ID（来自上行 ConnCtx）；push 时排除该连接避免发送方自回显（系统消息为空串）
 }
 
 // rk: msg.revoked.{tenant_id}  消费方：push（下发 RevokeNotify）

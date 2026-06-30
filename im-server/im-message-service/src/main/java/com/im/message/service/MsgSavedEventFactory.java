@@ -10,10 +10,14 @@ public class MsgSavedEventFactory {
   public static final String EVENT_TYPE = "msg.saved";
 
   public MsgSavedOutboxEvent create(long tenantId, MsgPush push) {
+    return create(tenantId, push, "");
+  }
+
+  public MsgSavedOutboxEvent create(long tenantId, MsgPush push, String senderConnId) {
     return new MsgSavedOutboxEvent(
         EVENT_TYPE,
         routingKey(tenantId),
-        toProto(tenantId, push).toByteArray());
+        toProto(tenantId, push, senderConnId).toByteArray());
   }
 
   public static String routingKey(long tenantId) {
@@ -21,6 +25,10 @@ public class MsgSavedEventFactory {
   }
 
   static MsgSavedEvent toProto(long tenantId, MsgPush push) {
+    return toProto(tenantId, push, "");
+  }
+
+  static MsgSavedEvent toProto(long tenantId, MsgPush push, String senderConnId) {
     return MsgSavedEvent.newBuilder()
         .setTenantId(tenantId)
         .setConvId(push.getConvId())
@@ -28,6 +36,7 @@ public class MsgSavedEventFactory {
         .setServerMsgId(push.getServerMsgId())
         .setSenderId(push.getSender().getUserId())
         .setPushReady(push)
+        .setSenderConnId(senderConnId == null ? "" : senderConnId)
         .build();
   }
 

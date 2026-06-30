@@ -17,6 +17,8 @@ export interface Conversation {
   peerUserId?: string;
   groupId?: string;
   maxSeq: string;
+  /** 本端已连续同步到的消息 seq；不能用服务端 maxSeq 替代 */
+  syncSeq?: string;
   /** 本端已读位置（用于未读角标计算） */
   readSeq: string;
   /** 对端已读位置（用于已读回执展示）；READ_NOTIFY 更新 */

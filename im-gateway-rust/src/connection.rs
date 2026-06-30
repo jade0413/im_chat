@@ -566,6 +566,7 @@ async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
         &mut ws_receiver,
         ctx.clone(),
         key.clone(),
+        handle.clone(),
         state.clone(),
         heartbeat_interval,
     )
@@ -586,9 +587,12 @@ async fn read_loop(
     receiver: &mut SplitStream<WebSocket>,
     ctx: ConnCtx,
     key: ConnKey,
+    handle: ConnectionHandle,
     state: AppState,
     heartbeat_interval: Duration,
 ) -> Result<()> {
+    // C-5：持有本连接 handle，避免对每个上行帧都做并发哈希查找 + 克隆整个 ConnectionHandle。
+    // 连接被踢/关闭由 writer 收到 close 信号关 socket → receiver 结束来感知，无需靠"查不到"判活。
     let idle_timeout = heartbeat_interval * 3;
     while let Ok(message) = time::timeout(idle_timeout, receiver.next()).await {
         let Some(message) = message else {
@@ -598,58 +602,37 @@ async fn read_loop(
         let payload = match message {
             Message::Binary(payload) => payload,
             Message::Close(_) => {
-                if let Some(handle) = state.registry.get(
-                    key.tenant_id,
-                    key.user_id,
-                    key.platform,
-                    key.conn_id.as_str(),
-                ) {
-                    handle.close();
-                }
+                handle.close();
                 break;
             }
             _ => continue,
         };
         let frame = frame_codec::decode_with_limit(&payload, state.config.max_frame_bytes)?;
         if frame.version < state.config.min_protocol_version {
-            if let Some(handle) = state.registry.get(
-                key.tenant_id,
-                key.user_id,
-                key.platform,
-                key.conn_id.as_str(),
-            ) {
-                let body = KickNotify {
-                    reason: PROTO_TOO_OLD_REASON,
-                    message: "protocol too old".to_string(),
-                }
-                .encode_to_vec();
-                handle.send_frame(frame_codec::new_frame(Cmd::Kick as i32, 0, body));
-                handle.close();
+            let body = KickNotify {
+                reason: PROTO_TOO_OLD_REASON,
+                message: "protocol too old".to_string(),
             }
+            .encode_to_vec();
+            handle.send_frame(frame_codec::new_frame(Cmd::Kick as i32, 0, body));
+            handle.close();
             break;
         }
         match frame.cmd {
             cmd if cmd == Cmd::Ping as i32 => {
-                if let Some(handle) = state.registry.get(
-                    key.tenant_id,
-                    key.user_id,
-                    key.platform,
-                    key.conn_id.as_str(),
-                ) {
-                    handle.send_frame(frame_codec::new_frame(
-                        Cmd::Pong as i32,
-                        frame.req_id,
-                        Vec::new(),
-                    ));
-                    if handle.should_refresh_route(state.config.route_renew_heartbeat_interval) {
-                        let rpc = state.rpc.clone();
-                        let heartbeat_ctx = ctx.clone();
-                        tokio::spawn(async move {
-                            if let Err(err) = rpc.refresh_route(heartbeat_ctx).await {
-                                warn!(?err, "failed to refresh route on heartbeat");
-                            }
-                        });
-                    }
+                handle.send_frame(frame_codec::new_frame(
+                    Cmd::Pong as i32,
+                    frame.req_id,
+                    Vec::new(),
+                ));
+                if handle.should_refresh_route(state.config.route_renew_heartbeat_interval) {
+                    let rpc = state.rpc.clone();
+                    let heartbeat_ctx = ctx.clone();
+                    tokio::spawn(async move {
+                        if let Err(err) = rpc.refresh_route(heartbeat_ctx).await {
+                            warn!(?err, "failed to refresh route on heartbeat");
+                        }
+                    });
                 }
             }
             cmd if cmd == Cmd::MsgRecvAck as i32 => {
@@ -691,18 +674,11 @@ async fn read_loop(
                             true,
                             dispatch_started.elapsed().as_millis() as u64,
                         );
-                        if let Some(handle) = state.registry.get(
-                            key.tenant_id,
-                            key.user_id,
-                            key.platform,
-                            key.conn_id.as_str(),
-                        ) {
-                            handle.send_frame(frame_codec::new_frame(
-                                response.cmd as i32,
-                                frame.req_id,
-                                response.body,
-                            ));
-                        }
+                        handle.send_frame(frame_codec::new_frame(
+                            response.cmd as i32,
+                            frame.req_id,
+                            response.body,
+                        ));
                     }
                     Err(err) => {
                         state.metrics.dispatch_completed(
@@ -719,22 +695,15 @@ async fn read_loop(
                             req_id = frame.req_id,
                             "dispatch failed"
                         );
-                        if let Some(handle) = state.registry.get(
-                            key.tenant_id,
-                            key.user_id,
-                            key.platform,
-                            key.conn_id.as_str(),
-                        ) {
-                            handle.send_frame(frame_codec::new_frame(
-                                Cmd::Error as i32,
+                        handle.send_frame(frame_codec::new_frame(
+                            Cmd::Error as i32,
+                            frame.req_id,
+                            frame_codec::gateway_error_body(
+                                INTERNAL_ERROR,
+                                "upstream unavailable",
                                 frame.req_id,
-                                frame_codec::gateway_error_body(
-                                    INTERNAL_ERROR,
-                                    "upstream unavailable",
-                                    frame.req_id,
-                                ),
-                            ));
-                        }
+                            ),
+                        ));
                     }
                 }
             }

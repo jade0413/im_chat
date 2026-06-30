@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +31,9 @@ public class OutboxPoller implements SmartLifecycle {
   private final Clock clock;
   private final String claimOwner;
   private final AtomicBoolean running = new AtomicBoolean(false);
+  // 提交后即时发布信号：write 成功提交即 release，poller 立刻醒来发布，
+  // 避免每条消息白等一个轮询间隔（D-1）。轮询仍作为漏发/失败兜底。
+  private final Semaphore wakeups = new Semaphore(0);
   private ExecutorService executor;
 
   @Autowired
@@ -91,18 +96,33 @@ public class OutboxPoller implements SmartLifecycle {
 
   private void pollLoop() {
     while (running.get()) {
-      pollOnce();
-      sleepInterval();
+      int published = pollOnce();
+      // 满批说明可能还有积压，立刻继续排空，不空等间隔
+      if (published >= properties.normalizedBatchSize()) {
+        wakeups.drainPermits();
+        continue;
+      }
+      awaitInterval();
     }
   }
 
-  private void sleepInterval() {
+  /** 等待"提交后唤醒"信号，最多等一个轮询间隔（兜底），有信号则立即返回。 */
+  private void awaitInterval() {
     try {
-      Thread.sleep(properties.normalizedInterval().toMillis());
+      wakeups.drainPermits();
+      wakeups.tryAcquire(properties.normalizedInterval().toMillis(), TimeUnit.MILLISECONDS);
     } catch (InterruptedException ex) {
       Thread.currentThread().interrupt();
       running.set(false);
     }
+  }
+
+  /**
+   * 唤醒轮询线程立即发布（best-effort）。由 {@link OutboxWriter} 在事务提交后调用，
+   * 使常态推送延迟≈0；即便漏掉唤醒，下一轮间隔轮询也会补发。
+   */
+  public void wakeup() {
+    wakeups.release();
   }
 
   private int pollOnceBatch() {

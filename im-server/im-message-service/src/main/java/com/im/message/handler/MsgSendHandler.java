@@ -49,9 +49,14 @@ public class MsgSendHandler implements CmdHandler {
       return MsgSendAck.newBuilder()
           .setCode(ex.errorCode().code())
           .setClientMsgId(request.getClientMsgId())
+          .setConvId(fallbackConvId(request))
           .build()
           .toByteArray();
     }
+  }
+
+  private long fallbackConvId(MsgSend request) {
+    return request.getTargetCase() == MsgSend.TargetCase.CONV_ID ? request.getConvId() : 0L;
   }
 
   private MsgSend parse(byte[] body) {

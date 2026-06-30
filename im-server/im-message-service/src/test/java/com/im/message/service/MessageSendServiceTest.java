@@ -91,7 +91,6 @@ class MessageSendServiceTest {
   @Test
   void rejectsWhenBlockedByPeer() {
     when(idempotencyService.findExisting("client-1")).thenReturn(null);
-    when(idempotencyService.tryAcquire(1L, "client-1")).thenReturn(true);
     org.mockito.Mockito.doThrow(new ImException(ErrorCode.BLOCKED_BY_PEER))
         .when(relationClient).ensureCanSendC2c(100L, 200L);
 
@@ -99,6 +98,7 @@ class MessageSendServiceTest {
         .isInstanceOf(ImException.class)
         .extracting("errorCode")
         .isEqualTo(ErrorCode.BLOCKED_BY_PEER);
+    verify(idempotencyService, never()).tryAcquire(1L, "client-1");
     verify(conversationResolver, never()).resolve(ctx(), request());
   }
 
@@ -107,6 +107,7 @@ class MessageSendServiceTest {
     MessageEntity existing = existingMessage();
     MessageSendResult expected = new MessageSendResult(9001L, 501L, 3L, 1000L);
     when(idempotencyService.findExisting("client-1")).thenReturn(null);
+    when(conversationResolver.resolve(ctx(), request())).thenReturn(conv());
     when(idempotencyService.tryAcquire(1L, "client-1")).thenReturn(false);
     when(idempotencyService.waitForExisting("client-1")).thenReturn(existing);
     when(assembler.toResult(existing)).thenReturn(expected);

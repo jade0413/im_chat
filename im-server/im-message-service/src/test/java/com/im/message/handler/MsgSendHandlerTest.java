@@ -53,6 +53,22 @@ class MsgSendHandlerTest {
     MsgSendAck ack = MsgSendAck.parseFrom(responseBody);
     assertThat(ack.getCode()).isEqualTo(ErrorCode.MSG_TOO_LARGE.code());
     assertThat(ack.getClientMsgId()).isEqualTo("client-1");
+    assertThat(ack.getConvId()).isZero();
+  }
+
+  @Test
+  void returnsMsgSendAckWithConvIdForExistingConversationBusinessError() throws Exception {
+    MsgSend request = convRequest("client-1", 501L);
+    when(messageSendService.send(ctx(), request))
+        .thenThrow(new ImException(ErrorCode.FRIEND_REQUIRED));
+
+    byte[] responseBody = new MsgSendHandler(messageSendService)
+        .handle(ctx(), request.toByteArray());
+
+    MsgSendAck ack = MsgSendAck.parseFrom(responseBody);
+    assertThat(ack.getCode()).isEqualTo(ErrorCode.FRIEND_REQUIRED.code());
+    assertThat(ack.getClientMsgId()).isEqualTo("client-1");
+    assertThat(ack.getConvId()).isEqualTo(501L);
   }
 
   @Test
@@ -71,6 +87,15 @@ class MsgSendHandlerTest {
     return MsgSend.newBuilder()
         .setClientMsgId(clientMsgId)
         .setToUserId(200L)
+        .setContent(MsgContent.newBuilder()
+            .setText(TextContent.newBuilder().setText("hello")))
+        .build();
+  }
+
+  private MsgSend convRequest(String clientMsgId, long convId) {
+    return MsgSend.newBuilder()
+        .setClientMsgId(clientMsgId)
+        .setConvId(convId)
         .setContent(MsgContent.newBuilder()
             .setText(TextContent.newBuilder().setText("hello")))
         .build();

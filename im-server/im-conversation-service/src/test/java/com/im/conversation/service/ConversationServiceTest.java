@@ -57,6 +57,9 @@ class ConversationServiceTest {
   @Mock
   private com.im.common.conversation.ConversationMemberCache memberCache;
 
+  @Mock
+  private UserProfileClient userProfileClient;
+
   private ConversationService service;
 
   @BeforeEach
@@ -69,7 +72,8 @@ class ConversationServiceTest {
         userConvEventMapper,
         new C2cKeyGenerator(),
         conversationCreator,
-        memberCache);
+        memberCache,
+        userProfileClient);
   }
 
   @Test

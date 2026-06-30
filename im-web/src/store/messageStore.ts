@@ -7,6 +7,7 @@ interface MessageState {
   hasMore: Map<string, boolean>;
   appendMessages: (convId: string, messages: ChatMessage[]) => void;
   prependHistory: (convId: string, messages: ChatMessage[], hasMore: boolean) => void;
+  setHasMore: (convId: string, hasMore: boolean) => void;
   addOptimistic: (message: ChatMessage) => void;
   updateByClientMsgId: (convId: string, clientMsgId: string, patch: Partial<ChatMessage>) => void;
   revokeMessage: (convId: string, seq: string) => void;
@@ -28,6 +29,13 @@ export const useMessageStore = create<MessageState>((set) => ({
       const hasMoreMap = new Map(state.hasMore);
       hasMoreMap.set(convId, hasMore);
       return { messages, hasMore: hasMoreMap };
+    }),
+
+  setHasMore: (convId, hasMore) =>
+    set((state) => {
+      const hasMoreMap = new Map(state.hasMore);
+      hasMoreMap.set(convId, hasMore);
+      return { hasMore: hasMoreMap };
     }),
 
   addOptimistic: (message) =>

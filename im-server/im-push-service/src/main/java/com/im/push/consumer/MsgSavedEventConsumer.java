@@ -67,12 +67,16 @@ public class MsgSavedEventConsumer {
       ConvMembersResult result = conversationMemberClient.getMembersResult(event.getConvId());
       List<Long> recipients = buildRecipients(result, event);
 
+      // 排除发起连接：发送方其发起连接已通过 MSG_SEND_ACK 获知结果，无需再收自己消息的 MSG_PUSH 回显。
+      // 仅排"发起连接"（excludeConnId），保留发送方其他端的实时多端同步；系统消息 sender_conn_id 为空串时不排除。
       pushDispatchService.pushToUsers(
           event.getTenantId(),
           recipients,
           Cmd.MSG_PUSH_VALUE,
           event.getPushReady().toByteArray(),
-          true);
+          true,
+          event.getSenderId(),
+          event.getSenderConnId());
     });
   }
 

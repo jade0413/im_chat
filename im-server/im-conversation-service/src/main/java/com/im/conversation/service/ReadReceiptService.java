@@ -57,9 +57,10 @@ public class ReadReceiptService {
           .eq(ConversationMemberEntity::getUserId, ctx.getUserId())
           .isNull(ConversationMemberEntity::getDeletedAt)
           .lt(ConversationMemberEntity::getReadSeq, request.getReadSeq()));
-      ConversationMemberEntity latest = findMember(request.getConvId(), ctx.getUserId());
-      effectiveReadSeq = latest == null ? request.getReadSeq() : nullToZero(latest.getReadSeq());
-      changed = updated > 0 && effectiveReadSeq == request.getReadSeq();
+      // read_seq 单调（UPDATE 带 lt 守卫）：updated>0 说明本次把它推进到了 request.getReadSeq()；
+      // updated==0 说明已有并发更新到 >=request，取两者较大值即可，无需再回查一次（C-6）。
+      changed = updated > 0;
+      effectiveReadSeq = changed ? request.getReadSeq() : Math.max(currentReadSeq, request.getReadSeq());
     }
 
     ReadNotify notify = ReadNotify.newBuilder()

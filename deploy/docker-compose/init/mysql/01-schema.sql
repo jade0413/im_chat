@@ -19,7 +19,7 @@ CREATE TABLE tenant_config (
   tenant_id          BIGINT NOT NULL,
   multi_device_policy JSON  NULL COMMENT 'D11 三平台类各限几台,默认{"MOBILE":1,"DESKTOP":1,"WEB":1}',
   max_group_members  INT    NOT NULL DEFAULT 500 COMMENT 'D13',
-  friend_required    TINYINT NOT NULL DEFAULT 0 COMMENT 'D17 好友制开关',
+  friend_required    TINYINT NOT NULL DEFAULT 1 COMMENT 'D17 好友制开关，默认开启',
   msg_retention_days INT    NOT NULL DEFAULT 365 COMMENT '§13.5 保留策略',
   plan_features      JSON   NULL,
   PRIMARY KEY (tenant_id)

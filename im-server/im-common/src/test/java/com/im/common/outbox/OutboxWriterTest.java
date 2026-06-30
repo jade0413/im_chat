@@ -48,9 +48,10 @@ class OutboxWriterTest {
 
   @Test
   void rejectsOversizedPayloadBeforeDatabaseWrite() {
-    OutboxWriter writer = new OutboxWriter(outboxMapper);
+    OutboxWriter writer = new OutboxWriter(outboxMapper, Clock.systemUTC());
 
-    assertThatThrownBy(() -> writer.write(1L, "msg.saved", "msg.saved.1", new byte[16_385]))
+    // 列已放宽为 MEDIUMBLOB（V11/R-1），防御上限提到 1MB；超过才拒绝。
+    assertThatThrownBy(() -> writer.write(1L, "msg.saved", "msg.saved.1", new byte[1_048_577]))
         .isInstanceOf(ImException.class)
         .extracting("errorCode")
         .isEqualTo(ErrorCode.VALIDATION_FAILED);

@@ -36,12 +36,15 @@ WSS 连接 → 5s 内必须发 AUTH（否则断）→ 网关 gRPC VerifyToken（
 ## 3. req/ack 配对与可靠性
 
 - `req_id`：客户端连接内自增；同步语义帧（MSG_SEND/SYNC_REQ/READ_REPORT）的响应帧回带同 req_id；不需 ack 的服务端主动推送 req_id=0；`PushEnvelope.need_ack=true` 的下行帧由网关分配非 0 req_id（D28），客户端 `MSG_RECV_ACK` 必须回带同 req_id
-- 客户端对 MSG_SEND 维护待确认队列：5s 无 MSG_SEND_ACK → 原 client_msg_id 重发（服务端幂等去重）→ 3 次失败标记发送失败
+- 客户端对 MSG_SEND 维护待确认队列（pendingMap：clientMsgId → {convId, body, sentAt}），收到 MSG_SEND_ACK 即出队；客户端生成 client_msg_id 保证服务端幂等去重。
+  - **im-web 当前实现（与早期"5s 定时重试 3 次"设计不同，以实现为准）**：单连接内**不做定时重发**——MSG_SEND 只在发送时投递一次；仅在 ① **重连成功（AUTH_ACK 后）** `drainPending()` 补发仍在队列中的消息，或 ② **用户手动重试** failed 消息时再次发送。pending 消息超过 `PENDING_TTL_MS = 60s`（按 sentAt 计）在 drain 时直接标记 failed。
+  - 影响：连接未断但服务端漏回 ACK 时，消息会停在 `sending` 直到下次重连或手动重试才补发（不会 5s 自动补）。若需"连接内发送超时自动补发"，须另加定时器，属待办。
 - 服务端推送可靠性：PushEnvelope.need_ack=true 的帧（MSG_PUSH），网关按 `req_id` 跟踪 MSG_RECV_ACK，不解码业务 ack body，不重推——
   对半死链重推 N 次照样全丢，是无效功。改用**死链判定**：
   10s 未收到 ack → 网关判定该连接为半死链 → 主动断开 + 清路由 → 客户端检测到断连立即自动重连 → 重连必发 SYNC_REQ → seq 对齐补回全部缺失。
   效果：在线接收方的最坏空窗 ≈ 10s(ack超时) + 重连耗时，且一次同步补齐所有积压，无重复消息；
   真离线的接收方走下次上线同步 + 离线推送通知（二阶段 APNs/FCM）。
+- 已知冗余（待优化，见 CLAUDE.md Open Questions「发送方自回显 MSG_PUSH 去重」）：C2C 推送成员含发送者本人且未排除发起连接，发送方发起连接会收到自己消息的 MSG_PUSH 回显（多 1 下行 + 1 上行 ack/条）。客户端按 `client_msg_id` 去重，无重复气泡，仅浪费帧。正确修复需 `MsgSavedEvent` 增 `sender_conn_id` 并在 push 时 `excludeConnId`（保留发送方其他端的实时多端同步）。read-notify 扇出已正确去重发起连接，无此问题。
   （对比重推方案：需服务端每消息定时器 + 客户端去重，半死链场景下依然无效，复杂度高收益负）
 
 ## 4. 关键设计点

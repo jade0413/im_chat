@@ -47,18 +47,17 @@ public class MessageSendService {
     if (existing != null) {
       return assembler.toResult(existing);
     }
-    if (!idempotencyService.tryAcquire(tenantId, request.getClientMsgId())) {
-      return assembler.toResult(idempotencyService.waitForExisting(request.getClientMsgId()));
-    }
-
     if (request.getTargetCase() == MsgSend.TargetCase.TO_USER_ID) {
       relationClient.ensureCanSendC2c(ctx.getUserId(), request.getToUserId());
     }
     ConvInfo conv = conversationResolver.resolve(ctx, request);
-    if (request.getTargetCase() == MsgSend.TargetCase.CONV_ID && conv.getType() == ConvType.C2C) {
-      relationClient.ensureCanSendC2c(ctx.getUserId(), conv.getPeerUserId());
-    }
+    ensureExistingConversationPolicy(ctx, request, conv);
     fileReferenceValidator.ensureReferencesConfirmed(tenantId, request.getContent());
+
+    if (!idempotencyService.tryAcquire(tenantId, request.getClientMsgId())) {
+      return assembler.toResult(idempotencyService.waitForExisting(request.getClientMsgId()));
+    }
+
     try {
       return persistService.persist(tenantId, ctx, request, conv);
     } catch (DuplicateKeyException ex) {
@@ -68,6 +67,13 @@ public class MessageSendService {
       }
       throw new ImException(ErrorCode.INTERNAL_ERROR, "duplicated message but row not found", ex);
     }
+  }
+
+  private void ensureExistingConversationPolicy(ConnCtx ctx, MsgSend request, ConvInfo conv) {
+    if (request.getTargetCase() != MsgSend.TargetCase.CONV_ID || conv.getType() != ConvType.C2C) {
+      return;
+    }
+    relationClient.ensureCanSendC2c(ctx.getUserId(), conv.getPeerUserId());
   }
 
   private long validateContext(ConnCtx ctx) {

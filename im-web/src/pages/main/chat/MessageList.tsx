@@ -3,6 +3,7 @@ import { Alert, Spin } from 'antd';
 import { useMessages } from '../../../hooks/useMessages';
 import { useInfiniteScroll } from '../../../hooks/useInfiniteScroll';
 import { useConvStore } from '../../../store/convStore';
+import { imSocket } from '../../../socket/ImSocket';
 import { compareIdLike } from '../../../utils/id';
 import { MessageBubble } from './MessageBubble';
 import { TimeDivider, TIME_GAP_MS } from './TimeDivider';
@@ -17,10 +18,11 @@ export function MessageList({ convId }: { convId: string }) {
   const endRef = useRef<HTMLDivElement>(null);
   const conv = useConvStore((state) => state.conversations.get(convId));
   const historyEnabled = !(conv?.type === 3 && conv.csStatus === '1');
-  const { messages, hasMore, loadingHistory, historyError, loadHistory, loadLatest } = useMessages(convId, {
+  const { messages, hasMore, loadingHistory, historyError, loadHistory } = useMessages(convId, {
     enabled: historyEnabled,
   });
   const convMaxSeq = conv?.maxSeq ?? '0';
+  const syncSeq = conv?.syncSeq ?? '0';
 
   // F2：进入会话时若无消息则加载历史；若本地消息落后于 convMaxSeq 则补齐
   useEffect(() => {
@@ -28,16 +30,16 @@ export function MessageList({ convId }: { convId: string }) {
       scrollToBottom('auto');
       return;
     }
-    const localMaxSeq = messages.length > 0 ? (messages[messages.length - 1].seq ?? '0') : '0';
-    const hasGap = compareIdLike(convMaxSeq, localMaxSeq) > 0;
+    const hasGap = compareIdLike(convMaxSeq, syncSeq) > 0;
+    if (hasGap) {
+      imSocket.sendSyncReq();
+    }
     if (messages.length === 0 && hasMore) {
       void loadHistory();
-    } else if (hasGap) {
-      void loadLatest();
     }
     // 切换会话时立即滚到底
     scrollToBottom('auto');
-  }, [convId, historyEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [convId, historyEnabled, convMaxSeq, syncSeq]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 在超过 5 分钟间隔的消息之间插入时间分割线
   const items = useMemo<ListItem[]>(() => {

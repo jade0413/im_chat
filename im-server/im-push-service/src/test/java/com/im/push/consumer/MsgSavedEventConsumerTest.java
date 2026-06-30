@@ -53,7 +53,9 @@ class MsgSavedEventConsumerTest {
         List.of(100L, 200L),
         Cmd.MSG_PUSH_VALUE,
         event.getPushReady().toByteArray(),
-        true);
+        true,
+        100L,
+        "conn-sender");
   }
 
   @Test
@@ -71,7 +73,9 @@ class MsgSavedEventConsumerTest {
         org.mockito.Mockito.anyCollection(),
         org.mockito.Mockito.anyInt(),
         org.mockito.Mockito.any(),
-        org.mockito.Mockito.anyBoolean());
+        org.mockito.Mockito.anyBoolean(),
+        org.mockito.Mockito.anyLong(),
+        org.mockito.Mockito.anyString());
   }
 
   private MsgSavedEvent event() {
@@ -81,6 +85,7 @@ class MsgSavedEventConsumerTest {
         .setSeq(1L)
         .setServerMsgId(9001L)
         .setSenderId(100L)
+        .setSenderConnId("conn-sender")
         .setPushReady(MsgPush.newBuilder()
             .setConvId(501L)
             .setSeq(1L)
