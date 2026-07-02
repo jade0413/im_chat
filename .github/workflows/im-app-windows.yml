@@ -47,7 +47,7 @@ jobs:
       - name: Generate Dart sources
         shell: pwsh
         run: |
-          bash ./tool/generate_proto.sh
+          .\tool\generate_proto.ps1
           dart run build_runner build --delete-conflicting-outputs
 
       - name: Analyze

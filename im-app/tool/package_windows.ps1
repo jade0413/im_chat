@@ -12,10 +12,7 @@ Write-Host "Resolving Flutter dependencies..."
 flutter pub get
 
 Write-Host "Generating protobuf bindings..."
-if (!(Get-Command bash -ErrorAction SilentlyContinue)) {
-  throw "Git Bash is required to run tool/generate_proto.sh"
-}
-bash ./tool/generate_proto.sh
+& (Join-Path $ProjectDir "tool\generate_proto.ps1")
 
 Write-Host "Generating Drift bindings..."
 dart run build_runner build --delete-conflicting-outputs
