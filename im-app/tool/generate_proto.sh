@@ -18,6 +18,9 @@ APP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROTO_ROOT="$(cd "$APP_DIR/../im-proto/proto" && pwd)"
 OUT_DIR="$APP_DIR/lib/core/proto/generated"
 export PATH="$PATH:$HOME/.pub-cache/bin"
+if [[ -n "${LOCALAPPDATA:-}" ]] && command -v cygpath >/dev/null 2>&1; then
+  export PATH="$PATH:$(cygpath -u "$LOCALAPPDATA")/Pub/Cache/bin"
+fi
 
 if ! command -v protoc >/dev/null 2>&1; then
   echo "✗ 未找到 protoc，请先安装：brew install protobuf（mac）/ choco install protoc（win）"; exit 1

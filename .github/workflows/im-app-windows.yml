@@ -36,6 +36,20 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Install protobuf generator
+        shell: pwsh
+        run: |
+          choco install protoc --no-progress -y
+          dart pub global activate protoc_plugin
+          $pubCacheBin = Join-Path $env:LOCALAPPDATA "Pub\Cache\bin"
+          Add-Content -Path $env:GITHUB_PATH -Value $pubCacheBin
+
+      - name: Generate Dart sources
+        shell: pwsh
+        run: |
+          bash ./tool/generate_proto.sh
+          dart run build_runner build --delete-conflicting-outputs
+
       - name: Analyze
         run: flutter analyze
 
