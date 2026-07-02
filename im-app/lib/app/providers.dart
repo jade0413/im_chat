@@ -148,9 +148,12 @@ final imEngineProvider = Provider<ImEngine>((ref) {
     currentUser: () => ref.read(authControllerProvider).user,
     onAuthExpired: () =>
         ref.read(authControllerProvider.notifier).handleAuthExpired('账号已下线'),
-    onKicked: (kick) => ref
-        .read(authControllerProvider.notifier)
-        .handleKicked(kick.message.isEmpty ? '当前账号已在其他设备登录' : kick.message),
+    onKicked: (kick) {
+      final message = kick.message;
+      ref
+          .read(authControllerProvider.notifier)
+          .handleKicked(message.isEmpty ? '当前账号已在其他设备登录' : message);
+    },
     getDeviceId: tokens.getOrCreateDeviceId,
     getAccessToken: tokens.readAccessToken,
   );

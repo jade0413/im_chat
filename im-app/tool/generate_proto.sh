@@ -18,8 +18,17 @@ APP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROTO_ROOT="$(cd "$APP_DIR/../im-proto/proto" && pwd)"
 OUT_DIR="$APP_DIR/lib/core/proto/generated"
 export PATH="$PATH:$HOME/.pub-cache/bin"
+PROTO_ROOT_ARG="$PROTO_ROOT"
+OUT_DIR_ARG="$OUT_DIR"
+PROTOC_GEN_DART_PLUGIN=""
 if [[ -n "${LOCALAPPDATA:-}" ]] && command -v cygpath >/dev/null 2>&1; then
-  export PATH="$PATH:$(cygpath -u "$LOCALAPPDATA")/Pub/Cache/bin"
+  PUB_CACHE_BIN="$(cygpath -u "$LOCALAPPDATA")/Pub/Cache/bin"
+  export PATH="$PATH:$PUB_CACHE_BIN"
+  PROTO_ROOT_ARG="$(cygpath -w "$PROTO_ROOT")"
+  OUT_DIR_ARG="$(cygpath -w "$OUT_DIR")"
+  if [[ -f "$PUB_CACHE_BIN/protoc-gen-dart.bat" ]]; then
+    PROTOC_GEN_DART_PLUGIN="$(cygpath -w "$PUB_CACHE_BIN/protoc-gen-dart.bat")"
+  fi
 fi
 
 if ! command -v protoc >/dev/null 2>&1; then
@@ -44,12 +53,25 @@ PROTO_FILES=(
 )
 
 echo "→ protoc 生成 Dart 绑定到 $OUT_DIR"
-protoc \
-  --proto_path="$PROTO_ROOT" \
-  --dart_out="$OUT_DIR" \
-  "${PROTO_FILES[@]}"
+if [[ -n "$PROTOC_GEN_DART_PLUGIN" ]]; then
+  protoc \
+    --plugin="protoc-gen-dart=$PROTOC_GEN_DART_PLUGIN" \
+    --proto_path="$PROTO_ROOT_ARG" \
+    --dart_out="$OUT_DIR_ARG" \
+    "${PROTO_FILES[@]}"
+else
+  protoc \
+    --proto_path="$PROTO_ROOT_ARG" \
+    --dart_out="$OUT_DIR_ARG" \
+    "${PROTO_FILES[@]}"
+fi
+
+if [[ ! -f "$OUT_DIR/ws/frame.pb.dart" ]]; then
+  echo "✗ protoc 执行后未找到生成文件：$OUT_DIR/ws/frame.pb.dart"
+  exit 1
+fi
 
 echo "✓ 完成。生成文件："
-ls -1 "$OUT_DIR"
+find "$OUT_DIR" -type f -name '*.dart' | sort
 echo ""
 echo "提示：改了 im-proto 后必须重跑本脚本，并保证 Rust/Java/Dart 三端同时编译通过（核心约定 5）。"
