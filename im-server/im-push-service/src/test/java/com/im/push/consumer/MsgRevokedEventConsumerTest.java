@@ -46,7 +46,8 @@ class MsgRevokedEventConsumerTest {
         org.mockito.Mockito.eq(List.of(100L, 200L)),
         org.mockito.Mockito.eq(Cmd.REVOKE_NOTIFY_VALUE),
         bodyCaptor.capture(),
-        org.mockito.Mockito.eq(true));
+        // 协议 §3：need_ack=true 仅 MSG_PUSH；REVOKE_NOTIFY 不做送达跟踪
+        org.mockito.Mockito.eq(false));
     RevokeNotify notify = RevokeNotify.parseFrom(bodyCaptor.getValue());
     assertThat(notify.getConvId()).isEqualTo(501L);
     assertThat(notify.getSeq()).isEqualTo(3L);

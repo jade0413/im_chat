@@ -233,7 +233,10 @@ class ImEngine {
   // ─── 下行：帧分发 ───────────────────────────────────────
 
   void _handleBusinessFrame(pb.Frame frame) {
-    final body = Uint8List.fromList(frame.body);
+    // frame.body 通常已是 Uint8List（protobuf 生成物内部表示），避免无谓整帧拷贝。
+    final rawBody = frame.body;
+    final body =
+        rawBody is Uint8List ? rawBody : Uint8List.fromList(rawBody);
     switch (frame.cmd) {
       case pb.Cmd.MSG_PUSH:
         unawaited(_handleMsgPush(body, frame.reqId));
@@ -243,15 +246,35 @@ class ImEngine {
         unawaited(_handleSyncResp(body));
       case pb.Cmd.READ_NOTIFY:
         unawaited(_handleReadNotify(body));
+        _ackPushIfNeeded(frame.reqId);
       case pb.Cmd.REVOKE_NOTIFY:
         unawaited(_handleRevokeNotify(body));
+        _ackPushIfNeeded(frame.reqId);
       case pb.Cmd.CONV_NOTIFY:
         unawaited(_handleConvNotify(body));
+        _ackPushIfNeeded(frame.reqId);
       case pb.Cmd.ERROR:
         _handleError(body);
       default:
         _log.fine('unhandled cmd=${frame.cmd}');
+        // 未知推送帧同样遵守 D28：带非 0 req_id 即回 ack，
+        // 服务端新增 need_ack 推送类型时旧客户端不至于被判半死链踢断。
+        _ackPushIfNeeded(frame.reqId);
     }
+  }
+
+  /// D28 防御性泛化：任何服务端主动推送若带非 0 req_id（need_ack=true），
+  /// 都必须回 MSG_RECV_ACK 回带同 req_id，否则网关 10s 判半死链断连。
+  /// 协议现状仅 MSG_PUSH 是 need_ack（其 ack 在 _handleMsgPush 内带 conv/seq
+  /// 回执）；其余推送帧回空 items——网关只认 req_id，Java OnPushAcked 对空
+  /// items 无副作用。
+  void _ackPushIfNeeded(Int64 reqId) {
+    if (reqId == Int64.ZERO) return;
+    _socket.send(
+      pb.Cmd.MSG_RECV_ACK,
+      WsMappers.buildRecvAck(const []),
+      reqId: reqId,
+    );
   }
 
   Future<void> _handleMsgPush(Uint8List body, Int64 reqId) async {

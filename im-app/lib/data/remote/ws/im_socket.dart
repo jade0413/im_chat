@@ -181,7 +181,9 @@ class ImSocket {
     if (data is! List<int>) return;
     pb.Frame frame;
     try {
-      frame = pb.decodeFrame(Uint8List.fromList(data));
+      // dart:io WebSocket 的二进制帧本就是 Uint8List，避免每帧一次整帧拷贝。
+      frame = pb.decodeFrame(
+          data is Uint8List ? data : Uint8List.fromList(data));
     } catch (e) {
       _log.warning('frame decode failed: $e');
       return;
@@ -266,6 +268,10 @@ class ImSocket {
     if (!_isActive(generation)) return;
     _log.warning('socket error: $e');
     if (!_hasAuthAck) _setState(ConnectionState.error, detail: '$e');
+    // cancelOnError=true：错误后订阅已取消，onDone 不会再触发。
+    // 必须在此走与 onDone 相同的清理+重连路径，否则认证后的 socket error
+    // 会留下"假在线"连接，只能靠 2.5×心跳的存活看门狗兜底（最长 ~75s 收发黑洞）。
+    _onDone(generation);
   }
 
   void _onDone(int generation) {

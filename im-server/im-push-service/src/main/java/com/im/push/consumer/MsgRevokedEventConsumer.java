@@ -49,12 +49,16 @@ public class MsgRevokedEventConsumer {
           .setReason(reason(event.getReason()))
           .setOperatorUserId(event.getOperatorUserId())
           .build();
+      // 2026-07-02 客户端联调审查修正：协议 §3 约定 need_ack=true 仅用于 MSG_PUSH。
+      // 此前误传 true——客户端只对 MSG_PUSH 回 MSG_RECV_ACK，REVOKE_NOTIFY 带非 0
+      // req_id 却无人 ack，在线端收到撤回 10s 后被网关判半死链踢断。
+      // 撤回通知不需送达跟踪：漏收由重连 SYNC / 历史拉取兜底（status=REVOKED）。
       pushDispatchService.pushToUsers(
           event.getTenantId(),
           memberUserIds,
           Cmd.REVOKE_NOTIFY_VALUE,
           notify.toByteArray(),
-          true);
+          false);
     });
   }
 
