@@ -101,6 +101,7 @@ vim .env
 
 - `MYSQL_ROOT_PASSWORD` / `REDIS_PASSWORD` / `RABBITMQ_PASSWORD` / `MINIO_ROOT_PASSWORD`：全部换强密码。
 - `JWT_SECRET`：≥ 32 字符的随机串（`openssl rand -base64 48`）。换它等于使全部已签发 token 失效，部署前定好不要再动。
+- `IM_WORKER_ID`：同一个 Redis 下每个 `im-server` 实例必须唯一。单机单实例保持默认 `2`；如果同一台 Redis 上跑了另一套环境或另一个服务端实例，改成未占用的数字。
 - `IM_GATEWAY_ALLOWED_ORIGINS`：改成真实 Web 域名（如 `https://im.example.com`），默认的 `localhost` 在生产会拒绝正常握手或放行任意来源。
 - `GRAFANA_PASSWORD`：若启用观测栈，换掉默认 `admin`。
 
@@ -143,6 +144,7 @@ docker compose --profile app up -d --build
 - **构建上下文是仓库根目录**（compose 里 `context: ../..`），因为 im-server 和 im-gateway 都要读同级 `im-proto`。从 `deploy/docker-compose/` 目录执行即可，不要 cd 到别处。
 - 三个镜像：`im-server`(Java)、`im-gateway`(Rust)、`im-web`(nginx 静态)。Rust 首次编译较慢，已配 cargo/maven 构建缓存挂载，二次构建会快。
 - **im-server 启动自检 fail-fast**（`IM_STARTUP_CHECK_ENABLED=true`）：MySQL 表、Redis、RabbitMQ exchange、MinIO bucket、workerId 租约任一失败直接退出。容器起不来先看 `docker compose logs im-server`，自检日志会指明哪一项没过。
+- 如果日志里出现 `snowflake worker_id lease conflict`，说明当前 `IM_WORKER_ID` 已被同一 Redis 里的其他实例占用；确认没有旧实例后等待租约 TTL 过期再重启，或给本实例配置新的 `IM_WORKER_ID`。
 - RabbitMQ 的 `im.events` exchange 和队列由 im-server 启动时声明，不在编排层建。
 
 端口（容器对宿主）：

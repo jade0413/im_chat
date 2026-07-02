@@ -25,16 +25,27 @@ class FileApi {
   /// PUT 直传到 MinIO 预签名 URL（不带我们的 Authorization，用裸 Dio）。
   Future<void> uploadDirect(PresignResult presign, Uint8List bytes) async {
     final raw = Dio();
+    final contentType =
+        _headerValue(presign.headers, Headers.contentTypeHeader);
     await raw.put<void>(
       presign.uploadUrl,
       data: Stream.fromIterable([bytes]),
       options: Options(
+        contentType: contentType,
         headers: {
           ...presign.headers,
           Headers.contentLengthHeader: bytes.length,
         },
       ),
     );
+  }
+
+  String? _headerValue(Map<String, String> headers, String name) {
+    final lowerName = name.toLowerCase();
+    for (final entry in headers.entries) {
+      if (entry.key.toLowerCase() == lowerName) return entry.value;
+    }
+    return null;
   }
 
   /// 确认对象已成功写入 MinIO，服务端会校验 size/mime 并把 file_meta 标记为 CONFIRMED。

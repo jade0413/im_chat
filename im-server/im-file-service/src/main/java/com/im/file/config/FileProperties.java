@@ -23,6 +23,8 @@ public record FileProperties(
       "image/png",
       "image/webp",
       "image/gif",
+      "image/heic",
+      "image/heif",
       "audio/aac",
       "audio/mpeg",
       "audio/ogg",
@@ -34,6 +36,10 @@ public record FileProperties(
       "video/quicktime",
       "application/pdf",
       "application/zip",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "application/octet-stream",
       "text/plain");
 

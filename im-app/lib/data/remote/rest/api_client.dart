@@ -54,14 +54,33 @@ class ApiClient {
                 requestOptions: response.requestOptions,
                 response: response,
                 type: DioExceptionType.badResponse,
-                error: ApiException(
-                    code, (data['message'] ?? '请求失败').toString()),
+                error:
+                    ApiException(code, (data['message'] ?? '请求失败').toString()),
               ));
               return;
             }
             response.data = data['data'];
           }
           handler.next(response);
+        },
+        onError: (error, handler) {
+          final data = error.response?.data;
+          if (data is Map && data.containsKey('code')) {
+            final code = (data['code'] as num?)?.toInt() ??
+                error.response?.statusCode ??
+                -1;
+            final message = (data['message'] ?? '请求失败').toString();
+            handler.next(DioException(
+              requestOptions: error.requestOptions,
+              response: error.response,
+              type: error.type,
+              error: ApiException(code, message),
+              message: message,
+              stackTrace: error.stackTrace,
+            ));
+            return;
+          }
+          handler.next(error);
         },
       );
 
@@ -160,4 +179,30 @@ class ApiException implements Exception {
   final String message;
   @override
   String toString() => 'ApiException($code, $message)';
+}
+
+String describeApiError(Object error) {
+  if (error is ApiException) return error.message;
+  if (error is DioException) {
+    final inner = error.error;
+    if (inner is ApiException) return inner.message;
+    final data = error.response?.data;
+    if (data is Map) {
+      final message = data['message'];
+      if (message != null && message.toString().trim().isNotEmpty) {
+        return message.toString();
+      }
+    }
+    if (data is String) {
+      final body = data.trim();
+      final message =
+          RegExp(r'<Message>([^<]+)</Message>').firstMatch(body)?.group(1);
+      if (message != null && message.trim().isNotEmpty) return message;
+      if (body.isNotEmpty && body.length <= 200) return body;
+    }
+    final status = error.response?.statusCode;
+    if (status != null) return 'HTTP $status';
+    return error.message ?? '网络请求失败';
+  }
+  return error.toString();
 }

@@ -168,6 +168,8 @@ public class FileService {
       case "image/png" -> ".png";
       case "image/webp" -> ".webp";
       case "image/gif" -> ".gif";
+      case "image/heic" -> ".heic";
+      case "image/heif" -> ".heif";
       case "audio/aac" -> ".aac";
       case "audio/mpeg" -> ".mp3";
       case "audio/ogg" -> ".ogg";
@@ -176,6 +178,10 @@ public class FileService {
       case "audio/mp4" -> ".m4a";
       case "application/pdf" -> ".pdf";
       case "application/zip" -> ".zip";
+      case "application/msword" -> ".doc";
+      case "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> ".docx";
+      case "application/vnd.ms-excel" -> ".xls";
+      case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" -> ".xlsx";
       case "text/plain" -> ".txt";
       default -> "";
     };
@@ -223,10 +229,6 @@ public class FileService {
   private void validateStoredObject(FileMetaEntity entity, ObjectStat stat) {
     if (stat.size() != entity.getSize()) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "uploaded object size mismatch");
-    }
-    String contentType = FileProperties.normalizeMime(stat.contentType());
-    if (!contentType.isBlank() && !contentType.equals(entity.getMime())) {
-      throw new ImException(ErrorCode.MIME_NOT_ALLOWED, "uploaded object mime mismatch");
     }
   }
 

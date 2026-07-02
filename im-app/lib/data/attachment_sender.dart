@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'models/message_content.dart';
+import 'remote/rest/api_client.dart';
 import 'remote/rest/file_api.dart';
 import 'repositories/message_repository.dart';
 
@@ -22,26 +23,38 @@ class AttachmentSender {
     int? width,
     int? height,
   }) async {
-    final presign = await _fileApi.presign(
-      fileName: fileName,
-      mime: mime,
-      size: bytes.length,
+    final presign = await _runUploadStep(
+      '申请上传凭证',
+      () => _fileApi.presign(
+        fileName: fileName,
+        mime: mime,
+        size: bytes.length,
+      ),
     );
-    await _fileApi.uploadDirect(presign, bytes);
-    await _fileApi.confirm(
-      objectKey: presign.objectKey,
-      size: bytes.length,
-      mime: mime,
+    await _runUploadStep(
+      '上传到对象存储',
+      () => _fileApi.uploadDirect(presign, bytes),
     );
-    await _messages.sendImage(
-      convId,
-      ImageBody(
+    await _runUploadStep(
+      '确认上传结果',
+      () => _fileApi.confirm(
         objectKey: presign.objectKey,
         size: bytes.length,
         mime: mime,
-        width: width,
-        height: height,
-        localPath: localPath,
+      ),
+    );
+    await _runUploadStep(
+      '发送图片消息',
+      () => _messages.sendImage(
+        convId,
+        ImageBody(
+          objectKey: presign.objectKey,
+          size: bytes.length,
+          mime: mime,
+          width: width,
+          height: height,
+          localPath: localPath,
+        ),
       ),
     );
   }
@@ -53,25 +66,56 @@ class AttachmentSender {
     required String fileName,
     required String mime,
   }) async {
-    final presign = await _fileApi.presign(
-      fileName: fileName,
-      mime: mime,
-      size: bytes.length,
-    );
-    await _fileApi.uploadDirect(presign, bytes);
-    await _fileApi.confirm(
-      objectKey: presign.objectKey,
-      size: bytes.length,
-      mime: mime,
-    );
-    await _messages.sendFile(
-      convId,
-      FileBody(
-        objectKey: presign.objectKey,
+    final presign = await _runUploadStep(
+      '申请上传凭证',
+      () => _fileApi.presign(
         fileName: fileName,
+        mime: mime,
+        size: bytes.length,
+      ),
+    );
+    await _runUploadStep(
+      '上传到对象存储',
+      () => _fileApi.uploadDirect(presign, bytes),
+    );
+    await _runUploadStep(
+      '确认上传结果',
+      () => _fileApi.confirm(
+        objectKey: presign.objectKey,
         size: bytes.length,
         mime: mime,
       ),
     );
+    await _runUploadStep(
+      '发送文件消息',
+      () => _messages.sendFile(
+        convId,
+        FileBody(
+          objectKey: presign.objectKey,
+          fileName: fileName,
+          size: bytes.length,
+          mime: mime,
+        ),
+      ),
+    );
   }
+
+  Future<T> _runUploadStep<T>(
+    String label,
+    Future<T> Function() task,
+  ) async {
+    try {
+      return await task();
+    } catch (e) {
+      throw AttachmentSendException('$label失败：${describeApiError(e)}');
+    }
+  }
+}
+
+class AttachmentSendException implements Exception {
+  AttachmentSendException(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
 }

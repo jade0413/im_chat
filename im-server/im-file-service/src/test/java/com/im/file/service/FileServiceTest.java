@@ -132,6 +132,21 @@ class FileServiceTest {
   }
 
   @Test
+  void confirmAllowsGenericObjectStorageContentType() throws Exception {
+    FileMetaEntity meta = pendingMeta();
+    when(fileMetaMapper.selectByObjectKey(1L, "1/202606/a.png")).thenReturn(meta);
+    when(storageClient.statObject("im-media", "1/202606/a.png"))
+        .thenReturn(new ObjectStat(512L, "application/octet-stream"));
+    when(fileMetaMapper.updateStatus(1L, "1/202606/a.png", FileMetaConstants.STATUS_PENDING,
+        FileMetaConstants.STATUS_CONFIRMED)).thenReturn(1);
+
+    FileMetaResponse response = TenantContext.callWithTenant(1L,
+        () -> service.confirm(100L, new ConfirmFileRequest("1/202606/a.png", 512L, "image/png")));
+
+    assertThat(response.status()).isEqualTo(FileMetaConstants.STATUS_CONFIRMED);
+  }
+
+  @Test
   void confirmIsIdempotentWhenAlreadyConfirmed() throws Exception {
     FileMetaEntity meta = pendingMeta();
     meta.setStatus(FileMetaConstants.STATUS_CONFIRMED);

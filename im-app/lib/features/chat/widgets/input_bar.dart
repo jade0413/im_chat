@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/theme/lumo_colors.dart';
+import '../../../data/remote/rest/api_client.dart';
 import '../../../data/repositories/conversation_repository.dart';
 import '../../../data/repositories/message_repository.dart';
 import 'mention_picker.dart';
@@ -190,7 +191,7 @@ class _InputBarState extends ConsumerState<InputBar> {
             localPath: file.path,
           ));
     } catch (e) {
-      _toast('图片发送失败：$e');
+      _toast('图片发送失败：${describeApiError(e)}');
     }
   }
 
@@ -213,7 +214,7 @@ class _InputBarState extends ConsumerState<InputBar> {
             mime: _mimeFromName(file.name),
           ));
     } catch (e) {
-      _toast('文件发送失败：$e');
+      _toast('文件发送失败：${describeApiError(e)}');
     }
   }
 
@@ -393,6 +394,8 @@ class _InputBarState extends ConsumerState<InputBar> {
         return 'image/webp';
       case 'heic':
         return 'image/heic';
+      case 'heif':
+        return 'image/heif';
       case 'mp4':
         return 'video/mp4';
       case 'mov':

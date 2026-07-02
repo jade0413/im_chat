@@ -107,12 +107,13 @@ flutter run -d android --dart-define=API_BASE_URL=https://im.example.com \
 
 ## 4. 四端平台配置（关键，务必做）
 
-- **macOS · 出网权限（最常见坑）**：沙箱默认禁止外联，必须在
+- **macOS · 出网/附件权限（最常见坑）**：沙箱默认禁止外联，也禁止读取用户选择的容器外文件。必须在
   `macos/Runner/DebugProfile.entitlements` 与 `Release.entitlements` 同时加：
   ```xml
   <key>com.apple.security.network.client</key><true/>
+  <key>com.apple.security.files.user-selected.read-only</key><true/>
   ```
-  否则 WebSocket / REST 全部连不上。
+  否则 WebSocket / REST 会连不上，聊天框选择图片/文件后也无法读取内容并上传。
 - **Android · 联网**：`android/app/src/main/AndroidManifest.xml` 加
   `<uses-permission android:name="android.permission.INTERNET"/>`；
   开发若用明文 `ws://`（如 10.0.2.2），再加 `android:usesCleartextTraffic="true"` 或网络安全配置。
