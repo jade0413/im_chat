@@ -1,0 +1,22 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    - "lib/core/proto/generated/**" # protoc 生成物不参与 lint
+  plugins:
+    - custom_lint # 启用 riverpod_lint
+  language:
+    strict-casts: true
+    strict-raw-types: true
+  errors:
+    invalid_annotation_target: ignore
+
+linter:
+  rules:
+    - prefer_const_constructors
+    - prefer_final_locals
+    - avoid_print # 统一走 logging
+    - always_declare_return_types
+    - unawaited_futures

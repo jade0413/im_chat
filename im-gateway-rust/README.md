@@ -24,7 +24,7 @@ cargo run
 |---|---:|---|
 | `GW_INSTANCE_ID` / `IM_GATEWAY_INSTANCE_ID` | `gw-local` | 网关实例 ID，对应 RabbitMQ 队列 `push.gw.{instance}` |
 | `GW_WS_BIND` / `IM_GATEWAY_WS_BIND` | `0.0.0.0:8080` | WebSocket 监听地址 |
-| `UPSTREAM_GRPC` / `IM_GATEWAY_UPSTREAM_GRPC` | `http://127.0.0.1:9091` | Java im-server gRPC 地址 |
+| `UPSTREAM_GRPC` / `IM_GATEWAY_UPSTREAM_GRPC` | `http://127.0.0.1:9091` | Java im-server gRPC 地址；支持逗号分隔多地址（如 `http://java-1:9091,http://java-2:9091`），多地址时网关做客户端 p2c 负载均衡 |
 | `RABBITMQ_URL` / `IM_GATEWAY_RABBITMQ_URL` | `amqp://im:im_dev_mq_pwd@127.0.0.1:5672/%2f` | RabbitMQ 连接串 |
 | `IM_GATEWAY_ALLOWED_ORIGINS` | `*` | WebSocket Origin 白名单，逗号分隔；生产必须配置为实际 Web 域名 |
 | `IM_GATEWAY_HANDSHAKE_RATE_LIMIT_PER_SEC` | `200` | 实例级 WS 握手令牌桶每秒补充速率 |

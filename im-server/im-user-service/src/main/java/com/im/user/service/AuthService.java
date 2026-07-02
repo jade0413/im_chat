@@ -107,6 +107,36 @@ public class AuthService {
   }
 
   /**
+   * 修改当前用户的个人资料（昵称必填、头像可选）。昵称非唯一标识，仅作展示名。
+   *
+   * @throws ImException VALIDATION_FAILED 昵称为空/过长；TOKEN_INVALID 用户不存在
+   */
+  @Transactional
+  public void updateProfile(long userId, String rawNickname, String rawAvatar) {
+    TenantContext.requiredTenantId();
+    String nickname = rawNickname == null ? "" : rawNickname.trim();
+    if (nickname.isEmpty()) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "昵称不能为空");
+    }
+    if (nickname.length() > 32) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "昵称过长（最多 32 字）");
+    }
+
+    UserEntity user = userMapper.selectById(userId);
+    if (user == null) {
+      throw new ImException(ErrorCode.TOKEN_INVALID, "user not found");
+    }
+
+    UserEntity update = new UserEntity();
+    update.setId(userId);
+    update.setNickname(nickname);
+    if (rawAvatar != null) {
+      update.setAvatar(rawAvatar.trim()); // 传空串=清空头像；不传该字段=不改
+    }
+    userMapper.updateById(update);
+  }
+
+  /**
    * 按关键字搜索用户（昵称/账号前缀），排除自身。最多 20 条。
    */
   public List<UserPublicProfileResponse> searchUsers(long selfUserId, String keyword) {

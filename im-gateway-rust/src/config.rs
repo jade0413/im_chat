@@ -6,7 +6,9 @@ use std::{env, net::SocketAddr, time::Duration};
 pub struct Config {
     pub instance_id: String,
     pub ws_bind: SocketAddr,
-    pub upstream_grpc: String,
+    /// 上游 Java gRPC 地址，支持逗号分隔多端点（R3：多实例负载均衡）。
+    /// 单地址 = 现状行为；多地址 = tower p2c balance。
+    pub upstream_grpc: Vec<String>,
     pub rabbitmq_url: String,
     pub gateway_queue_prefix: String,
     pub allowed_origins: Vec<String>,
@@ -38,7 +40,7 @@ impl Config {
             ws_bind: read_env(&["IM_GATEWAY_WS_BIND", "GW_WS_BIND"], "0.0.0.0:8080")
                 .parse()
                 .context("invalid gateway bind address")?,
-            upstream_grpc: read_env(
+            upstream_grpc: read_csv_env(
                 &["IM_GATEWAY_UPSTREAM_GRPC", "UPSTREAM_GRPC"],
                 "http://127.0.0.1:9091",
             ),
@@ -148,7 +150,7 @@ mod tests {
         let config = Config {
             instance_id: "gw-a".to_string(),
             ws_bind: "127.0.0.1:8080".parse().unwrap(),
-            upstream_grpc: "http://127.0.0.1:9091".to_string(),
+            upstream_grpc: vec!["http://127.0.0.1:9091".to_string()],
             rabbitmq_url: "amqp://localhost:5672/%2f".to_string(),
             gateway_queue_prefix: "push.gw.".to_string(),
             allowed_origins: vec!["*".to_string()],

@@ -10,7 +10,7 @@ mod state;
 
 use crate::{
     config::Config,
-    connection::{ConnectionRegistry, PendingAcks},
+    connection::ConnectionRegistry,
     handshake_limiter::{HandshakeLimiter, IpHandshakeLimiter},
     metrics::Metrics,
     rpc::RpcClients,
@@ -28,12 +28,11 @@ async fn main() -> Result<()> {
     init_tracing();
 
     let config = Arc::new(Config::from_env()?);
-    let rpc = RpcClients::connect(config.upstream_grpc.clone(), config.as_ref()).await?;
+    let rpc = RpcClients::connect(&config.upstream_grpc, config.as_ref()).await?;
     let state = AppState {
         config: config.clone(),
-        rpc,
+        rpc: Arc::new(rpc),
         registry: ConnectionRegistry::new(),
-        pending_acks: PendingAcks::new(),
         handshake_limiter: HandshakeLimiter::new(
             config.handshake_rate_limit_per_sec,
             config.handshake_rate_limit_burst,
@@ -64,7 +63,7 @@ async fn main() -> Result<()> {
     info!(
         bind = %config.ws_bind,
         instance = config.instance_id.as_str(),
-        upstream = config.upstream_grpc.as_str(),
+        upstream = config.upstream_grpc.join(","),
         queue = queue_name.as_str(),
         "im gateway started"
     );
@@ -91,9 +90,10 @@ async fn ready(axum::extract::State(state): axum::extract::State<AppState>) -> S
 }
 
 async fn metrics(axum::extract::State(state): axum::extract::State<AppState>) -> String {
+    // R2：pending ack 归属各连接，全局总数由 registry 汇总（仅 /metrics 低频调用）。
     state
         .metrics
-        .render_prometheus(state.registry.len(), state.pending_acks.len())
+        .render_prometheus(state.registry.len(), state.registry.pending_acks_total())
 }
 
 async fn shutdown_signal(state: AppState) {

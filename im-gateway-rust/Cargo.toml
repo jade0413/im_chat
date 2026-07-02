@@ -5,7 +5,11 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
-axum = { version = "0.7", features = ["ws"] }
+async-trait = "0.1"
+# R1：axum 0.8 起 ws Message::Binary 载荷为 bytes::Bytes，
+# 广播扇出可全链路零拷贝（预编码帧 clone 仅引用计数）。
+axum = { version = "0.8", features = ["ws"] }
+bytes = "1"
 dashmap = "6"
 futures-util = "0.3"
 lapin = "2"
@@ -16,6 +20,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4"] }
 
+[dev-dependencies]
+# R5：连接状态机测试用内存 channel 充当 ws 收发端
+futures = "0.3"
+
 [build-dependencies]
 protoc-bin-vendored = "3"
+prost-build = "0.13"
 tonic-build = "0.12"

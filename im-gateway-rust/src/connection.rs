@@ -1,11 +1,9 @@
 use crate::{
     frame_codec,
-    metrics::Metrics,
     proto::im::{
         rpc::v1::{ConnCtx, VerifyTokenReq},
         ws::v1::{AuthReq, AuthResp, Cmd, Frame, KickNotify},
     },
-    rpc::RpcClients,
     state::AppState,
 };
 use anyhow::{Context, Result};
@@ -18,8 +16,9 @@ use axum::{
     http::{header::ORIGIN, HeaderMap, StatusCode},
     response::IntoResponse,
 };
+use bytes::Bytes;
 use dashmap::DashMap;
-use futures_util::{stream::SplitStream, SinkExt, StreamExt};
+use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use prost::Message as _;
 use std::{
     hash::{Hash, Hasher},
@@ -31,7 +30,7 @@ use std::{
 };
 use tokio::{
     sync::{mpsc, watch},
-    time,
+    time::{self, MissedTickBehavior},
 };
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -42,6 +41,9 @@ const TOKEN_INVALID: i32 = 1001;
 const REPLAY_REJECTED: i32 = 1005;
 const INTERNAL_ERROR: i32 = 9999;
 const PROTO_TOO_OLD_REASON: i32 = 4;
+
+/// R2：pending ack 过期扫描粒度。10s 超时语义为约值，±1s 精度足够。
+const ACK_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Debug, Eq)]
 pub struct ConnKey {
@@ -125,6 +127,14 @@ impl ConnectionRegistry {
         self.inner.len()
     }
 
+    /// R2：pending ack 归属各连接后，全局总数由此汇总（仅 /metrics 低频调用）。
+    pub fn pending_acks_total(&self) -> usize {
+        self.inner
+            .iter()
+            .map(|entry| entry.value().pending_len())
+            .sum()
+    }
+
     pub fn close_all(&self) -> usize {
         let handles = self
             .inner
@@ -149,6 +159,10 @@ pub struct ConnectionHandle {
     heartbeat_count: Arc<AtomicU64>,
     outbound_full_count: Arc<AtomicU64>,
     outbound_full_disconnect_threshold: u64,
+    // R2：pending ack 是连接局部状态（req_id -> 过期时刻）。
+    // 随 handle 一起销毁，断连清理 O(1)，不再需要全局 PendingAcks 表、
+    // 不再 per-push spawn 定时任务、不再有断连时的全表 retain。
+    pending_acks: Arc<DashMap<u64, Instant>>,
 }
 
 impl ConnectionHandle {
@@ -167,6 +181,7 @@ impl ConnectionHandle {
             heartbeat_count: Arc::new(AtomicU64::new(0)),
             outbound_full_count: Arc::new(AtomicU64::new(0)),
             outbound_full_disconnect_threshold: outbound_full_disconnect_threshold.max(1),
+            pending_acks: Arc::new(DashMap::new()),
         }
     }
 
@@ -178,12 +193,14 @@ impl ConnectionHandle {
         self.key.clone()
     }
 
+    /// need_ack 推送：req_id 逐连接分配，帧需逐个编码（req_id 不同无法共享）。
+    /// body 为 `Bytes`，clone 仅引用计数（R1）。
     pub fn send_push(
         &self,
         cmd: u32,
-        body: Vec<u8>,
+        body: Bytes,
         need_ack: bool,
-        runtime: PushSendRuntime,
+        ack_timeout: Duration,
     ) -> PushSendResult {
         if cmd > i32::MAX as u32 {
             warn!(cmd, "skip push with invalid cmd");
@@ -194,27 +211,64 @@ impl ConnectionHandle {
         } else {
             0
         };
+        if need_ack {
+            // 先登记再发送，杜绝"ack 先于登记到达"的竞态窗口。
+            self.pending_acks.insert(req_id, Instant::now() + ack_timeout);
+        }
         let frame = frame_codec::new_frame(cmd as i32, req_id, body);
         match self.send_frame(frame) {
-            FrameSendResult::Sent => {}
-            FrameSendResult::Dropped => return PushSendResult::Dropped,
-            FrameSendResult::Disconnected => return PushSendResult::Disconnected,
+            FrameSendResult::Sent => PushSendResult::Sent,
+            FrameSendResult::Dropped => {
+                if need_ack {
+                    self.pending_acks.remove(&req_id);
+                }
+                PushSendResult::Dropped
+            }
+            FrameSendResult::Disconnected => {
+                if need_ack {
+                    self.pending_acks.remove(&req_id);
+                }
+                PushSendResult::Disconnected
+            }
         }
-        if need_ack {
-            runtime.pending_acks.track(
-                self.clone(),
-                req_id,
-                runtime.registry,
-                runtime.rpc,
-                runtime.metrics,
-                runtime.ack_timeout,
-            );
+    }
+
+    /// 广播推送（need_ack=false，req_id 恒 0）：所有目标共享同一段预编码帧字节，
+    /// clone 仅引用计数，零编码零拷贝（R1）。
+    pub fn send_encoded(&self, frame_bytes: Bytes) -> PushSendResult {
+        match self.try_send(Outbound::Encoded(frame_bytes)) {
+            FrameSendResult::Sent => PushSendResult::Sent,
+            FrameSendResult::Dropped => PushSendResult::Dropped,
+            FrameSendResult::Disconnected => PushSendResult::Disconnected,
         }
-        PushSendResult::Sent
+    }
+
+    /// 客户端 MSG_RECV_ACK：清除本连接 pending 记录。
+    pub fn ack(&self, req_id: u64) -> bool {
+        if req_id == 0 {
+            return false;
+        }
+        self.pending_acks.remove(&req_id).is_some()
+    }
+
+    pub fn pending_len(&self) -> usize {
+        self.pending_acks.len()
+    }
+
+    fn has_expired_ack(&self, now: Instant) -> bool {
+        !self.pending_acks.is_empty()
+            && self
+                .pending_acks
+                .iter()
+                .any(|entry| *entry.value() <= now)
     }
 
     fn send_frame(&self, frame: Frame) -> FrameSendResult {
-        match self.sender.try_send(Outbound::Frame(frame)) {
+        self.try_send(Outbound::Frame(frame))
+    }
+
+    fn try_send(&self, outbound: Outbound) -> FrameSendResult {
+        match self.sender.try_send(outbound) {
             Ok(()) => {
                 self.outbound_full_count.store(0, Ordering::Relaxed);
                 FrameSendResult::Sent
@@ -265,17 +319,11 @@ pub enum PushSendResult {
     Disconnected,
 }
 
-#[derive(Clone)]
-pub struct PushSendRuntime {
-    pub pending_acks: PendingAcks,
-    pub registry: ConnectionRegistry,
-    pub rpc: RpcClients,
-    pub metrics: Metrics,
-    pub ack_timeout: Duration,
-}
-
 enum Outbound {
+    /// 逐帧编码路径（连接层应答、need_ack 推送等 req_id 各异的帧）。
     Frame(Frame),
+    /// 预编码共享路径（广播推送，R1：一次编码，多目标引用计数共享）。
+    Encoded(Bytes),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -283,85 +331,6 @@ enum FrameSendResult {
     Sent,
     Dropped,
     Disconnected,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-struct AckKey {
-    conn: ConnKey,
-    req_id: u64,
-}
-
-#[derive(Clone)]
-pub struct PendingAcks {
-    inner: Arc<DashMap<AckKey, ()>>,
-}
-
-impl PendingAcks {
-    pub fn new() -> Self {
-        Self {
-            inner: Arc::new(DashMap::new()),
-        }
-    }
-
-    fn track(
-        &self,
-        handle: ConnectionHandle,
-        req_id: u64,
-        registry: ConnectionRegistry,
-        rpc: RpcClients,
-        metrics: Metrics,
-        ack_timeout: Duration,
-    ) {
-        let ack_key = AckKey {
-            conn: handle.key(),
-            req_id,
-        };
-        self.inner.insert(ack_key.clone(), ());
-
-        let pending_acks = self.clone();
-        tokio::spawn(async move {
-            time::sleep(ack_timeout).await;
-            if pending_acks.inner.remove(&ack_key).is_none() {
-                return;
-            }
-            warn!(
-                tenant_id = handle.ctx.tenant_id,
-                user_id = handle.ctx.user_id,
-                platform = handle.ctx.platform,
-                conn_id = handle.ctx.conn_id,
-                req_id,
-                "push ack timeout, close connection"
-            );
-            if registry.remove(&handle.key()).is_some() {
-                metrics.connection_closed(handle.ctx.tenant_id);
-                metrics.ack_timeout_disconnect();
-                handle.close();
-                if let Err(err) = rpc.on_disconnected(handle.ctx()).await {
-                    warn!(?err, "failed to report disconnected after push ack timeout");
-                }
-            }
-        });
-    }
-
-    pub fn ack(&self, conn: &ConnKey, req_id: u64) -> bool {
-        if req_id == 0 {
-            return false;
-        }
-        self.inner
-            .remove(&AckKey {
-                conn: conn.clone(),
-                req_id,
-            })
-            .is_some()
-    }
-
-    pub fn cancel_connection(&self, conn: &ConnKey) {
-        self.inner.retain(|key, _| &key.conn != conn);
-    }
-
-    pub fn len(&self) -> usize {
-        self.inner.len()
-    }
 }
 
 pub async fn ws_handler(
@@ -397,13 +366,26 @@ pub async fn ws_handler(
 }
 
 async fn handle_socket(socket: WebSocket, state: AppState) {
-    if let Err(err) = handle_socket_inner(socket, state).await {
+    let (ws_sender, ws_receiver) = socket.split();
+    if let Err(err) = run_connection(ws_sender, ws_receiver, state).await {
         warn!(error = %format!("{err:#}"), "websocket connection closed with error");
     }
 }
 
-async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
-    let (mut ws_sender, mut ws_receiver) = socket.split();
+/// 连接状态机主体（R5）：收发两端泛型化（任意 Sink/Stream），
+/// 上游依赖走 `Upstream` trait —— 生产为 axum WebSocket + gRPC，
+/// 测试用内存 channel + mock 即可覆盖认证/重放/踢线/ack 全部分支。
+pub(crate) async fn run_connection<Tx, Rx, E>(
+    mut ws_sender: Tx,
+    mut ws_receiver: Rx,
+    state: AppState,
+) -> Result<()>
+where
+    Tx: Sink<Message> + Unpin + Send + 'static,
+    Tx::Error: std::error::Error + Send + Sync + 'static,
+    Rx: Stream<Item = std::result::Result<Message, E>> + Unpin,
+    E: std::error::Error + Send + Sync + 'static,
+{
     let first_frame = read_auth_frame(
         &mut ws_receiver,
         state.config.auth_timeout,
@@ -419,7 +401,7 @@ async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
         return Ok(());
     }
 
-    let auth = AuthReq::decode(first_frame.body.as_slice()).context("invalid auth body")?;
+    let auth = AuthReq::decode(first_frame.body.clone()).context("invalid auth body")?;
     let now = unix_ts();
     if !timestamp_in_window(now, auth.timestamp, state.config.auth_replay_window) {
         send_auth_resp(
@@ -482,8 +464,8 @@ async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
         trace_id: Uuid::new_v4().to_string(),
     };
 
-    let (outbound_tx, mut outbound_rx) = mpsc::channel(state.config.outbound_queue_size);
-    let (close_tx, mut close_rx) = watch::channel(false);
+    let (outbound_tx, outbound_rx) = mpsc::channel(state.config.outbound_queue_size);
+    let (close_tx, close_rx) = watch::channel(false);
     let handle = ConnectionHandle::new(
         ctx.clone(),
         outbound_tx,
@@ -536,42 +518,25 @@ async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
         "websocket authenticated"
     );
 
-    let writer = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                outbound = outbound_rx.recv() => {
-                    let Some(Outbound::Frame(frame)) = outbound else {
-                        break;
-                    };
-                    if ws_sender
-                        .send(Message::Binary(frame_codec::encode(&frame)))
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-                changed = close_rx.changed() => {
-                    if changed.is_ok() && *close_rx.borrow() {
-                        let _ = ws_sender.send(Message::Close(None)).await;
-                    }
-                    break;
-                }
-            }
-        }
-    });
+    let writer = tokio::spawn(writer_loop(
+        ws_sender,
+        outbound_rx,
+        close_rx,
+        handle.clone(),
+        state.clone(),
+        ctx.clone(),
+    ));
 
     let heartbeat_interval = normalize_heartbeat_interval(verify.heartbeat_interval_sec);
     let read_result = read_loop(
         &mut ws_receiver,
         ctx.clone(),
-        key.clone(),
         handle.clone(),
         state.clone(),
         heartbeat_interval,
     )
     .await;
-    state.pending_acks.cancel_connection(&key);
+    // R2：pending ack 随 handle 一起消亡，无需全局取消。
     if state.registry.remove(&key).is_some() {
         state.metrics.connection_closed(ctx.tenant_id);
         if let Err(err) = state.rpc.on_disconnected(ctx).await {
@@ -583,14 +548,84 @@ async fn handle_socket_inner(socket: WebSocket, state: AppState) -> Result<()> {
     read_result
 }
 
-async fn read_loop(
-    receiver: &mut SplitStream<WebSocket>,
+/// 下行写循环 + pending ack 过期扫描（R2）。
+/// 扫描只遍历本连接在途 ack（量级 = 单连接未确认推送数），
+/// 超时判定半死链：本地摘除路由并回报 Java，随后关闭 socket。
+async fn writer_loop<Tx>(
+    mut ws_sender: Tx,
+    mut outbound_rx: mpsc::Receiver<Outbound>,
+    mut close_rx: watch::Receiver<bool>,
+    handle: ConnectionHandle,
+    state: AppState,
     ctx: ConnCtx,
-    key: ConnKey,
+) where
+    Tx: Sink<Message> + Unpin + Send + 'static,
+    Tx::Error: std::error::Error + Send + Sync + 'static,
+{
+    let mut sweep = time::interval(ACK_SWEEP_INTERVAL);
+    sweep.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            // biased：已入队的下行帧优先于 close 信号刷出，保证 KICK/最后一批推送
+            // 在关闭前送达（close 后无新生产者，无饿死风险）。
+            biased;
+            outbound = outbound_rx.recv() => {
+                let Some(outbound) = outbound else {
+                    break;
+                };
+                let message = match outbound {
+                    Outbound::Frame(frame) => Message::Binary(frame_codec::encode(&frame)),
+                    Outbound::Encoded(frame_bytes) => Message::Binary(frame_bytes),
+                };
+                if ws_sender.send(message).await.is_err() {
+                    break;
+                }
+            }
+            changed = close_rx.changed() => {
+                if changed.is_ok() && *close_rx.borrow() {
+                    let _ = ws_sender.send(Message::Close(None)).await;
+                }
+                break;
+            }
+            _ = sweep.tick() => {
+                if handle.has_expired_ack(Instant::now()) {
+                    warn!(
+                        tenant_id = ctx.tenant_id,
+                        user_id = ctx.user_id,
+                        platform = ctx.platform,
+                        conn_id = ctx.conn_id,
+                        "push ack timeout, close connection"
+                    );
+                    if state.registry.remove(&handle.key()).is_some() {
+                        state.metrics.connection_closed(ctx.tenant_id);
+                        state.metrics.ack_timeout_disconnect();
+                        let rpc = state.rpc.clone();
+                        let disconnected_ctx = ctx.clone();
+                        tokio::spawn(async move {
+                            if let Err(err) = rpc.on_disconnected(disconnected_ctx).await {
+                                warn!(?err, "failed to report disconnected after push ack timeout");
+                            }
+                        });
+                    }
+                    let _ = ws_sender.send(Message::Close(None)).await;
+                    break;
+                }
+            }
+        }
+    }
+}
+
+async fn read_loop<Rx, E>(
+    receiver: &mut Rx,
+    ctx: ConnCtx,
     handle: ConnectionHandle,
     state: AppState,
     heartbeat_interval: Duration,
-) -> Result<()> {
+) -> Result<()>
+where
+    Rx: Stream<Item = std::result::Result<Message, E>> + Unpin,
+    E: std::error::Error + Send + Sync + 'static,
+{
     // C-5：持有本连接 handle，避免对每个上行帧都做并发哈希查找 + 克隆整个 ConnectionHandle。
     // 连接被踢/关闭由 writer 收到 close 信号关 socket → receiver 结束来感知，无需靠"查不到"判活。
     let idle_timeout = heartbeat_interval * 3;
@@ -607,13 +642,15 @@ async fn read_loop(
             }
             _ => continue,
         };
-        let frame = frame_codec::decode_with_limit(&payload, state.config.max_frame_bytes)?;
+        let frame = frame_codec::decode_with_limit(payload, state.config.max_frame_bytes)?;
         if frame.version < state.config.min_protocol_version {
-            let body = KickNotify {
-                reason: PROTO_TOO_OLD_REASON,
-                message: "protocol too old".to_string(),
-            }
-            .encode_to_vec();
+            let body = Bytes::from(
+                KickNotify {
+                    reason: PROTO_TOO_OLD_REASON,
+                    message: "protocol too old".to_string(),
+                }
+                .encode_to_vec(),
+            );
             handle.send_frame(frame_codec::new_frame(Cmd::Kick as i32, 0, body));
             handle.close();
             break;
@@ -623,7 +660,7 @@ async fn read_loop(
                 handle.send_frame(frame_codec::new_frame(
                     Cmd::Pong as i32,
                     frame.req_id,
-                    Vec::new(),
+                    Bytes::new(),
                 ));
                 if handle.should_refresh_route(state.config.route_renew_heartbeat_interval) {
                     let rpc = state.rpc.clone();
@@ -636,7 +673,8 @@ async fn read_loop(
                 }
             }
             cmd if cmd == Cmd::MsgRecvAck as i32 => {
-                let acked = state.pending_acks.ack(&key, frame.req_id);
+                // R2：ack 直达本连接 handle，无全局表查找。
+                let acked = handle.ack(frame.req_id);
                 debug!(
                     tenant_id = ctx.tenant_id,
                     user_id = ctx.user_id,
@@ -721,17 +759,21 @@ async fn read_loop(
     Ok(())
 }
 
-async fn read_auth_frame(
-    receiver: &mut SplitStream<WebSocket>,
+async fn read_auth_frame<Rx, E>(
+    receiver: &mut Rx,
     timeout: Duration,
     max_frame_bytes: usize,
-) -> Result<Frame> {
+) -> Result<Frame>
+where
+    Rx: Stream<Item = std::result::Result<Message, E>> + Unpin,
+    E: std::error::Error + Send + Sync + 'static,
+{
     let next = time::timeout(timeout, receiver.next())
         .await
         .context("AUTH timeout")?
         .context("websocket closed before AUTH")??;
     match next {
-        Message::Binary(payload) => frame_codec::decode_with_limit(&payload, max_frame_bytes),
+        Message::Binary(payload) => frame_codec::decode_with_limit(payload, max_frame_bytes),
         _ => anyhow::bail!("AUTH must be sent as binary protobuf frame"),
     }
 }
@@ -744,16 +786,19 @@ async fn send_auth_resp<S>(
     heartbeat_interval_sec: u32,
 ) -> Result<()>
 where
-    S: futures_util::Sink<Message, Error = axum::Error> + Unpin,
+    S: Sink<Message> + Unpin,
+    S::Error: std::error::Error + Send + Sync + 'static,
 {
-    let body = AuthResp {
-        code,
-        message: message.to_string(),
-        user_id,
-        server_ts: unix_ts(),
-        heartbeat_interval_sec,
-    }
-    .encode_to_vec();
+    let body = Bytes::from(
+        AuthResp {
+            code,
+            message: message.to_string(),
+            user_id,
+            server_ts: unix_ts(),
+            heartbeat_interval_sec,
+        }
+        .encode_to_vec(),
+    );
     sender
         .send(Message::Binary(frame_codec::encode(
             &frame_codec::new_frame(Cmd::AuthAck as i32, 0, body),
@@ -765,13 +810,16 @@ where
 
 async fn send_kick<S>(sender: &mut S, reason: i32, message: &str) -> Result<()>
 where
-    S: futures_util::Sink<Message, Error = axum::Error> + Unpin,
+    S: Sink<Message> + Unpin,
+    S::Error: std::error::Error + Send + Sync + 'static,
 {
-    let body = KickNotify {
-        reason,
-        message: message.to_string(),
-    }
-    .encode_to_vec();
+    let body = Bytes::from(
+        KickNotify {
+            reason,
+            message: message.to_string(),
+        }
+        .encode_to_vec(),
+    );
     sender
         .send(Message::Binary(frame_codec::encode(
             &frame_codec::new_frame(Cmd::Kick as i32, 0, body),
@@ -812,10 +860,28 @@ fn origin_allowed(origin: Option<&str>, allowed_origins: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        frame_codec, normalize_heartbeat_interval, origin_allowed, timestamp_in_window, ConnCtx,
-        ConnectionHandle, FrameSendResult,
+        frame_codec, normalize_heartbeat_interval, origin_allowed, run_connection,
+        timestamp_in_window, ConnCtx, ConnectionHandle, ConnectionRegistry, FrameSendResult,
+        Message, PushSendResult,
     };
-    use std::time::Duration;
+    use crate::{
+        config::Config,
+        handshake_limiter::{HandshakeLimiter, IpHandshakeLimiter},
+        metrics::Metrics,
+        proto::im::{
+            rpc::v1::{Empty, UplinkResp, VerifyTokenReq, VerifyTokenResp},
+            ws::v1::{AuthReq, AuthResp, Cmd},
+        },
+        rpc::Upstream,
+        state::{AppState, Lifecycle},
+    };
+    use anyhow::Result;
+    use bytes::Bytes;
+    use prost::Message as _;
+    use std::{
+        sync::{Arc, Mutex as StdMutex},
+        time::{Duration, Instant},
+    };
     use tokio::sync::{mpsc, watch};
 
     #[test]
@@ -854,24 +920,303 @@ mod tests {
         let handle = ConnectionHandle::new(ctx(), tx, close_tx, 3);
 
         assert_eq!(
-            handle.send_frame(frame_codec::new_frame(1, 1, Vec::new())),
+            handle.send_frame(frame_codec::new_frame(1, 1, Bytes::new())),
             FrameSendResult::Sent
         );
         assert_eq!(
-            handle.send_frame(frame_codec::new_frame(1, 2, Vec::new())),
+            handle.send_frame(frame_codec::new_frame(1, 2, Bytes::new())),
             FrameSendResult::Dropped
         );
         assert!(!*close_rx.borrow());
         assert_eq!(
-            handle.send_frame(frame_codec::new_frame(1, 3, Vec::new())),
+            handle.send_frame(frame_codec::new_frame(1, 3, Bytes::new())),
             FrameSendResult::Dropped
         );
         assert!(!*close_rx.borrow());
         assert_eq!(
-            handle.send_frame(frame_codec::new_frame(1, 4, Vec::new())),
+            handle.send_frame(frame_codec::new_frame(1, 4, Bytes::new())),
             FrameSendResult::Disconnected
         );
         assert!(*close_rx.borrow());
+    }
+
+    // ---- R2：pending ack 生命周期（连接局部） ----
+
+    #[test]
+    fn tracks_pending_ack_until_acked_and_detects_expiry() {
+        let (tx, _rx) = mpsc::channel(8);
+        let (close_tx, _close_rx) = watch::channel(false);
+        let handle = ConnectionHandle::new(ctx(), tx, close_tx, 3);
+
+        let result = handle.send_push(
+            Cmd::MsgPush as u32,
+            Bytes::from_static(b"x"),
+            true,
+            Duration::from_secs(10),
+        );
+        assert_eq!(result, PushSendResult::Sent);
+        assert_eq!(handle.pending_len(), 1);
+        assert!(!handle.has_expired_ack(Instant::now()));
+        assert!(handle.has_expired_ack(Instant::now() + Duration::from_secs(11)));
+
+        assert!(handle.ack(1)); // 首个 req_id 从 1 开始
+        assert!(!handle.ack(1));
+        assert!(!handle.ack(0)); // req_id=0 恒为非法
+        assert_eq!(handle.pending_len(), 0);
+    }
+
+    #[test]
+    fn broadcast_send_does_not_track_ack_and_failed_push_rolls_back() {
+        let (tx, _rx) = mpsc::channel(1);
+        let (close_tx, _close_rx) = watch::channel(false);
+        let handle = ConnectionHandle::new(ctx(), tx, close_tx, 99);
+
+        // 广播路径（need_ack=false 预编码帧）不登记 pending。
+        assert_eq!(
+            handle.send_encoded(Bytes::from_static(b"frame")),
+            PushSendResult::Sent
+        );
+        assert_eq!(handle.pending_len(), 0);
+
+        // 队列满：need_ack 推送失败要回滚 pending 登记。
+        assert_eq!(
+            handle.send_push(Cmd::MsgPush as u32, Bytes::new(), true, Duration::from_secs(10)),
+            PushSendResult::Dropped
+        );
+        assert_eq!(handle.pending_len(), 0);
+    }
+
+    // ---- R5：连接状态机测试（内存收发 + mock 上游） ----
+
+    #[derive(Clone, Default)]
+    struct MockUpstream {
+        calls: Arc<StdMutex<Vec<String>>>,
+        reject_token: bool,
+    }
+
+    impl MockUpstream {
+        fn calls(&self) -> Vec<String> {
+            self.calls.lock().unwrap().clone()
+        }
+
+        fn record(&self, name: &str) {
+            self.calls.lock().unwrap().push(name.to_string());
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Upstream for MockUpstream {
+        async fn verify_token(&self, _request: VerifyTokenReq) -> Result<VerifyTokenResp> {
+            self.record("verify_token");
+            if self.reject_token {
+                anyhow::bail!("token rejected");
+            }
+            Ok(VerifyTokenResp {
+                code: 0,
+                message: "ok".to_string(),
+                user_id: 100,
+                heartbeat_interval_sec: 30,
+                ..Default::default()
+            })
+        }
+
+        async fn dispatch(
+            &self,
+            _ctx: ConnCtx,
+            _cmd: u32,
+            body: Bytes,
+            _req_id: u64,
+        ) -> Result<UplinkResp> {
+            self.record("dispatch");
+            Ok(UplinkResp {
+                cmd: Cmd::MsgSendAck as u32,
+                body, // 原样回显便于断言
+            })
+        }
+
+        async fn on_connected(&self, _ctx: ConnCtx) -> Result<Empty> {
+            self.record("on_connected");
+            Ok(Empty {})
+        }
+
+        async fn refresh_route(&self, _ctx: ConnCtx) -> Result<Empty> {
+            self.record("refresh_route");
+            Ok(Empty {})
+        }
+
+        async fn on_disconnected(&self, _ctx: ConnCtx) -> Result<Empty> {
+            self.record("on_disconnected");
+            Ok(Empty {})
+        }
+
+        async fn on_push_acked(&self, _ctx: ConnCtx, _ack_body: Bytes) -> Result<Empty> {
+            self.record("on_push_acked");
+            Ok(Empty {})
+        }
+    }
+
+    fn test_config() -> Config {
+        Config {
+            instance_id: "gw-test".to_string(),
+            ws_bind: "127.0.0.1:8080".parse().unwrap(),
+            upstream_grpc: vec!["http://127.0.0.1:9091".to_string()],
+            rabbitmq_url: "amqp://localhost:5672/%2f".to_string(),
+            gateway_queue_prefix: "push.gw.".to_string(),
+            allowed_origins: vec!["*".to_string()],
+            handshake_rate_limit_per_sec: 200,
+            handshake_rate_limit_burst: 400,
+            per_ip_handshake_rate_limit_per_sec: 20,
+            per_ip_handshake_rate_limit_burst: 40,
+            per_ip_handshake_limiter_idle_ttl: Duration::from_secs(600),
+            auth_timeout: Duration::from_secs(5),
+            auth_replay_window: Duration::from_secs(300),
+            push_ack_timeout: Duration::from_secs(10),
+            dispatch_timeout: Duration::from_secs(10),
+            verify_timeout: Duration::from_secs(5),
+            conn_event_timeout: Duration::from_secs(5),
+            outbound_queue_size: 256,
+            outbound_queue_full_disconnect_threshold: 3,
+            route_renew_heartbeat_interval: 3,
+            drain_timeout: Duration::from_secs(1),
+            rabbitmq_prefetch_count: 16,
+            min_protocol_version: 1,
+            max_frame_bytes: 64 * 1024,
+        }
+    }
+
+    fn test_state(upstream: MockUpstream) -> AppState {
+        AppState {
+            config: Arc::new(test_config()),
+            rpc: Arc::new(upstream),
+            registry: ConnectionRegistry::new(),
+            handshake_limiter: HandshakeLimiter::new(200, 400),
+            ip_handshake_limiter: IpHandshakeLimiter::new(20, 40, Duration::from_secs(600)),
+            lifecycle: Lifecycle::default(),
+            metrics: Metrics::default(),
+        }
+    }
+
+    fn auth_frame() -> Message {
+        let body = AuthReq {
+            token: "test-token".to_string(),
+            tenant_id: 1,
+            device_id: "device-a".to_string(),
+            platform: 1,
+            app_version: "1.0.0".to_string(),
+            timestamp: super::unix_ts(),
+        }
+        .encode_to_vec();
+        Message::Binary(frame_codec::encode(&frame_codec::new_frame(
+            Cmd::Auth as i32,
+            1,
+            Bytes::from(body),
+        )))
+    }
+
+    fn decode_auth_resp(message: &Message) -> AuthResp {
+        let Message::Binary(payload) = message else {
+            panic!("expected binary frame, got {message:?}");
+        };
+        let frame = frame_codec::decode_with_limit(payload.clone(), 64 * 1024).unwrap();
+        assert_eq!(frame.cmd, Cmd::AuthAck as i32);
+        AuthResp::decode(frame.body).unwrap()
+    }
+
+    /// 认证成功 → AUTH_ACK(code=0)；上行帧经 Upstream::dispatch 原样回包；
+    /// 流结束触发 on_disconnected 清理。
+    #[tokio::test]
+    async fn authenticates_dispatches_and_cleans_up() {
+        let mock = MockUpstream::default();
+        let state = test_state(mock.clone());
+
+        let uplink = Message::Binary(frame_codec::encode(&frame_codec::new_frame(
+            Cmd::MsgSend as i32,
+            7,
+            Bytes::from_static(b"hello"),
+        )));
+        let (mut in_tx, in_rx) = futures::channel::mpsc::unbounded::<Result<Message, axum::Error>>();
+        let (out_tx, mut out_rx) = futures::channel::mpsc::unbounded::<Message>();
+
+        in_tx.unbounded_send(Ok(auth_frame())).unwrap();
+        in_tx.unbounded_send(Ok(uplink)).unwrap();
+        in_tx.disconnect(); // 客户端断开 → read_loop 结束 → 清理
+
+        run_connection(out_tx, in_rx, state.clone()).await.unwrap();
+
+        let auth_ack = decode_auth_resp(&out_rx.try_next().unwrap().unwrap());
+        assert_eq!(auth_ack.code, 0);
+        assert_eq!(auth_ack.user_id, 100);
+
+        let Message::Binary(payload) = out_rx.try_next().unwrap().unwrap() else {
+            panic!("expected dispatch response frame");
+        };
+        let resp_frame = frame_codec::decode_with_limit(payload, 64 * 1024).unwrap();
+        assert_eq!(resp_frame.cmd, Cmd::MsgSendAck as i32);
+        assert_eq!(resp_frame.req_id, 7);
+        assert_eq!(resp_frame.body.as_ref(), b"hello");
+
+        let calls = mock.calls();
+        assert!(calls.contains(&"verify_token".to_string()));
+        assert!(calls.contains(&"on_connected".to_string()));
+        assert!(calls.contains(&"dispatch".to_string()));
+        assert!(calls.contains(&"on_disconnected".to_string()));
+        assert_eq!(state.registry.len(), 0);
+    }
+
+    /// 重放窗口外的 AUTH → AUTH_ACK(REPLAY_REJECTED)，不触碰上游连接事件。
+    #[tokio::test]
+    async fn rejects_replayed_auth_without_touching_upstream_conn_events() {
+        let mock = MockUpstream::default();
+        let state = test_state(mock.clone());
+
+        let stale_auth = {
+            let body = AuthReq {
+                token: "test-token".to_string(),
+                tenant_id: 1,
+                device_id: "device-a".to_string(),
+                platform: 1,
+                app_version: "1.0.0".to_string(),
+                timestamp: 1, // 远超重放窗口
+            }
+            .encode_to_vec();
+            Message::Binary(frame_codec::encode(&frame_codec::new_frame(
+                Cmd::Auth as i32,
+                1,
+                Bytes::from(body),
+            )))
+        };
+        let (mut in_tx, in_rx) = futures::channel::mpsc::unbounded::<Result<Message, axum::Error>>();
+        let (out_tx, mut out_rx) = futures::channel::mpsc::unbounded::<Message>();
+        in_tx.unbounded_send(Ok(stale_auth)).unwrap();
+        in_tx.disconnect();
+
+        run_connection(out_tx, in_rx, state).await.unwrap();
+
+        let resp = decode_auth_resp(&out_rx.try_next().unwrap().unwrap());
+        assert_eq!(resp.code, super::REPLAY_REJECTED);
+        assert!(mock.calls().is_empty());
+    }
+
+    /// token 校验失败 → AUTH_ACK(TOKEN_INVALID)，不注册连接。
+    #[tokio::test]
+    async fn rejects_invalid_token() {
+        let mock = MockUpstream {
+            reject_token: true,
+            ..MockUpstream::default()
+        };
+        let state = test_state(mock.clone());
+
+        let (mut in_tx, in_rx) = futures::channel::mpsc::unbounded::<Result<Message, axum::Error>>();
+        let (out_tx, mut out_rx) = futures::channel::mpsc::unbounded::<Message>();
+        in_tx.unbounded_send(Ok(auth_frame())).unwrap();
+        in_tx.disconnect();
+
+        run_connection(out_tx, in_rx, state.clone()).await.unwrap();
+
+        let resp = decode_auth_resp(&out_rx.try_next().unwrap().unwrap());
+        assert_eq!(resp.code, super::TOKEN_INVALID);
+        assert!(!mock.calls().contains(&"on_connected".to_string()));
+        assert_eq!(state.registry.len(), 0);
     }
 
     fn ctx() -> ConnCtx {

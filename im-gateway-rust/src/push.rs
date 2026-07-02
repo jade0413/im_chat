@@ -1,9 +1,11 @@
 use crate::{
-    connection::{PushSendResult, PushSendRuntime},
+    connection::PushSendResult,
+    frame_codec,
     proto::im::{rpc::v1::PushEnvelope, ws::v1::Cmd},
     state::AppState,
 };
 use anyhow::{Context, Result};
+use bytes::Bytes;
 use futures_util::StreamExt;
 use lapin::{
     options::{BasicAckOptions, BasicConsumeOptions, BasicQosOptions, QueueDeclareOptions},
@@ -77,14 +79,16 @@ async fn run_push_consumer_once(state: AppState) -> Result<()> {
 
     info!(queue = queue_name, "gateway push consumer started");
     while let Some(delivery) = consumer.next().await {
-        let delivery = match delivery {
+        let mut delivery = match delivery {
             Ok(delivery) => delivery,
             Err(err) => {
                 warn!(?err, "rabbitmq delivery error");
                 continue;
             }
         };
-        if let Err(err) = handle_push_delivery(&state, delivery.data.as_ref()).await {
+        // Vec -> Bytes 零拷贝转让所有权，后续 envelope.body 是它的引用计数切片（R1）。
+        let payload = Bytes::from(std::mem::take(&mut delivery.data));
+        if let Err(err) = handle_push_delivery(&state, payload).await {
             warn!(?err, "failed to handle push envelope");
         }
         delivery
@@ -95,20 +99,27 @@ async fn run_push_consumer_once(state: AppState) -> Result<()> {
     Ok(())
 }
 
-async fn handle_push_delivery(state: &AppState, payload: &[u8]) -> Result<()> {
+async fn handle_push_delivery(state: &AppState, payload: Bytes) -> Result<()> {
     let envelope = PushEnvelope::decode(payload).context("invalid push envelope")?;
+    if envelope.cmd > i32::MAX as u32 {
+        warn!(cmd = envelope.cmd, "skip push envelope with invalid cmd");
+        return Ok(());
+    }
     let is_kick = envelope.cmd == Cmd::Kick as u32;
     let target_count = envelope.targets.len();
-    let runtime = PushSendRuntime {
-        pending_acks: state.pending_acks.clone(),
-        registry: state.registry.clone(),
-        rpc: state.rpc.clone(),
-        metrics: state.metrics.clone(),
-        ack_timeout: state.config.push_ack_timeout,
-    };
+    // R1：广播路径（need_ack=false，req_id 恒 0）所有目标帧字节完全相同，
+    // 整只信封只编码一次，target 间共享（Bytes clone = 引用计数 +1）。
+    // need_ack 路径 req_id 逐连接分配，帧需逐个编码，但 body 仍零拷贝共享。
+    let shared_frame: Option<Bytes> = (!envelope.need_ack).then(|| {
+        frame_codec::encode(&frame_codec::new_frame(
+            envelope.cmd as i32,
+            0,
+            envelope.body.clone(),
+        ))
+    });
     let mut delivered = 0usize;
     let mut failed = 0usize;
-    for target in envelope.targets {
+    for target in &envelope.targets {
         let Some(handle) = state.registry.get(
             envelope.tenant_id,
             target.user_id,
@@ -117,12 +128,16 @@ async fn handle_push_delivery(state: &AppState, payload: &[u8]) -> Result<()> {
         ) else {
             continue;
         };
-        match handle.send_push(
-            envelope.cmd,
-            envelope.body.clone(),
-            envelope.need_ack,
-            runtime.clone(),
-        ) {
+        let result = match &shared_frame {
+            Some(frame_bytes) => handle.send_encoded(frame_bytes.clone()),
+            None => handle.send_push(
+                envelope.cmd,
+                envelope.body.clone(),
+                true,
+                state.config.push_ack_timeout,
+            ),
+        };
+        match result {
             PushSendResult::Sent => {
                 delivered += 1;
                 state.metrics.push_delivered();
@@ -134,13 +149,13 @@ async fn handle_push_delivery(state: &AppState, payload: &[u8]) -> Result<()> {
                 failed += 1;
                 state.metrics.push_failed();
                 if is_kick {
-                    disconnect_slow_consumer(state, &handle, envelope.tenant_id).await;
+                    disconnect_slow_consumer(state, &handle, envelope.tenant_id);
                 }
             }
             PushSendResult::Disconnected => {
                 failed += 1;
                 state.metrics.push_failed();
-                disconnect_slow_consumer(state, &handle, envelope.tenant_id).await;
+                disconnect_slow_consumer(state, &handle, envelope.tenant_id);
             }
         }
     }
@@ -158,7 +173,7 @@ async fn handle_push_delivery(state: &AppState, payload: &[u8]) -> Result<()> {
     Ok(())
 }
 
-async fn disconnect_slow_consumer(
+fn disconnect_slow_consumer(
     state: &AppState,
     handle: &crate::connection::ConnectionHandle,
     tenant_id: i64,

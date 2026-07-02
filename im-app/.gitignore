@@ -1,0 +1,31 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+.pub-cache/
+.pub/
+*.iml
+.idea/
+
+# 代码生成产物（构建时由 build_runner / protoc 生成，不入库）
+*.g.dart
+*.freezed.dart
+lib/core/proto/generated/
+
+# 平台构建产物
+**/ios/Pods/
+**/ios/.symlinks/
+**/macos/Pods/
+**/windows/flutter/ephemeral/
+**/android/.gradle/
+**/android/local.properties
+
+# 凭证 / 本地配置
+.env
+*.keystore
+*.jks
+
+# 系统
+.DS_Store

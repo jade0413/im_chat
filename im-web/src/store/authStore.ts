@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { bindAuthHandlers, refreshTokenDirect } from '../api/client';
 import * as authApi from '../api/auth';
-import { getCurrentUser } from '../api/user';
+import { getCurrentUser, updateAgentStatus } from '../api/user';
 import { REFRESH_TOKEN_KEY } from '../config';
 import { idToString } from '../utils/id';
 import type { TokenResponse } from '../api/types';
@@ -18,7 +18,7 @@ interface AuthState {
   refreshFromStorage: () => Promise<boolean>;
   logout: () => void;
   applyTokens: (tokens: TokenResponse) => void;
-  loadCurrentUser: () => Promise<void>;
+  loadCurrentUser: () => Promise<SessionUser>;
   /** 资料更新后本地同步 session user */
   setUser: (user: SessionUser) => void;
 }
@@ -29,6 +29,19 @@ function normalizeUser(user: Awaited<ReturnType<typeof getCurrentUser>>): Sessio
     id: idToString(user.id),
     tenantId: idToString(user.tenantId),
   };
+}
+
+async function markAgentOnlineAfterLogin(user: SessionUser): Promise<SessionUser> {
+  if (!user.isAgent || Number(user.agentStatus ?? 0) !== 0) {
+    return user;
+  }
+  try {
+    await updateAgentStatus(1);
+    return { ...user, agentStatus: 1 };
+  } catch (error) {
+    console.warn('[im-web/auth] failed to mark agent online after login', error);
+    return user;
+  }
 }
 
 /**
@@ -59,7 +72,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   loadCurrentUser: async () => {
     const user = await getCurrentUser();
-    set({ user: normalizeUser(user) });
+    const normalized = normalizeUser(user);
+    set({ user: normalized });
+    return normalized;
   },
 
   login: async (account, password) => {
@@ -67,7 +82,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const tokens = await authApi.login(account, password);
       get().applyTokens(tokens);
-      await get().loadCurrentUser();
+      const user = await get().loadCurrentUser();
+      const nextUser = await markAgentOnlineAfterLogin(user);
+      if (nextUser !== user) {
+        set({ user: nextUser });
+      }
     } finally {
       set({ loading: false, bootstrapped: true });
     }
@@ -78,7 +97,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const tokens = await authApi.register(account, password, nickname);
       get().applyTokens(tokens);
-      await get().loadCurrentUser();
+      const user = await get().loadCurrentUser();
+      const nextUser = await markAgentOnlineAfterLogin(user);
+      if (nextUser !== user) {
+        set({ user: nextUser });
+      }
     } finally {
       set({ loading: false, bootstrapped: true });
     }

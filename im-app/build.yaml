@@ -1,0 +1,14 @@
+targets:
+  $default:
+    builders:
+      drift_dev:
+        options:
+          # 生成可空 DSL、模块化 DAO；存储 Int64 为文本以保证大整数精度（seq/snowflake）
+          store_date_time_values_as_text: true
+          named_parameters: true
+          apply_converters_on_variables: true
+          generate_connect_constructor: true
+          sql:
+            dialect: sqlite
+            options:
+              version: "3.39"

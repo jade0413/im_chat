@@ -114,31 +114,163 @@ textarea {
   place-items: center;
   padding: 32px 16px;
   background:
-    radial-gradient(1100px 520px at 12% -8%, rgba(43, 139, 255, 0.18), transparent 60%),
-    radial-gradient(900px 500px at 100% 0%, rgba(63, 107, 255, 0.16), transparent 55%),
-    linear-gradient(180deg, #f7f9fc 0%, #eef1f6 100%);
+    radial-gradient(900px 480px at 12% -8%, rgba(90, 84, 240, 0.14), transparent 62%),
+    radial-gradient(900px 520px at 100% 0%, rgba(52, 148, 255, 0.1), transparent 58%),
+    linear-gradient(180deg, #f8f9fd 0%, #eef1f6 100%);
 }
 
 .auth-panel {
-  width: min(420px, 100%);
+  width: min(440px, 100%);
   background: var(--im-panel);
   border: 1px solid var(--im-border);
   border-radius: 20px;
   box-shadow: var(--im-shadow-lg);
-  padding: 36px 34px;
+  padding: 36px 34px 32px;
+}
+
+.auth-logo {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 18px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #7c64ff 0%, #5a54f6 100%);
+  color: #fff;
+  font-size: 26px;
+  box-shadow: 0 10px 26px rgba(90, 84, 240, 0.28);
+}
+
+.auth-eyebrow {
+  margin-bottom: 6px;
+  color: #6a54f6;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .auth-title {
   margin: 0 0 6px;
+  color: #16171d;
   font-size: 28px;
   line-height: 1.25;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-weight: 800;
+  letter-spacing: 0;
 }
 
 .auth-subtitle {
   margin: 0 0 28px;
-  color: var(--im-text-muted);
+  color: #8b94a8;
+  font-size: 14px;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.auth-form .ant-form-item {
+  margin-bottom: 14px;
+}
+
+.auth-account-switch.ant-segmented {
+  width: 100%;
+  margin-bottom: 18px;
+  padding: 4px;
+  border-radius: 14px;
+  background: #eef1f6;
+}
+
+.auth-account-switch .ant-segmented-item {
+  min-height: 40px;
+  border-radius: 12px;
+  color: #778197;
+  font-weight: 700;
+  line-height: 40px;
+}
+
+.auth-account-switch .ant-segmented-item-selected {
+  color: #16171d;
+  box-shadow: 0 8px 20px rgba(22, 32, 46, 0.08);
+}
+
+.auth-input.ant-input-affix-wrapper {
+  height: 48px;
+  padding: 0 18px;
+  border: 1px solid #e6e9f1;
+  border-radius: 12px;
+  background: #f4f6fa;
+  box-shadow: none;
+}
+
+.auth-input.ant-input-affix-wrapper-focused,
+.auth-input.ant-input-affix-wrapper:focus,
+.auth-input.ant-input-affix-wrapper:focus-within {
+  border-color: #7a67ff;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(106, 84, 246, 0.12);
+}
+
+.auth-input .ant-input,
+.auth-input .ant-input-password {
+  background: transparent;
+  color: #16171d;
+  font-size: 16px;
+}
+
+.auth-input .ant-input-prefix {
+  margin-right: 12px;
+  color: #98a1b3;
+  font-size: 17px;
+}
+
+.auth-input.ant-input-affix-wrapper-focused .ant-input-prefix,
+.auth-input.ant-input-affix-wrapper:focus-within .ant-input-prefix {
+  color: #6a54f6;
+}
+
+.auth-input .ant-input::placeholder {
+  color: #8b94a8;
+}
+
+.auth-forgot {
+  display: flex;
+  justify-content: flex-end;
+  margin: -2px 2px 18px;
+}
+
+.auth-forgot button {
+  border: none;
+  background: transparent;
+  color: #6a54f6;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.auth-submit.ant-btn {
+  height: 46px;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #765cff 0%, #5b54f4 100%);
+  font-size: 16px;
+  font-weight: 800;
+  box-shadow: 0 12px 24px rgba(106, 84, 246, 0.24);
+}
+
+.auth-submit.ant-btn:not(:disabled):hover {
+  background: linear-gradient(135deg, #846eff 0%, #625cff 100%);
+  transform: translateY(-1px);
+}
+
+.auth-footer {
+  margin-top: 20px;
+  text-align: center;
+  color: #8b94a8;
+}
+
+.auth-footer a {
+  color: #5b54f4;
+  font-weight: 800;
 }
 
 /* =========================================================
@@ -835,6 +967,31 @@ textarea {
 
 /* 极窄屏：导航栏移到底部更顺手；面板占满 */
 @media (max-width: 520px) {
+  .auth-shell {
+    padding: 20px 14px;
+  }
+
+  .auth-panel {
+    padding: 28px 22px 24px;
+  }
+
+  .auth-logo {
+    width: 50px;
+    height: 50px;
+    margin-bottom: 16px;
+    border-radius: 15px;
+    font-size: 24px;
+  }
+
+  .auth-title {
+    font-size: 26px;
+  }
+
+  .auth-input.ant-input-affix-wrapper,
+  .auth-submit.ant-btn {
+    height: 46px;
+  }
+
   .chat-header {
     padding: 0 14px;
   }

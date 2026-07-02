@@ -3,6 +3,7 @@ package com.im.user.rest;
 import com.im.common.auth.UserContext;
 import com.im.common.web.ApiResponse;
 import com.im.user.dto.UpdateAgentStatusRequest;
+import com.im.user.dto.UpdateProfileRequest;
 import com.im.user.dto.UpdateUsernameRequest;
 import com.im.user.dto.UserProfileResponse;
 import com.im.user.dto.UserPublicProfileResponse;
@@ -40,6 +41,20 @@ public class UserController {
   @GetMapping("/me")
   public ApiResponse<UserProfileResponse> me() {
     return ApiResponse.ok(authService.getProfile(UserContext.requiredUserId()));
+  }
+
+  /**
+   * 修改个人资料：昵称（展示名，可改）+ 头像（可选）。
+   *
+   * <pre>
+   * PUT /api/v1/users/me/profile
+   * Body: {"nickname": "Jade", "avatar": "https://..."}   // avatar 可省略
+   * </pre>
+   */
+  @PutMapping("/me/profile")
+  public ApiResponse<Void> updateProfile(@Valid @RequestBody UpdateProfileRequest request) {
+    authService.updateProfile(UserContext.requiredUserId(), request.nickname(), request.avatar());
+    return ApiResponse.ok(null);
   }
 
   /** 查询其他用户公开资料（不含账号）。 */

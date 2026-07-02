@@ -1,0 +1,22 @@
+# Shorebird 热更新配置（D：Shorebird code push + 桌面端配置 OTA）
+#
+# 仅 Android / iOS 通过 Shorebird code push 热更 Dart 代码。
+# Windows / macOS 桌面端 Shorebird 暂不支持热更 Dart——走应用内版本检测 + 引导下载新安装包
+# （见 lib/core/update/update_service.dart 与 README「热更新」章节）。
+#
+# 首次接入：
+#   1) dart pub global activate shorebird_cli   （或 https://shorebird.dev 安装脚本）
+#   2) shorebird login
+#   3) shorebird init     —— 会回填下面的 app_id
+#   4) 发版：   shorebird release android / ios
+#      打补丁： shorebird patch android / ios
+#
+# app_id 由 `shorebird init` 生成后填入；多平台可用 flavors 区分。
+app_id: REPLACE_WITH_SHOREBIRD_APP_ID
+
+# 按构建渠道隔离热更新轨道（可选）：
+# flavors:
+#   dev: REPLACE_WITH_DEV_APP_ID
+#   prod: REPLACE_WITH_PROD_APP_ID
+
+auto_update: true # 启动时静默检查补丁；下次冷启动生效

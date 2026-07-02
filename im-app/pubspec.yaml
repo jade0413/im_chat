@@ -1,0 +1,93 @@
+name: im_app
+description: "微光 Lumo —— 多端 IM 客户端（Android / iOS / macOS / Windows）"
+publish_to: "none"
+
+# version+build：build 号用于桌面端 OTA 版本比较；Shorebird patch 号独立于此
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # ── 状态管理（D：Riverpod）─────────────────────────────
+  flutter_riverpod: ^2.5.1
+  riverpod_annotation: ^2.3.5
+
+  # ── 本地缓存（D：drift / SQLite，四端一致）──────────────
+  drift: ^2.18.0
+  sqlite3_flutter_libs: ^0.5.24 # 打包原生 sqlite3（Android/iOS/macOS/Windows）
+  path_provider: ^2.1.3
+  path: ^1.9.0
+
+  # ── 网络：WebSocket（消息核心）+ REST ──────────────────
+  web_socket_channel: ^3.0.1
+  dio: ^5.5.0
+  connectivity_plus: ^6.0.5 # 网络恢复监听（替代 web 端 online/visibilitychange）
+
+  # ── 协议：protobuf（im-proto 唯一事实来源，protoc --dart_out 生成）──
+  protobuf: ^6.0.0
+  fixnum: ^1.1.0 # Int64，承载 seq / snowflake / 雪花 id
+
+  # ── 路由 + 自适应布局 ───────────────────────────────────
+  go_router: ^14.2.0
+
+  # ── 热更新（D：Shorebird code push + 桌面端配置 OTA）────
+  shorebird_code_push: ^2.0.4
+  package_info_plus: ^8.0.0 # 读当前版本号，桌面端 OTA 版本比较
+  url_launcher: ^6.3.0 # 桌面端引导下载新安装包
+
+  # ── 凭证存储 ────────────────────────────────────────────
+  flutter_secure_storage: ^9.2.2 # token / refresh_token / device_id
+
+  # ── 富媒体 ──────────────────────────────────────────────
+  cached_network_image: ^3.3.1
+  image_picker: ^1.1.2
+  file_picker: ^8.0.6
+
+  # ── 工具 ────────────────────────────────────────────────
+  uuid: ^4.4.0
+  intl: ^0.20.2 # 跟随 flutter_localizations 的 pin（避免 SDK 版本冲突）
+  collection: ^1.18.0
+  freezed_annotation: ^2.4.1
+  json_annotation: ^4.9.0
+  logging: ^1.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+  # 代码生成
+  build_runner: ^2.4.11
+  riverpod_generator: ^2.4.0
+  drift_dev: ^2.18.0
+  freezed: ^2.5.2
+  json_serializable: ^6.8.0
+
+  # Riverpod 静态检查（强烈建议开启）
+  custom_lint: ^0.6.4
+  riverpod_lint: ^2.3.10
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
+  # Lumo 设计语言字体：Plus Jakarta Sans（拉丁）；中文走系统 苹方/微软雅黑。
+  # 字体文件未随脚手架附带——把 ttf 放进 assets/fonts/ 后取消下面注释即可启用；
+  # 未启用时 LumoTheme 的 fontFamily 会回退到系统字体（fontFamilyFallback）。
+  # fonts:
+  #   - family: PlusJakartaSans
+  #     fonts:
+  #       - asset: assets/fonts/PlusJakartaSans-Regular.ttf
+  #       - asset: assets/fonts/PlusJakartaSans-Medium.ttf
+  #         weight: 500
+  #       - asset: assets/fonts/PlusJakartaSans-SemiBold.ttf
+  #         weight: 600
+  #       - asset: assets/fonts/PlusJakartaSans-Bold.ttf
+  #         weight: 700

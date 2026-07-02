@@ -378,8 +378,10 @@ function statusLabel(status: string) {
     case 'connected': return '在线';
     case 'connecting': return '连接中';
     case 'reconnecting': return '重连中';
+    case 'closed': return '已断开';
+    case 'idle': return '未连接';
     case 'error': return '异常';
-    default: return '离线';
+    default: return '未知';
   }
 }
 

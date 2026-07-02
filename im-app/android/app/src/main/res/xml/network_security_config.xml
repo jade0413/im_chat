@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 仅开发联调允许明文（ws:// / http:// 到本地后端）。生产用 wss/https，
+     上线前移除下面的 domain-config 或收紧白名单。 -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>   <!-- Android 模拟器→宿主机 -->
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">localhost</domain>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false"/>
+</network-security-config>

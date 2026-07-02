@@ -1,6 +1,7 @@
 package com.im.push.service;
 
 import com.google.protobuf.ByteString;
+import com.google.protobuf.UnsafeByteOperations;
 import com.im.common.auth.TokenVersionService;
 import com.im.common.device.PlatformClass;
 import com.im.common.error.ErrorCode;
@@ -115,11 +116,16 @@ public class PushDispatchService {
 
   private void publishGrouped(long tenantId, int cmd, byte[] body, boolean needAck,
       Map<String, List<OnlineRoute>> routesByGateway) {
+    // J1（2026-07-02 结构审查）：body 来自事件解码后只读，不再有写入方，
+    // unsafeWrap 免掉每个网关分组一次的深拷贝（copyFrom）。
+    ByteString bodyBytes = body == null || body.length == 0
+        ? ByteString.EMPTY
+        : UnsafeByteOperations.unsafeWrap(body);
     for (Map.Entry<String, List<OnlineRoute>> entry : routesByGateway.entrySet()) {
       PushEnvelope.Builder envelope = PushEnvelope.newBuilder()
           .setTenantId(tenantId)
           .setCmd(cmd)
-          .setBody(ByteString.copyFrom(body == null ? new byte[0] : body))
+          .setBody(bodyBytes)
           .setTraceId(TraceContext.currentOrCreateTraceId())
           .setNeedAck(needAck);
       entry.getValue().forEach(route -> envelope.addTargets(toTarget(route)));

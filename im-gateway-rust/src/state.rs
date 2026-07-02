@@ -1,9 +1,9 @@
 use crate::{
     config::Config,
-    connection::{ConnectionRegistry, PendingAcks},
+    connection::ConnectionRegistry,
     handshake_limiter::{HandshakeLimiter, IpHandshakeLimiter},
     metrics::Metrics,
-    rpc::RpcClients,
+    rpc::Upstream,
 };
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -13,9 +13,10 @@ use std::sync::{
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
-    pub rpc: RpcClients,
+    /// R5：上游依赖抽象为 trait 对象。生产注入 gRPC 实现（RpcClients），
+    /// 测试注入内存 mock。网关 QPS 量级下动态分发开销可忽略。
+    pub rpc: Arc<dyn Upstream>,
     pub registry: ConnectionRegistry,
-    pub pending_acks: PendingAcks,
     pub handshake_limiter: HandshakeLimiter,
     pub ip_handshake_limiter: IpHandshakeLimiter,
     pub lifecycle: Lifecycle,
