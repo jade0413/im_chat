@@ -53,7 +53,9 @@ final tokenStoreProvider = Provider<TokenStore>(
 
 final databaseProvider = Provider<AppDatabase>((ref) {
   final db = AppDatabase();
-  ref.onDispose(db.close);
+  ref.onDispose(() {
+    db.close();
+  });
   return db;
 });
 
