@@ -8,21 +8,26 @@ import io.minio.errors.ErrorResponseException;
 import io.minio.http.Method;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 @Component
 public class MinioObjectStorageClient implements ObjectStorageClient {
 
-  private final MinioClient minioClient;
+  private final MinioClient internalClient;
+  private final MinioClient presignClient;
 
-  public MinioObjectStorageClient(MinioClient minioClient) {
-    this.minioClient = minioClient;
+  public MinioObjectStorageClient(
+      @Qualifier("minioInternalClient") MinioClient internalClient,
+      @Qualifier("minioPresignClient") MinioClient presignClient) {
+    this.internalClient = internalClient;
+    this.presignClient = presignClient;
   }
 
   @Override
   public String presignPut(String bucket, String objectKey, Duration ttl) {
     try {
-      return minioClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
+      return presignClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
           .method(Method.PUT)
           .bucket(bucket)
           .object(objectKey)
@@ -36,7 +41,7 @@ public class MinioObjectStorageClient implements ObjectStorageClient {
   @Override
   public String presignGet(String bucket, String objectKey, Duration ttl) {
     try {
-      return minioClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
+      return presignClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
           .method(Method.GET)
           .bucket(bucket)
           .object(objectKey)
@@ -50,7 +55,7 @@ public class MinioObjectStorageClient implements ObjectStorageClient {
   @Override
   public ObjectStat statObject(String bucket, String objectKey) {
     try {
-      StatObjectResponse response = minioClient.statObject(StatObjectArgs.builder()
+      StatObjectResponse response = internalClient.statObject(StatObjectArgs.builder()
           .bucket(bucket)
           .object(objectKey)
           .build());

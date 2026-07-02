@@ -47,6 +47,7 @@ class Conversation {
 
   bool get isC2C => type == ConvTypeValue.c2c;
   bool get isGroup => type == ConvTypeValue.group;
+  bool get isCs => type == ConvTypeValue.csSession;
   bool get isSystem => type == ConvTypeValue.system;
 
   /// 未读数（BigInt 安全相减，下限 0）。

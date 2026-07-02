@@ -34,6 +34,7 @@ mkdir -p "$OUT_DIR"
 PROTO_FILES=(
   "ws/frame.proto"
   "body/messages.proto"
+  "body/call.proto"
   "common/content.proto"
   "common/enums.proto"
   "common/error.proto"

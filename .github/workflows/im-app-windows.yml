@@ -1,0 +1,55 @@
+name: Build im-app Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "im-app/**"
+      - ".github/workflows/im-app-windows.yml"
+
+jobs:
+  windows:
+    name: Windows release zip
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: im-app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.4"
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Build and package Windows
+        shell: pwsh
+        run: .\tool\package_windows.ps1
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: im-app-windows
+          path: im-app/dist/*.zip
+          if-no-files-found: error
+          retention-days: 14

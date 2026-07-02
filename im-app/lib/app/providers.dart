@@ -15,6 +15,7 @@ import '../data/local/daos/outbox_dao.dart';
 import '../data/local/daos/sync_cursor_dao.dart';
 import '../data/models/chat_message.dart';
 import '../data/models/conversation.dart';
+import '../data/models/cs_models.dart';
 import '../data/models/enums.dart';
 import '../data/models/friend.dart';
 import '../data/models/session_user.dart';
@@ -22,6 +23,7 @@ import '../data/remote/rest/api_client.dart';
 import '../data/remote/rest/auth_api.dart';
 import '../data/remote/rest/credential_storage.dart';
 import '../data/remote/rest/conv_api.dart';
+import '../data/remote/rest/cs_api.dart';
 import '../data/remote/rest/file_api.dart';
 import '../data/remote/rest/friend_api.dart';
 import '../data/remote/rest/group_api.dart';
@@ -94,6 +96,8 @@ final groupApiProvider =
     Provider<GroupApi>((ref) => GroupApi(ref.watch(apiClientProvider)));
 final convApiProvider =
     Provider<ConvApi>((ref) => ConvApi(ref.watch(apiClientProvider)));
+final csApiProvider =
+    Provider<CsApi>((ref) => CsApi(ref.watch(apiClientProvider)));
 
 /// 好友列表（REST 拉取；下拉刷新用 ref.invalidate）。
 final friendsProvider = FutureProvider<List<Friend>>(
@@ -113,6 +117,17 @@ final groupMembersProvider =
   final ids = members.map((m) => m.userId).toList();
   if (ids.isEmpty) return const [];
   return ref.watch(friendApiProvider).batchUsers(ids);
+});
+
+final csConversationsProvider =
+    FutureProvider<List<CsConversation>>((ref) async {
+  final response = await ref.watch(csApiProvider).listConversations(limit: 50);
+  return response.convs;
+});
+
+final csNotesProvider =
+    FutureProvider.family<List<CsInternalNote>, String>((ref, convId) {
+  return ref.watch(csApiProvider).listNotes(convId);
 });
 
 // ─── 消息引擎（连接层 + 本地缓存协调者）────────────────────
@@ -267,6 +282,41 @@ class AuthController extends Notifier<AuthState> {
       return true;
     } catch (e) {
       _log.warning('update nickname failed: $e');
+      return false;
+    }
+  }
+
+  Future<bool> updateUsername(String username) async {
+    final value = username.trim();
+    if (value.isEmpty) return false;
+    try {
+      await ref.read(authApiProvider).updateUsername(value);
+      await _refreshProfile();
+      return true;
+    } catch (e) {
+      _log.warning('update username failed: $e');
+      return false;
+    }
+  }
+
+  Future<bool> updateFriendVerifyRequired(bool required) async {
+    try {
+      await ref.read(friendApiProvider).updateVerifySetting(required ? 1 : 0);
+      await _refreshProfile();
+      return true;
+    } catch (e) {
+      _log.warning('update friend verify setting failed: $e');
+      return false;
+    }
+  }
+
+  Future<bool> updateAgentStatus(int agentStatus) async {
+    try {
+      await ref.read(authApiProvider).updateAgentStatus(agentStatus);
+      await _refreshProfile();
+      return true;
+    } catch (e) {
+      _log.warning('update agent status failed: $e');
       return false;
     }
   }

@@ -31,6 +31,12 @@ im:
       access-key: ${MINIO_ROOT_USER}
       secret-key: ${MINIO_ROOT_PASSWORD}
       bucket: ${MINIO_BUCKET:im-media}
+  file:
+    endpoint: ${MINIO_ENDPOINT:http://minio:9000}
+    public-endpoint: ${MINIO_PUBLIC_ENDPOINT:${IM_MINIO_PUBLIC_ENDPOINT:${MINIO_ENDPOINT:http://minio:9000}}}
+    access-key: ${MINIO_ROOT_USER}
+    secret-key: ${MINIO_ROOT_PASSWORD}
+    bucket: ${MINIO_BUCKET:im-media}
   outbox:
     enabled: ${OUTBOX_ENABLED:true}
   rpc:

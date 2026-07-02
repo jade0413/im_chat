@@ -58,6 +58,7 @@ class FileServiceTest {
   void setUp() {
     FileProperties properties = new FileProperties(
         "http://minio:9000",
+        "http://localhost:9000",
         "ak",
         "sk",
         "im-media",

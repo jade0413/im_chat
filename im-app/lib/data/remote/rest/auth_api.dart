@@ -58,4 +58,20 @@ class AuthApi {
       },
     );
   }
+
+  /// 设置/修改微光号（D42，可分享的对外加好友标识）。
+  Future<void> updateUsername(String username) async {
+    await _dio.put<dynamic>(
+      '/api/v1/users/me/username',
+      data: {'username': username.trim()},
+    );
+  }
+
+  /// 坐席在线状态：0=离线 1=在线 2=忙碌。
+  Future<void> updateAgentStatus(int agentStatus) async {
+    await _dio.patch<dynamic>(
+      '/api/v1/users/me/agent-status',
+      data: {'agentStatus': agentStatus},
+    );
+  }
 }

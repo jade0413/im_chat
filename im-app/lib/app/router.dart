@@ -7,6 +7,7 @@ import '../features/chat/chat_page.dart';
 import '../features/contacts/add_friend_page.dart';
 import '../features/groups/create_group_page.dart';
 import '../features/home/home_shell.dart';
+import '../features/search/message_search_page.dart';
 import '../features/splash/splash_page.dart';
 import 'providers.dart';
 
@@ -36,6 +37,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/splash', builder: (_, __) => const SplashPage()),
       GoRoute(path: '/login', builder: (_, __) => const LoginPage()),
       GoRoute(path: '/', builder: (_, __) => const HomeShell()),
+      GoRoute(path: '/search', builder: (_, __) => const MessageSearchPage()),
       GoRoute(path: '/add-friend', builder: (_, __) => const AddFriendPage()),
       GoRoute(
         path: '/create-group',

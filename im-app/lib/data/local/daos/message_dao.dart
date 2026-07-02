@@ -110,6 +110,27 @@ class MessageDao extends DatabaseAccessor<AppDatabase> with _$MessageDaoMixin {
     return row?.toModel();
   }
 
+  Future<List<ChatMessage>> searchMessages(
+    String keyword, {
+    int limit = 80,
+  }) async {
+    final queryText = _ftsQuery(keyword);
+    if (queryText.isEmpty) return const [];
+    final rows = await customSelect(
+      '''
+      SELECT m.*
+      FROM messages m
+      JOIN message_search_fts f ON f.client_msg_id = m.client_msg_id
+      WHERE message_search_fts MATCH ?
+      ORDER BY m.send_time_ms DESC
+      LIMIT ?
+      ''',
+      variables: [Variable<String>(queryText), Variable<int>(limit)],
+      readsFrom: {messages},
+    ).get();
+    return rows.map((row) => messages.map(row.data).toModel()).toList();
+  }
+
   /// 已确认消息的 seq 列表（计算连续 syncSeq 用）。
   Future<List<String>> getSeqs(String convId) async {
     final query = selectOnly(messages)
@@ -123,4 +144,15 @@ class MessageDao extends DatabaseAccessor<AppDatabase> with _$MessageDaoMixin {
       (delete(messages)..where((t) => t.convId.equals(convId))).go();
 
   Future<void> clearAll() => delete(messages).go();
+
+  String _ftsQuery(String raw) {
+    final tokens = raw
+        .trim()
+        .split(RegExp(r'\s+'))
+        .map((token) => token.trim())
+        .where((token) => token.isNotEmpty)
+        .map((token) => '"${token.replaceAll('"', '""')}"')
+        .toList();
+    return tokens.join(' ');
+  }
 }

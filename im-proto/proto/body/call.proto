@@ -1,0 +1,94 @@
+// ============================================================
+// 实时通话信令 body（D45：1v1 语音 MVP）—— Java 与客户端编译，网关透传
+// 与 ws/frame.proto 的 CALL_* Cmd 一一对应
+//
+// 设计要点：
+// - 媒体走 WebRTC P2P + coturn 中继，本文件只定义信令；SDP/ICE 以
+//   不透明字符串透传（服务端不解析，仅校验参与者身份后中转给对端）
+// - call_id 服务端生成（UUID）；client_call_id 客户端生成用于 INVITE 幂等
+// - media_type 预留 VIDEO；group 通话不在本协议内（届时开 v2 或扩展）
+// ============================================================
+syntax = "proto3";
+package im.body.v1;
+option java_package = "com.im.proto.body";
+option java_multiple_files = true;
+
+enum CallMediaType {
+  CALL_MEDIA_UNSPECIFIED = 0;
+  CALL_MEDIA_VOICE       = 1;
+  CALL_MEDIA_VIDEO       = 2;  // 预留（D45 MVP 不实现）
+}
+
+enum CallEvent {
+  CALL_EVENT_UNSPECIFIED = 0;
+  CALL_EVENT_INVITE      = 1;  // 来电振铃（推被叫全端）
+  CALL_EVENT_ACCEPTED    = 2;  // 对方已接听（推主叫）
+  CALL_EVENT_REJECTED    = 3;  // 对方拒接（推主叫）
+  CALL_EVENT_CANCELED    = 4;  // 主叫在接听前取消（推被叫）
+  CALL_EVENT_HANGUP      = 5;  // 通话中对方挂断
+  CALL_EVENT_TIMEOUT     = 6;  // 60s 无人接听（推双方）
+  CALL_EVENT_BUSY        = 7;  // 对方忙线（推主叫；由服务端代答，不打扰被叫）
+  CALL_EVENT_SIGNAL      = 8;  // SDP/ICE 信令中转（signal 字段有值）
+  CALL_EVENT_ANSWERED_ELSEWHERE = 9;  // 本账号其他端已接听（推被叫其余端收铃）
+}
+
+enum CallSignalType {
+  CALL_SIGNAL_UNSPECIFIED = 0;
+  CALL_SDP_OFFER          = 1;
+  CALL_SDP_ANSWER         = 2;
+  CALL_ICE_CANDIDATE      = 3;
+}
+
+// TURN/STUN 服务器描述（coturn REST 凭证：username={expiry}:{userId}，
+// credential=base64(hmac-sha1(secret, username))，1h 时效）
+message IceServer {
+  repeated string urls  = 1;   // 如 "turn:turn.example.com:3478?transport=udp"
+  string username       = 2;   // STUN 无凭证时为空
+  string credential     = 3;
+}
+
+// ---------------- 上行（C->S）----------------
+
+message CallInvite {
+  int64 callee_user_id    = 1;
+  CallMediaType media     = 2;
+  string client_call_id   = 3;  // UUID，重试幂等：同 id 重复 INVITE 返回同一 call
+}
+
+message CallAnswer {
+  string call_id = 1;
+  bool accept    = 2;  // false=拒接
+}
+
+message CallSignal {
+  string call_id       = 1;
+  CallSignalType type  = 2;
+  string payload       = 3;  // SDP 原文 / ICE candidate JSON，服务端不解析
+}
+
+message CallHangup {
+  string call_id = 1;  // 振铃期主叫调用=取消；通话中调用=挂断
+}
+
+// ---------------- 下行 ----------------
+
+// CALL_* 上行的统一同步响应（Dispatch 返回，Cmd=CALL_ACK）
+message CallAck {
+  int32 code                    = 1;  // 0=OK；忙线/无效状态等见 common/error.proto
+  string message                = 2;
+  string call_id                = 3;
+  repeated IceServer ice_servers = 4;  // INVITE 与 ANSWER(accept) 的 ack 携带
+  int64 server_ts               = 5;
+}
+
+// 服务端推送（Cmd=CALL_NOTIFY，need_ack=true）
+message CallNotify {
+  string call_id                = 1;
+  CallEvent event               = 2;
+  int64 peer_user_id            = 3;  // 对端（来电=主叫；其余=另一方）
+  CallMediaType media           = 4;
+  CallSignal signal             = 5;  // event=SIGNAL 时有值
+  repeated IceServer ice_servers = 6;  // event=INVITE / ACCEPTED 时携带
+  int64 server_ts               = 7;
+  int32 duration_sec            = 8;  // event=HANGUP/TIMEOUT 时的已通话时长（未接通=0）
+}

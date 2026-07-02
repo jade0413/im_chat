@@ -17,6 +17,9 @@ class MessageRepository {
   Stream<List<ChatMessage>> watch(String convId) =>
       _messageDao.watchMessages(convId);
 
+  Future<List<ChatMessage>> search(String keyword, {int limit = 80}) =>
+      _messageDao.searchMessages(keyword, limit: limit);
+
   Future<void> sendText(String convId, String text,
           {List<String> atUserIds = const []}) =>
       _engine.sendText(convId, text, atUserIds: atUserIds);

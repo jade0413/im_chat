@@ -36,4 +36,20 @@ class FileApi {
       ),
     );
   }
+
+  /// 确认对象已成功写入 MinIO，服务端会校验 size/mime 并把 file_meta 标记为 CONFIRMED。
+  Future<void> confirm({
+    required String objectKey,
+    int? size,
+    String? mime,
+  }) async {
+    await _client.dio.post<dynamic>(
+      '/api/v1/files/confirm',
+      data: {
+        'objectKey': objectKey,
+        if (size != null) 'size': size,
+        if (mime != null && mime.isNotEmpty) 'mime': mime,
+      },
+    );
+  }
 }

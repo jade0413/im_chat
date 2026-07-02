@@ -7,39 +7,73 @@ import '../../core/theme/lumo_colors.dart';
 import '../../data/models/conversation.dart';
 import '../../data/models/friend.dart';
 import '../../shared/widgets/lumo_avatar.dart';
+import '../cs/cs_conversation_sheet.dart';
 import '../groups/group_info_dialog.dart';
 import 'widgets/input_bar.dart';
 import 'widgets/message_list.dart';
 
 /// 单个会话聊天页。embedded=true 时用于桌面右栏（无返回按钮、无 Scaffold AppBar）。
-class ChatPage extends ConsumerWidget {
+class ChatPage extends ConsumerStatefulWidget {
   const ChatPage({super.key, required this.convId, this.embedded = false});
 
   final String convId;
   final bool embedded;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ChatPage> createState() => _ChatPageState();
+}
+
+class _ChatPageState extends ConsumerState<ChatPage> {
+  String? _lastMarkedConvId;
+  String? _lastMarkedSeq;
+
+  @override
+  void didUpdateWidget(covariant ChatPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.convId != widget.convId) {
+      _lastMarkedConvId = null;
+      _lastMarkedSeq = null;
+    }
+  }
+
+  void _markIfUnread(Conversation? c) {
+    if (c == null || c.unread <= 0) return;
+    if (_lastMarkedConvId == c.convId && _lastMarkedSeq == c.maxSeq) return;
+    _lastMarkedConvId = c.convId;
+    _lastMarkedSeq = c.maxSeq;
+    Future.microtask(() {
+      if (!mounted) return;
+      ref.read(messageRepositoryProvider).markRead(c.convId, c.maxSeq);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final convId = widget.convId;
     final convAsync = ref.watch(conversationProvider(convId));
     final conv = convAsync.valueOrNull;
 
     // 进入/有新消息时标记已读到最新 seq。
-    ref.listen(conversationProvider(convId), (_, next) {
-      final c = next.valueOrNull;
-      if (c != null && c.unread > 0) {
-        ref.read(messageRepositoryProvider).markRead(c.convId, c.maxSeq);
-      }
-    });
+    ref.listen(
+      conversationProvider(convId),
+      (_, next) => _markIfUnread(next.valueOrNull),
+    );
+    _markIfUnread(conv);
 
     final body = Column(
       children: [
         Expanded(
-            child: MessageList(convId: convId, peerReadSeq: conv?.peerReadSeq)),
+          child: MessageList(
+            key: ValueKey(convId),
+            convId: convId,
+            peerReadSeq: conv?.peerReadSeq,
+          ),
+        ),
         InputBar(convId: convId),
       ],
     );
 
-    if (embedded) {
+    if (widget.embedded) {
       return Column(
         children: [
           _Header(convId: convId, conv: conv, embedded: true),
@@ -60,7 +94,8 @@ class ChatPage extends ConsumerWidget {
 }
 
 class _Header extends ConsumerWidget {
-  const _Header({required this.convId, required this.conv, required this.embedded});
+  const _Header(
+      {required this.convId, required this.conv, required this.embedded});
   final String convId;
   final Conversation? conv;
   final bool embedded;
@@ -84,8 +119,8 @@ class _Header extends ConsumerWidget {
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontWeight: FontWeight.w600, fontSize: 16),
+                style:
+                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
               ),
             ),
             // C2C：标题旁提示可点改备注
@@ -103,8 +138,7 @@ class _Header extends ConsumerWidget {
               SizedBox(width: 4),
               Text(
                 '在线',
-                style: TextStyle(
-                    fontSize: 11, color: LumoColors.textSecondary),
+                style: TextStyle(fontSize: 11, color: LumoColors.textSecondary),
               ),
             ],
           ),
@@ -127,7 +161,25 @@ class _Header extends ConsumerWidget {
                   )
                 : titleBlock,
           ),
-          if (conv?.isGroup ?? false)
+          if (conv?.isCs ?? false) ...[
+            if (conv?.csStatus == '1')
+              IconButton(
+                tooltip: '认领会话',
+                onPressed: () => _claimCs(context, ref),
+                icon: const Icon(Icons.person_add_alt_1_outlined),
+              ),
+            if (conv?.csStatus == '2')
+              IconButton(
+                tooltip: '结单',
+                onPressed: () => _resolveCs(context, ref),
+                icon: const Icon(Icons.check_circle_outline_rounded),
+              ),
+            IconButton(
+              tooltip: '会话资料',
+              onPressed: () => showCsConversationSheet(context, convId: convId),
+              icon: const Icon(Icons.article_outlined),
+            ),
+          ] else if (conv?.isGroup ?? false)
             IconButton(
               tooltip: '群聊信息',
               onPressed: conv?.groupId == null
@@ -142,6 +194,38 @@ class _Header extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _claimCs(BuildContext context, WidgetRef ref) async {
+    final c = conv;
+    if (c == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(csApiProvider).claim(c.convId);
+      await ref
+          .read(conversationRepositoryProvider)
+          .save(c.copyWith(csStatus: '2'));
+      ref.invalidate(csConversationsProvider);
+      messenger.showSnackBar(const SnackBar(content: Text('已认领会话')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('认领失败：$e')));
+    }
+  }
+
+  Future<void> _resolveCs(BuildContext context, WidgetRef ref) async {
+    final c = conv;
+    if (c == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(csApiProvider).resolve(c.convId);
+      await ref
+          .read(conversationRepositoryProvider)
+          .save(c.copyWith(csStatus: '3'));
+      ref.invalidate(csConversationsProvider);
+      messenger.showSnackBar(const SnackBar(content: Text('会话已结单')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('结单失败：$e')));
+    }
   }
 
   void _showGroupInfo(BuildContext context, Conversation conv) {
@@ -203,9 +287,8 @@ class _Header extends ConsumerWidget {
     try {
       await ref.read(friendApiProvider).updateRemark(peerId, remark);
       // 备注为空 → 回落昵称；否则显示备注。
-      final fallback = (friend?.nickname?.isNotEmpty ?? false)
-          ? friend!.nickname!
-          : c.title;
+      final fallback =
+          (friend?.nickname?.isNotEmpty ?? false) ? friend!.nickname! : c.title;
       final newTitle = remark.isNotEmpty ? remark : fallback;
       await ref.read(conversationRepositoryProvider).rename(c.convId, newTitle);
       ref.invalidate(friendsProvider); // 联系人列表同步新备注

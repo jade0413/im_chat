@@ -9,6 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "im.file")
 public record FileProperties(
     String endpoint,
+    String publicEndpoint,
     String accessKey,
     String secretKey,
     String bucket,
@@ -38,6 +39,7 @@ public record FileProperties(
 
   public FileProperties {
     endpoint = firstText(endpoint, env("IM_MINIO_ENDPOINT"), env("MINIO_ENDPOINT"), "http://localhost:9000");
+    publicEndpoint = firstText(publicEndpoint, env("IM_MINIO_PUBLIC_ENDPOINT"), env("MINIO_PUBLIC_ENDPOINT"), endpoint);
     accessKey = firstText(accessKey, env("IM_MINIO_ACCESS_KEY"), env("MINIO_ROOT_USER"), "im_minio");
     secretKey = firstText(secretKey, env("IM_MINIO_SECRET_KEY"), env("MINIO_ROOT_PASSWORD"), "im_dev_minio_pwd");
     bucket = firstText(bucket, env("IM_MINIO_BUCKET"), env("MINIO_BUCKET"), "im-media");

@@ -32,7 +32,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -55,6 +55,9 @@ class AppDatabase extends _$AppDatabase {
               FROM outbox
               ''',
             );
+          }
+          if (from < 3) {
+            await _createMessageSearchIndex();
           }
           await _createIndexes();
         },
@@ -80,6 +83,55 @@ class AppDatabase extends _$AppDatabase {
     // 去重：同一会话同一 seq 至多一条（防重连/重复 SYNC 插入重复）
     await customStatement(
       'CREATE UNIQUE INDEX IF NOT EXISTS uq_msg_conv_seq ON messages (conv_id, seq) WHERE seq IS NOT NULL;',
+    );
+    await _createMessageSearchIndex();
+  }
+
+  Future<void> _createMessageSearchIndex() async {
+    await customStatement(
+      '''
+      CREATE VIRTUAL TABLE IF NOT EXISTS message_search_fts USING fts5(
+        client_msg_id UNINDEXED,
+        conv_id UNINDEXED,
+        sender,
+        body,
+        tokenize='unicode61'
+      );
+      ''',
+    );
+    await customStatement(
+      '''
+      INSERT OR IGNORE INTO message_search_fts(rowid, client_msg_id, conv_id, sender, body)
+      SELECT rowid, client_msg_id, conv_id, sender_nickname, content_json
+      FROM messages;
+      ''',
+    );
+    await customStatement(
+      '''
+      CREATE TRIGGER IF NOT EXISTS message_search_ai
+      AFTER INSERT ON messages BEGIN
+        INSERT OR REPLACE INTO message_search_fts(rowid, client_msg_id, conv_id, sender, body)
+        VALUES (new.rowid, new.client_msg_id, new.conv_id, new.sender_nickname, new.content_json);
+      END;
+      ''',
+    );
+    await customStatement(
+      '''
+      CREATE TRIGGER IF NOT EXISTS message_search_ad
+      AFTER DELETE ON messages BEGIN
+        DELETE FROM message_search_fts WHERE rowid = old.rowid;
+      END;
+      ''',
+    );
+    await customStatement(
+      '''
+      CREATE TRIGGER IF NOT EXISTS message_search_au
+      AFTER UPDATE ON messages BEGIN
+        DELETE FROM message_search_fts WHERE rowid = old.rowid;
+        INSERT OR REPLACE INTO message_search_fts(rowid, client_msg_id, conv_id, sender, body)
+        VALUES (new.rowid, new.client_msg_id, new.conv_id, new.sender_nickname, new.content_json);
+      END;
+      ''',
     );
   }
 }

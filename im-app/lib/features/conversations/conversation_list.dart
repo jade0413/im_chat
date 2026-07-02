@@ -55,7 +55,7 @@ class _ConversationListState extends ConsumerState<ConversationList> {
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
                 ),
                 const Spacer(),
-                _circleBtn(Icons.search, () {}),
+                _circleBtn(Icons.search, () => context.push('/search')),
                 const SizedBox(width: 8),
                 _circleBtn(
                   Icons.add,

@@ -30,6 +30,18 @@ enum Cmd {
   READ_NOTIFY   = 23;  // S->C body=ReadNotify
   REVOKE_NOTIFY = 24;  // S->C body=RevokeNotify   （用户撤回/审核撤回共用）
   CONV_NOTIFY   = 25;  // S->C body=ConvNotify     （会话元数据变更：置顶/免打扰/客服状态）
+
+  // ---- 实时通话信令（D45：1v1 语音 MVP，body 定义在 body/call.proto）----
+  // 媒体流走 WebRTC P2P（+coturn 中继），本通道只承载信令；网关照常透传。
+  CALL_INVITE   = 40;  // C->S body=CallInvite     （发起呼叫；Dispatch 同步返回 CALL_ACK）
+  CALL_ANSWER   = 41;  // C->S body=CallAnswer     （接听/拒接；返回 CALL_ACK）
+  CALL_SIGNAL   = 42;  // C->S body=CallSignal     （SDP/ICE 透传中转；返回 CALL_ACK）
+  CALL_HANGUP   = 43;  // C->S body=CallHangup     （挂断/取消；返回 CALL_ACK）
+  CALL_NOTIFY   = 45;  // S->C body=CallNotify     （来电/接通/拒接/取消/挂断/超时/忙线/信令）
+                       //      need_ack=true（协议 §3 修订：MSG_PUSH 之外唯一的 need_ack 帧——
+                       //      振铃丢失不可接受，且 D44 后客户端对任意 req_id≠0 推送帧均回 ack）
+  CALL_ACK      = 49;  // S->C body=CallAck        （CALL_* 上行的统一同步响应）
+
   ERROR         = 99;  // S->C body=ErrorBody（body/*.proto）
 }
 

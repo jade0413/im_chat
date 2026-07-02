@@ -19,7 +19,8 @@ class MessageList extends ConsumerStatefulWidget {
 
 class _MessageListState extends ConsumerState<MessageList> {
   final _scroll = ScrollController();
-  int _lastCount = 0;
+  int? _lastCount;
+  String? _lastTailKey;
   bool _loadingOlder = false;
 
   @override
@@ -34,8 +35,20 @@ class _MessageListState extends ConsumerState<MessageList> {
     super.dispose();
   }
 
+  @override
+  void didUpdateWidget(covariant MessageList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.convId != widget.convId) {
+      _lastCount = null;
+      _lastTailKey = null;
+      _loadingOlder = false;
+    }
+  }
+
   void _onScroll() {
-    if (_scroll.position.pixels <= 60 && !_loadingOlder) {
+    final pos = _scroll.position;
+    if (pos.maxScrollExtent <= 0 || _loadingOlder) return;
+    if (pos.pixels >= pos.maxScrollExtent - 60) {
       _loadingOlder = true;
       ref
           .read(messageRepositoryProvider)
@@ -44,19 +57,25 @@ class _MessageListState extends ConsumerState<MessageList> {
     }
   }
 
-  void _autoScroll(int count) {
-    if (count != _lastCount) {
-      _lastCount = count;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scroll.hasClients) {
-          _scroll.animateTo(
-            _scroll.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOut,
-          );
-        }
-      });
-    }
+  void _autoScroll(List<ChatMessage> messages) {
+    final count = messages.length;
+    final tailKey = messages.isEmpty ? null : messages.last.clientMsgId;
+    final firstLayout = _lastCount == null;
+    final tailChanged = tailKey != null && tailKey != _lastTailKey;
+
+    _lastCount = count;
+    _lastTailKey = tailKey;
+
+    if (count == 0 || firstLayout || !tailChanged) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scroll.hasClients) return;
+      _scroll.animateTo(
+        _scroll.position.minScrollExtent,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   @override
@@ -68,7 +87,7 @@ class _MessageListState extends ConsumerState<MessageList> {
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('加载失败：$e')),
       data: (messages) {
-        _autoScroll(messages.length);
+        _autoScroll(messages);
         if (messages.isEmpty) {
           return const Center(
             child: Text(
@@ -79,11 +98,14 @@ class _MessageListState extends ConsumerState<MessageList> {
         }
         return ListView.builder(
           controller: _scroll,
+          reverse: true,
+          physics: const ClampingScrollPhysics(),
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
           itemCount: messages.length,
           itemBuilder: (context, i) {
-            final msg = messages[i];
-            final prev = i > 0 ? messages[i - 1] : null;
+            final index = messages.length - 1 - i;
+            final msg = messages[index];
+            final prev = index > 0 ? messages[index - 1] : null;
             final isSelf = msg.sender.userId == myId;
             final showTime = _shouldShowTime(prev, msg);
             return Column(

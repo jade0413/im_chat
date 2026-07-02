@@ -20,6 +20,8 @@ class GroupInfoDialog extends ConsumerStatefulWidget {
 class _GroupInfoDialogState extends ConsumerState<GroupInfoDialog> {
   var _loadingMembers = true;
   var _savingInvite = false;
+  var _renaming = false;
+  String? _removingUserId;
   var _members = const <GroupMember>[];
   var _memberProfiles = const <String, Friend>{};
   final _inviteSelected = <String>{};
@@ -74,6 +76,16 @@ class _GroupInfoDialogState extends ConsumerState<GroupInfoDialog> {
                     ],
                   ),
                 ),
+                IconButton(
+                  tooltip: '修改群名称',
+                  onPressed: _renaming ? null : _renameGroup,
+                  icon: _renaming
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.edit_outlined),
+                ),
               ],
             ),
             const SizedBox(height: 18),
@@ -93,6 +105,8 @@ class _GroupInfoDialogState extends ConsumerState<GroupInfoDialog> {
               selfId: self?.id,
               selfName: self?.displayName,
               selfAvatar: self?.avatar,
+              removingUserId: _removingUserId,
+              onRemove: _removeMember,
             ),
             const SizedBox(height: 18),
             const Text(
@@ -226,6 +240,97 @@ class _GroupInfoDialogState extends ConsumerState<GroupInfoDialog> {
       if (mounted) setState(() => _savingInvite = false);
     }
   }
+
+  Future<void> _renameGroup() async {
+    final controller = TextEditingController(text: widget.conversation.title);
+    final nextName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('修改群名称'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 64,
+          decoration: const InputDecoration(
+            hintText: '输入新的群名称',
+            counterText: '',
+          ),
+          onSubmitted: (value) => Navigator.of(ctx).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    final name = nextName?.trim() ?? '';
+    if (name.isEmpty || name == widget.conversation.title) return;
+    setState(() => _renaming = true);
+    try {
+      final updated =
+          await ref.read(groupApiProvider).renameGroup(_groupId, name);
+      await ref
+          .read(conversationRepositoryProvider)
+          .rename(widget.conversation.convId, updated.name);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('群名称已更新')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('修改群名称失败：$e')),
+      );
+    } finally {
+      if (mounted) setState(() => _renaming = false);
+    }
+  }
+
+  Future<void> _removeMember(GroupMember member) async {
+    final selfId = ref.read(authControllerProvider).user?.id;
+    if (member.userId == selfId) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('移除成员'),
+        content: const Text('确定将该成员移出群聊？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('移除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _removingUserId = member.userId);
+    try {
+      await ref.read(groupApiProvider).removeMember(_groupId, member.userId);
+      await _loadMembers();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('成员已移除')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('移除成员失败：$e')),
+      );
+    } finally {
+      if (mounted) setState(() => _removingUserId = null);
+    }
+  }
 }
 
 class _MemberList extends StatelessWidget {
@@ -237,6 +342,8 @@ class _MemberList extends StatelessWidget {
     this.selfId,
     this.selfName,
     this.selfAvatar,
+    this.removingUserId,
+    this.onRemove,
   });
 
   final bool loading;
@@ -246,6 +353,8 @@ class _MemberList extends StatelessWidget {
   final String? selfId;
   final String? selfName;
   final String? selfAvatar;
+  final String? removingUserId;
+  final void Function(GroupMember member)? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -276,16 +385,36 @@ class _MemberList extends StatelessWidget {
               ? (selfName == null || selfName!.isEmpty ? '我' : '$selfName（我）')
               : (friend?.displayName ?? '未设置昵称');
           final avatar = isSelf ? selfAvatar : friend?.avatar;
+          final role = member.isOwner
+              ? const _RoleBadge(text: '群主', color: Color(0xFFF59E0B))
+              : member.isAdmin
+                  ? const _RoleBadge(text: '管理员', color: Color(0xFF3B82F6))
+                  : null;
           return ListTile(
             dense: true,
             contentPadding: EdgeInsets.zero,
             leading: LumoAvatar(name: name, url: avatar, size: 34),
             title: Text(name),
-            trailing: member.isOwner
-                ? const _RoleBadge(text: '群主', color: Color(0xFFF59E0B))
-                : member.isAdmin
-                    ? const _RoleBadge(text: '管理员', color: Color(0xFF3B82F6))
-                    : null,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (role != null) role,
+                if (!member.isOwner && !isSelf && onRemove != null) ...[
+                  const SizedBox(width: 4),
+                  IconButton(
+                    tooltip: '移除成员',
+                    icon: removingUserId == member.userId
+                        ? const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.person_remove_outlined, size: 20),
+                    onPressed:
+                        removingUserId == null ? () => onRemove!(member) : null,
+                  ),
+                ],
+              ],
+            ),
           );
         },
       ),

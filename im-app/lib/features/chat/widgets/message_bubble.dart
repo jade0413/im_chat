@@ -9,6 +9,7 @@ import '../../../core/utils/time.dart';
 import '../../../data/models/chat_message.dart';
 import '../../../data/models/enums.dart';
 import '../../../data/models/message_content.dart';
+import '../../../data/models/system_notification.dart';
 import '../../../shared/widgets/lumo_avatar.dart';
 
 /// 单条消息气泡。按内容类型渲染；自己/对方左右分列；系统消息居中灰条。
@@ -284,7 +285,7 @@ class MessageBubble extends StatelessWidget {
 
   Widget _systemChip(BuildContext context) {
     final c = message.content as NotificationBody;
-    final label = c.eventType == 'message.revoked' ? '消息已撤回' : _eventLabel(c);
+    final label = systemNotificationText(c);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Center(
@@ -303,16 +304,6 @@ class MessageBubble extends StatelessWidget {
       ),
     );
   }
-
-  String _eventLabel(NotificationBody c) => switch (c.eventType) {
-        'group.created' => '群聊已创建',
-        'group.member_added' => '新成员加入群聊',
-        'group.member_removed' => '成员退出群聊',
-        'group.name_changed' => '群名已修改',
-        'cs.assigned' => '客服已接入',
-        'cs.resolved' => '会话已结束',
-        _ => c.payload ?? '系统消息',
-      };
 
   String _fmtSize(int bytes) {
     if (bytes < 1024) return '$bytes B';

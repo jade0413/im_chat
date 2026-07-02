@@ -1,8 +1,9 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/theme/lumo_colors.dart';
@@ -32,6 +33,7 @@ class _InputBarState extends ConsumerState<InputBar> {
   bool _hasText = false;
   bool _showEmoji = false;
   bool _uploading = false;
+  bool _claiming = false;
   late final MessageRepository _messages;
   late final ConversationRepository _convs;
 
@@ -168,18 +170,24 @@ class _InputBarState extends ConsumerState<InputBar> {
   Future<void> _pickImage() async {
     if (_uploading) return;
     try {
-      final picked = await ImagePicker().pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 85,
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        withData: true,
       );
-      if (picked == null) return;
-      final bytes = await picked.readAsBytes();
+      final files = result?.files ?? const <PlatformFile>[];
+      if (files.isEmpty) return;
+      final file = files.first;
+      final bytes = await _readPickedFileBytes(file);
+      if (bytes == null) {
+        _toast('无法读取图片内容');
+        return;
+      }
       await _runUpload(() => ref.read(attachmentSenderProvider).sendImage(
             widget.convId,
             bytes: bytes,
-            fileName: picked.name,
-            mime: picked.mimeType ?? _mimeFromName(picked.name),
-            localPath: picked.path,
+            fileName: file.name,
+            mime: _mimeFromName(file.name),
+            localPath: file.path,
           ));
     } catch (e) {
       _toast('图片发送失败：$e');
@@ -193,7 +201,7 @@ class _InputBarState extends ConsumerState<InputBar> {
       final files = result?.files ?? const <PlatformFile>[];
       if (files.isEmpty) return;
       final file = files.first;
-      final bytes = file.bytes;
+      final bytes = await _readPickedFileBytes(file);
       if (bytes == null) {
         _toast('无法读取文件内容');
         return;
@@ -209,12 +217,40 @@ class _InputBarState extends ConsumerState<InputBar> {
     }
   }
 
+  Future<Uint8List?> _readPickedFileBytes(PlatformFile file) async {
+    final bytes = file.bytes;
+    if (bytes != null) return bytes;
+    final path = file.path;
+    if (path == null || path.isEmpty) return null;
+    return File(path).readAsBytes();
+  }
+
   Future<void> _runUpload(Future<void> Function() task) async {
     setState(() => _uploading = true);
     try {
       await task();
     } finally {
       if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  Future<void> _claimCsConversation() async {
+    if (_claiming) return;
+    setState(() => _claiming = true);
+    try {
+      await ref.read(csApiProvider).claim(widget.convId);
+      final current = ref.read(conversationProvider(widget.convId)).valueOrNull;
+      if (current != null) {
+        await ref
+            .read(conversationRepositoryProvider)
+            .save(current.copyWith(csStatus: '2'));
+      }
+      ref.invalidate(csConversationsProvider);
+      _toast('已认领会话');
+    } catch (e) {
+      _toast('认领失败：$e');
+    } finally {
+      if (mounted) setState(() => _claiming = false);
     }
   }
 
@@ -229,6 +265,36 @@ class _InputBarState extends ConsumerState<InputBar> {
     final conv = ref.watch(conversationProvider(widget.convId)).valueOrNull;
     _isGroup = conv?.isGroup ?? false;
     _groupId = conv?.groupId;
+    if (conv?.isSystem ?? false) {
+      return const _DisabledInputNotice(text: '系统通知会话，不可回复');
+    }
+    if (conv?.isCs ?? false) {
+      final status = conv?.csStatus;
+      if (status != '2') {
+        final agentStatus =
+            ref.watch(authControllerProvider).user?.agentStatus ?? 0;
+        final canClaim = status == '1' && agentStatus == 1;
+        return _DisabledInputNotice(
+          text: _csDisabledText(status, agentStatus),
+          action: status == '1'
+              ? FilledButton.icon(
+                  onPressed:
+                      canClaim && !_claiming ? _claimCsConversation : null,
+                  icon: _claiming
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.person_add_alt_1_rounded),
+                  label: Text(_claiming ? '认领中' : '认领会话'),
+                )
+              : null,
+        );
+      }
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -275,8 +341,8 @@ class _InputBarState extends ConsumerState<InputBar> {
                       },
                       decoration: const InputDecoration(
                         hintText: '输入消息…',
-                        contentPadding: EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 10),
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       ),
                     ),
                   ),
@@ -351,6 +417,52 @@ class _InputBarState extends ConsumerState<InputBar> {
         return 'application/octet-stream';
     }
   }
+
+  String _csDisabledText(String? csStatus, int agentStatus) {
+    if (csStatus == '1') {
+      if (agentStatus == 1) return '认领会话后可查看记录并回复访客';
+      if (agentStatus == 2) return '当前忙碌中，切换为在线后可认领新访客';
+      return '当前离线，切换为在线后可认领新访客';
+    }
+    if (csStatus == '3') return '会话已结单，不能继续发送消息';
+    return '客服会话状态异常，暂不可回复';
+  }
+}
+
+class _DisabledInputNotice extends StatelessWidget {
+  const _DisabledInputNotice({required this.text, this.action});
+
+  final String text;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).appBarTheme.backgroundColor,
+        border: const Border(
+            top: BorderSide(color: LumoColors.divider, width: 0.6)),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                text,
+                style: const TextStyle(color: LumoColors.textSecondary),
+              ),
+            ),
+            if (action != null) ...[
+              const SizedBox(width: 10),
+              action!,
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// 常用表情面板（unicode，直接插入文本；跨端一致、零依赖）。
@@ -359,12 +471,54 @@ class _EmojiPanel extends StatelessWidget {
   final void Function(String) onPick;
 
   static const _emojis = [
-    '😀', '😁', '😂', '🤣', '😊', '😍', '😘', '😜',
-    '🤔', '🙂', '😉', '😎', '😢', '😭', '😡', '😱',
-    '👍', '👎', '👏', '🙏', '💪', '🤝', '👌', '✌️',
-    '❤️', '💔', '💯', '🔥', '🎉', '✨', '⭐', '🌟',
-    '😴', '🤗', '😅', '😇', '🥰', '😋', '🤩', '😳',
-    '🍺', '☕', '🎂', '🌹', '🐶', '🐱', '🌈', '☀️',
+    '😀',
+    '😁',
+    '😂',
+    '🤣',
+    '😊',
+    '😍',
+    '😘',
+    '😜',
+    '🤔',
+    '🙂',
+    '😉',
+    '😎',
+    '😢',
+    '😭',
+    '😡',
+    '😱',
+    '👍',
+    '👎',
+    '👏',
+    '🙏',
+    '💪',
+    '🤝',
+    '👌',
+    '✌️',
+    '❤️',
+    '💔',
+    '💯',
+    '🔥',
+    '🎉',
+    '✨',
+    '⭐',
+    '🌟',
+    '😴',
+    '🤗',
+    '😅',
+    '😇',
+    '🥰',
+    '😋',
+    '🤩',
+    '😳',
+    '🍺',
+    '☕',
+    '🎂',
+    '🌹',
+    '🐶',
+    '🐱',
+    '🌈',
+    '☀️',
   ];
 
   @override

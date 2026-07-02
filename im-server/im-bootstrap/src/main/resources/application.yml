@@ -78,6 +78,12 @@ im:
       refresh-ttl: 30d
   gateway-auth:
     heartbeat-interval-sec: ${IM_GATEWAY_AUTH_HEARTBEAT_INTERVAL_SEC:30}
+  file:
+    endpoint: ${IM_MINIO_ENDPOINT:${MINIO_ENDPOINT:http://localhost:9000}}
+    public-endpoint: ${IM_MINIO_PUBLIC_ENDPOINT:${MINIO_PUBLIC_ENDPOINT:${im.file.endpoint}}}
+    access-key: ${IM_MINIO_ACCESS_KEY:${MINIO_ROOT_USER:im_minio}}
+    secret-key: ${IM_MINIO_SECRET_KEY:${MINIO_ROOT_PASSWORD:im_dev_minio_pwd}}
+    bucket: ${IM_MINIO_BUCKET:im-media}
   message:
     retention:
       # 消息保留清理作业（按 tenant_config.msg_retention_days 周期删除过期消息）。

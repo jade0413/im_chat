@@ -9,6 +9,7 @@ import '../../shared/widgets/lumo_avatar.dart';
 import '../chat/chat_page.dart';
 import '../contacts/contacts_page.dart';
 import '../conversations/conversation_list.dart';
+import '../cs/cs_workbench_page.dart';
 import '../profile/profile_page.dart';
 
 /// 桌面三栏选中的会话（移动端走路由 push，不用此 provider）。
@@ -28,17 +29,27 @@ class HomeShell extends StatelessWidget {
 }
 
 // ─── 移动端：底部 Tab ──────────────────────────────────────
-class _MobileHome extends StatefulWidget {
+class _MobileHome extends ConsumerStatefulWidget {
   const _MobileHome();
   @override
-  State<_MobileHome> createState() => _MobileHomeState();
+  ConsumerState<_MobileHome> createState() => _MobileHomeState();
 }
 
-class _MobileHomeState extends State<_MobileHome> {
+class _MobileHomeState extends ConsumerState<_MobileHome> {
   int _index = 0;
 
   @override
   Widget build(BuildContext context) {
+    final isAgent = ref.watch(authControllerProvider).user?.isAgent ?? false;
+    final pages = <Widget>[
+      ConversationList(
+        onOpen: (conv) => context.push('/chat/${conv.convId}'),
+      ),
+      const ContactsPage(),
+      if (isAgent) const CsWorkbenchPage(),
+      const ProfilePage(),
+    ];
+    if (_index >= pages.length) _index = pages.length - 1;
     return Scaffold(
       body: SafeArea(
         bottom: false,
@@ -48,13 +59,7 @@ class _MobileHomeState extends State<_MobileHome> {
             Expanded(
               child: IndexedStack(
                 index: _index,
-                children: [
-                  ConversationList(
-                    onOpen: (conv) => context.push('/chat/${conv.convId}'),
-                  ),
-                  const ContactsPage(),
-                  const ProfilePage(),
-                ],
+                children: pages,
               ),
             ),
           ],
@@ -63,18 +68,24 @@ class _MobileHomeState extends State<_MobileHome> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.chat_bubble_outline),
             selectedIcon: Icon(Icons.chat_bubble),
             label: '消息',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.people_outline),
             selectedIcon: Icon(Icons.people),
             label: '通讯录',
           ),
-          NavigationDestination(
+          if (isAgent)
+            const NavigationDestination(
+              icon: Icon(Icons.support_agent_outlined),
+              selectedIcon: Icon(Icons.support_agent),
+              label: '客服',
+            ),
+          const NavigationDestination(
             icon: Icon(Icons.person_outline),
             selectedIcon: Icon(Icons.person),
             label: '我',
@@ -99,6 +110,7 @@ class _DesktopHomeState extends ConsumerState<_DesktopHome> {
   Widget build(BuildContext context) {
     final selected = ref.watch(selectedConvProvider);
     final user = ref.watch(authControllerProvider).user;
+    final isAgent = user?.isAgent ?? false;
     return Scaffold(
       body: Row(
         children: [
@@ -111,7 +123,8 @@ class _DesktopHomeState extends ConsumerState<_DesktopHome> {
                 const SizedBox(height: 16),
                 _navIcon(Icons.chat_bubble_rounded, 0),
                 _navIcon(Icons.people_alt_rounded, 1),
-                _navIcon(Icons.folder_rounded, 2),
+                if (isAgent) _navIcon(Icons.support_agent_rounded, 2),
+                _navIcon(Icons.person_rounded, isAgent ? 3 : 2),
                 const Spacer(),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 16),
@@ -144,7 +157,11 @@ class _DesktopHomeState extends ConsumerState<_DesktopHome> {
                     : ChatPage(convId: selected, embedded: true))
                 : (_nav == 1
                     ? ContactsPage(onOpenConversation: _selectConversation)
-                    : const ProfilePage()),
+                    : (_nav == 2 && isAgent
+                        ? CsWorkbenchPage(
+                            onOpenConversation: _selectConversation,
+                          )
+                        : const ProfilePage())),
           ),
         ],
       ),
@@ -155,7 +172,11 @@ class _DesktopHomeState extends ConsumerState<_DesktopHome> {
     if (_nav == 1) {
       return ContactsPage(onOpenConversation: _selectConversation);
     }
-    if (_nav == 2) return const ProfilePage();
+    final isAgent = ref.watch(authControllerProvider).user?.isAgent ?? false;
+    if (_nav == 2 && isAgent) {
+      return CsWorkbenchPage(onOpenConversation: _selectConversation);
+    }
+    if ((_nav == 2 && !isAgent) || _nav == 3) return const ProfilePage();
     return ConversationList(
       selectedConvId: ref.watch(selectedConvProvider),
       onOpen: (conv) =>

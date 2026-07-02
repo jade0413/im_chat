@@ -69,6 +69,14 @@ class FriendApi {
     );
   }
 
+  /// 好友设置（D40）：1=加我需验证，0=免验证。
+  Future<void> updateVerifySetting(int friendVerifyRequired) async {
+    await _client.dio.put<dynamic>(
+      '/api/v1/friend/settings',
+      data: {'friendVerifyRequired': friendVerifyRequired},
+    );
+  }
+
   /// 搜索用户（精确：username 或手机号）。
   Future<List<Friend>> searchUsers(String keyword) async {
     final resp = await _client.dio.get<dynamic>(

@@ -28,6 +28,11 @@ class AttachmentSender {
       size: bytes.length,
     );
     await _fileApi.uploadDirect(presign, bytes);
+    await _fileApi.confirm(
+      objectKey: presign.objectKey,
+      size: bytes.length,
+      mime: mime,
+    );
     await _messages.sendImage(
       convId,
       ImageBody(
@@ -54,6 +59,11 @@ class AttachmentSender {
       size: bytes.length,
     );
     await _fileApi.uploadDirect(presign, bytes);
+    await _fileApi.confirm(
+      objectKey: presign.objectKey,
+      size: bytes.length,
+      mime: mime,
+    );
     await _messages.sendFile(
       convId,
       FileBody(

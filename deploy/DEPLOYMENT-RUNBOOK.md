@@ -121,6 +121,7 @@ docker compose ps                 # 等所有服务 healthy
 
 - **MySQL**：执行 `init/mysql/01-schema.sql`（15 张表 + dev 租户种子）。⚠️ 该脚本**只在数据目录为空的首次启动执行**。后续表结构演进走 Flyway，不要再改这个文件，也不要靠删库重跑它来"升级"。
 - **MinIO**：`minio-init` 一次性建私有 bucket `im-media`（D10 预签名直传），跑完即退出，`docker compose ps` 里显示 exited(0) 属正常。
+- **MinIO 预签名地址**：`MINIO_ENDPOINT` 是 im-server 容器内访问地址（默认 `http://minio:9000`），`MINIO_PUBLIC_ENDPOINT` 是返回给浏览器/APP 的地址。生产必须改成客户端可访问的文件域名或公网地址，否则前端会拿到 `http://minio:9000/...` 这种外部无法解析的 URL。
 
 验证：
 
