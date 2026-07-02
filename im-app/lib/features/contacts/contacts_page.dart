@@ -92,8 +92,11 @@ class ContactsPage extends ConsumerWidget {
     final openConversation = onOpenConversation;
     final router = openConversation == null ? GoRouter.of(context) : null;
     try {
-      final convId =
-          await ref.read(conversationRepositoryProvider).openC2c(f.userId);
+      final convId = await ref.read(conversationRepositoryProvider).openC2c(
+            f.userId,
+            title: f.displayName,
+            avatar: f.avatar,
+          );
       if (openConversation != null) {
         openConversation(convId);
       } else if (router != null) {

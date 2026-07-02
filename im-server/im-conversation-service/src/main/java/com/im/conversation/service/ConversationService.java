@@ -520,9 +520,13 @@ public class ConversationService {
     GroupInfoEntity group = convType(conversation) == ConvType.GROUP
         ? loadGroupInfo(conversation.getGroupId())
         : null;
-    // 单条路径暂不补对端资料（C2C 标题回退 peerUserId，客户端可用本地用户缓存补齐）；
-    // 列表路径已批量填充（D-5）。
-    return buildConvInfo(conversation, peerUserId, member, group, null);
+    UserProfileClient.PeerProfile peerProfile = null;
+    if (convType(conversation) == ConvType.C2C && peerUserId > 0) {
+      Map<Long, UserProfileClient.PeerProfile> profiles =
+          userProfileClient.batchGet(List.of(peerUserId));
+      peerProfile = profiles == null ? null : profiles.get(peerUserId);
+    }
+    return buildConvInfo(conversation, peerUserId, member, group, peerProfile);
   }
 
   /** 不查库的 ConvInfo 装配：群信息、C2C 对端资料由调用方预取传入。 */

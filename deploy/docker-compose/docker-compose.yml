@@ -164,7 +164,7 @@ services:
       --realm=${TURN_REALM:-im.local}
       --listening-port=3478
       --min-port=49160 --max-port=49200
-      --external-ip=${103.45.65.84:-}
+      --external-ip=${EXTERNAL_IP:-}
       --fingerprint
       --no-multicast-peers
       --no-tlsv1 --no-tlsv1_1
