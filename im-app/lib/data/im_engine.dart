@@ -8,6 +8,7 @@ import '../core/proto/codec.dart' as pb;
 import '../core/utils/id.dart';
 import '../core/utils/seq.dart';
 import '../core/utils/uuid.dart';
+import 'call/call_engine.dart';
 import 'local/app_database.dart';
 import 'local/daos/conversation_dao.dart';
 import 'local/daos/kv_dao.dart';
@@ -83,6 +84,11 @@ class ImEngine {
   late final ImSocket _socket;
   ImSocket get socket => _socket;
   Stream<ConnectionState> get connectionState => _socket.stateStream;
+
+  /// 通话引擎（D45）：providers 装配时注入，CALL_* 下行帧转交其处理。
+  CallEngine? _callEngine;
+  // ignore: use_setters_to_change_properties
+  void bindCallEngine(CallEngine engine) => _callEngine = engine;
 
   /// Sync Cursor 全局分量（会话级分量是 conversation.syncSeq + sync_cursors）。
   String _convListVersion = '0';
@@ -253,6 +259,12 @@ class ImEngine {
       case pb.Cmd.CONV_NOTIFY:
         unawaited(_handleConvNotify(body));
         _ackPushIfNeeded(frame.reqId);
+      case pb.Cmd.CALL_NOTIFY:
+        // D45：通话信令推送（need_ack=true，必须回 ack，否则网关判半死链断连）
+        _dispatchCallNotify(body);
+        _ackPushIfNeeded(frame.reqId);
+      case pb.Cmd.CALL_ACK:
+        _dispatchCallAck(body); // CALL_* 上行的响应帧，不 ack
       case pb.Cmd.ERROR:
         _handleError(body);
       default:
@@ -474,6 +486,27 @@ class ImEngine {
           draft: existing?.draft,
         ),
       );
+    }
+  }
+
+  void _dispatchCallNotify(Uint8List body) {
+    final engine = _callEngine;
+    if (engine == null) {
+      _log.warning('CALL_NOTIFY dropped: call engine not bound');
+      return;
+    }
+    try {
+      engine.onCallNotify(pb.CallNotify.fromBuffer(body));
+    } catch (e) {
+      _log.warning('call notify handling failed: $e');
+    }
+  }
+
+  void _dispatchCallAck(Uint8List body) {
+    try {
+      _callEngine?.onCallAck(pb.CallAck.fromBuffer(body));
+    } catch (e) {
+      _log.warning('call ack handling failed: $e');
     }
   }
 

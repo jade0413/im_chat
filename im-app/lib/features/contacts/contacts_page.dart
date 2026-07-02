@@ -20,6 +20,11 @@ class ContactsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final friendsAsync = ref.watch(friendsProvider);
+    final incomingRequests = ref.watch(friendRequestsProvider('incoming'));
+    final pendingRequests = incomingRequests.maybeWhen(
+      data: (items) => items.where((r) => r.pending).length,
+      orElse: () => 0,
+    );
     final groupConvs = ref.watch(conversationsProvider).maybeWhen(
           data: (all) => all.where((c) => c.isGroup).toList(),
           orElse: () => const <Conversation>[],
@@ -48,6 +53,8 @@ class ContactsPage extends ConsumerWidget {
             Icons.person_add_alt_1,
             '新的朋友',
             const Color(0xFF3B82F6),
+            subtitle: pendingRequests > 0 ? '$pendingRequests 条待处理申请' : null,
+            badgeCount: pendingRequests,
             onTap: () => unawaited(GoRouter.of(context).push('/add-friend')),
           ),
           _entry(
@@ -89,8 +96,8 @@ class ContactsPage extends ConsumerWidget {
           await ref.read(conversationRepositoryProvider).openC2c(f.userId);
       if (openConversation != null) {
         openConversation(convId);
-      } else {
-        unawaited(router!.push('/chat/$convId'));
+      } else if (router != null) {
+        unawaited(router.push('/chat/$convId'));
       }
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('打开会话失败：$e')));
@@ -209,6 +216,7 @@ class ContactsPage extends ConsumerWidget {
     String label,
     Color color, {
     String? subtitle,
+    int badgeCount = 0,
     VoidCallback? onTap,
   }) =>
       ListTile(
@@ -229,9 +237,41 @@ class ContactsPage extends ConsumerWidget {
                   color: LumoColors.textSecondary,
                 ),
               ),
-        trailing: const Icon(
-          Icons.chevron_right,
-          color: LumoColors.textSecondary,
+        trailing: SizedBox(
+          width: badgeCount > 0 ? 58 : 24,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (badgeCount > 0) ...[
+                Flexible(
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: LumoColors.danger,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      badgeCount > 99 ? '99+' : '$badgeCount',
+                      maxLines: 1,
+                      overflow: TextOverflow.clip,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ],
+              const Icon(
+                Icons.chevron_right,
+                color: LumoColors.textSecondary,
+              ),
+            ],
+          ),
         ),
         onTap: onTap,
       );
@@ -272,6 +312,7 @@ class _FriendList extends StatelessWidget {
         itemBuilder: (_, i) {
           final f = sorted[i];
           final showHeader = i == 0 || sorted[i - 1].initial != f.initial;
+          final subtitle = _subtitle(f);
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -288,9 +329,9 @@ class _FriendList extends StatelessWidget {
                 leading:
                     LumoAvatar(name: f.displayName, url: f.avatar, size: 42),
                 title: Text(f.displayName),
-                subtitle: _subtitle(f) != null
-                    ? Text(_subtitle(f)!, style: const TextStyle(fontSize: 12))
-                    : null,
+                subtitle: subtitle == null
+                    ? null
+                    : Text(subtitle, style: const TextStyle(fontSize: 12)),
                 trailing: IconButton(
                   tooltip: '修改备注',
                   icon: const Icon(Icons.edit_outlined, size: 20),
@@ -307,11 +348,14 @@ class _FriendList extends StatelessWidget {
   }
 
   String? _subtitle(Friend f) {
-    if (f.remark != null && f.remark!.isNotEmpty) {
-      if (f.nickname != null && f.nickname!.isNotEmpty) return f.nickname;
-      if (f.username != null && f.username!.isNotEmpty) return '@${f.username}';
+    final remark = f.remark;
+    final nickname = f.nickname;
+    final username = f.username;
+    if (remark != null && remark.isNotEmpty) {
+      if (nickname != null && nickname.isNotEmpty) return nickname;
+      if (username != null && username.isNotEmpty) return '@$username';
     }
-    if (f.username != null && f.username!.isNotEmpty) return '@${f.username}';
+    if (username != null && username.isNotEmpty) return '@$username';
     return null;
   }
 }

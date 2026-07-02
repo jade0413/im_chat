@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../core/logging.dart';
+import '../data/call/call_engine.dart';
 import '../data/im_engine.dart';
 import '../data/local/app_database.dart';
 import '../data/local/daos/conversation_dao.dart';
@@ -164,6 +165,21 @@ final imEngineProvider = Provider<ImEngine>((ref) {
 /// 连接状态（顶部网络横幅订阅）。
 final connectionStateProvider = StreamProvider<ConnectionState>(
   (ref) => ref.watch(imEngineProvider).connectionState,
+);
+
+// ─── 语音通话引擎（D45：信令走 ImSocket，媒体 WebRTC P2P + coturn）────
+
+final callEngineProvider = Provider<CallEngine>((ref) {
+  final imEngine = ref.watch(imEngineProvider);
+  final callEngine = CallEngine(sendFrame: imEngine.socket.send);
+  imEngine.bindCallEngine(callEngine); // CALL_NOTIFY / CALL_ACK 帧接线
+  ref.onDispose(callEngine.dispose);
+  return callEngine;
+});
+
+/// 通话状态（通话页 + 全局来电路由监听订阅）。
+final callStateProvider = StreamProvider<CallState>(
+  (ref) => ref.watch(callEngineProvider).states,
 );
 
 // ─── 仓储（UI 唯一读写入口；UI 不直接碰 Engine/DAO/WebSocket）────

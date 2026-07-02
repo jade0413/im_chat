@@ -107,6 +107,8 @@ class _Header extends ConsumerWidget {
         ? const EdgeInsets.symmetric(horizontal: 16, vertical: 12)
         : EdgeInsets.zero;
     final isC2C = conv?.isC2C ?? false;
+    final groupConv =
+        conv?.isGroup == true && conv?.groupId != null ? conv : null;
     final titleBlock = Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -161,6 +163,23 @@ class _Header extends ConsumerWidget {
                   )
                 : titleBlock,
           ),
+          // D45：单聊语音通话入口（对方 userId 已知的 C2C 会话）
+          if (isC2C && conv?.peerUserId != null)
+            IconButton(
+              tooltip: '语音通话',
+              icon: const Icon(Icons.call_outlined),
+              onPressed: () async {
+                final ok = await ref.read(callEngineProvider).startCall(
+                      conv!.peerUserId!,
+                      peerName: title,
+                    );
+                if (!ok && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('当前无法发起通话（连接未就绪或已在通话中）')),
+                  );
+                }
+              },
+            ),
           if (conv?.isCs ?? false) ...[
             if (conv?.csStatus == '1')
               IconButton(
@@ -179,12 +198,10 @@ class _Header extends ConsumerWidget {
               onPressed: () => showCsConversationSheet(context, convId: convId),
               icon: const Icon(Icons.article_outlined),
             ),
-          ] else if (conv?.isGroup ?? false)
+          ] else if (groupConv != null)
             IconButton(
               tooltip: '群聊信息',
-              onPressed: conv?.groupId == null
-                  ? null
-                  : () => _showGroupInfo(context, conv!),
+              onPressed: () => _showGroupInfo(context, groupConv),
               icon: const Icon(Icons.group_add_outlined),
             )
           else if (embedded) ...[
@@ -287,8 +304,10 @@ class _Header extends ConsumerWidget {
     try {
       await ref.read(friendApiProvider).updateRemark(peerId, remark);
       // 备注为空 → 回落昵称；否则显示备注。
-      final fallback =
-          (friend?.nickname?.isNotEmpty ?? false) ? friend!.nickname! : c.title;
+      final friendNickname = friend?.nickname;
+      final fallback = friendNickname != null && friendNickname.isNotEmpty
+          ? friendNickname
+          : c.title;
       final newTitle = remark.isNotEmpty ? remark : fallback;
       await ref.read(conversationRepositoryProvider).rename(c.convId, newTitle);
       ref.invalidate(friendsProvider); // 联系人列表同步新备注

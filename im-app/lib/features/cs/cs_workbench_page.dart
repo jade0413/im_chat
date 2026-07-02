@@ -28,6 +28,7 @@ class CsWorkbenchPage extends ConsumerWidget {
         ),
       );
     }
+    final agentStatus = user?.agentStatus ?? 0;
     final convs = ref.watch(csConversationsProvider);
     return SafeArea(
       bottom: false,
@@ -55,7 +56,7 @@ class CsWorkbenchPage extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 10),
-            _AgentStatusCard(current: user!.agentStatus),
+            _AgentStatusCard(current: agentStatus),
             const SizedBox(height: 16),
             convs.when(
               loading: () => const Padding(

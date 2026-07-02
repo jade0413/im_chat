@@ -75,6 +75,34 @@ public final class RedisKeys {
     return "im:worker:" + workerId;
   }
 
+  // ---- 实时通话（D45）----
+
+  /** 呼叫会话 HASH：caller_id/callee_id/media/state/client_call_id/invite_at_ms/answer_at_ms。 */
+  public static String callSession(long tenantId, String callId) {
+    validatePositive("tenantId", tenantId);
+    validateText("callId", callId);
+    return "call:" + tenantId + ":" + callId;
+  }
+
+  /** 用户占线标记 STRING=callId：存在即忙线（振铃/通话中）。 */
+  public static String callUserBusy(long tenantId, long userId) {
+    validatePositive("tenantId", tenantId);
+    validatePositive("userId", userId);
+    return "call:busy:" + tenantId + ":" + userId;
+  }
+
+  /** INVITE 幂等 STRING clientCallId -> callId。 */
+  public static String callIdempotency(long tenantId, String clientCallId) {
+    validatePositive("tenantId", tenantId);
+    validateText("clientCallId", clientCallId);
+    return "call:idem:" + tenantId + ":" + clientCallId;
+  }
+
+  /** 振铃超时 ZSET（全局单键，member = tenantId:callId，score = 截止时间戳 ms）。 */
+  public static String callRingDeadlines() {
+    return "call:deadline";
+  }
+
   private static void validatePositive(String name, long value) {
     if (value <= 0) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, name + " must be positive");

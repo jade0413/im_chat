@@ -13,6 +13,8 @@ import 'package:fixnum/fixnum.dart';
 // 单一导入边界：全 App 通过本文件拿 proto 类型，不直接 import generated/。
 export 'generated/ws/frame.pb.dart';
 export 'generated/body/messages.pb.dart';
+export 'generated/body/call.pb.dart';
+export 'generated/body/call.pbenum.dart';
 export 'generated/common/content.pb.dart';
 export 'generated/common/enums.pb.dart';
 export 'generated/common/error.pb.dart';

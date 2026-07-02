@@ -1,4 +1,4 @@
-// 错误码分段：1xxx 认证 / 2xxx 消息 / 3xxx 会话 / 4xxx 群 / 5xxx 文件 / 6xxx 限流与风控
+// 错误码分段：1xxx 认证 / 2xxx 消息 / 3xxx 会话 / 4xxx 群 / 5xxx 文件 / 6xxx 限流与风控 / 7xxx 实时通话
 syntax = "proto3";
 package im.common.v1;
 option java_package = "com.im.proto.common";
@@ -21,4 +21,9 @@ enum ErrorCode {
   FILE_TOO_LARGE = 5001; QUOTA_EXCEEDED = 5002; MIME_NOT_ALLOWED = 5003;
   // 6xxx 限流与风控
   RATE_LIMITED = 6001; TENANT_QUOTA_EXCEEDED = 6002; CONTENT_REJECTED = 6003;
+  // 7xxx 实时通话（D45）
+  CALL_BUSY = 7001;            // 主叫或被叫正在通话/振铃中
+  CALL_NOT_FOUND = 7002;       // call_id 不存在或已结束
+  CALL_STATE_INVALID = 7003;   // 当前状态不允许该操作（如重复接听）
+  CALL_PEER_OFFLINE = 7004;    // 被叫全端离线（MVP 无离线推送，直接代答）
 }

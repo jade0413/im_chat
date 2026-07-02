@@ -395,25 +395,30 @@ class _MemberList extends StatelessWidget {
             contentPadding: EdgeInsets.zero,
             leading: LumoAvatar(name: name, url: avatar, size: 34),
             title: Text(name),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (role != null) role,
-                if (!member.isOwner && !isSelf && onRemove != null) ...[
-                  const SizedBox(width: 4),
-                  IconButton(
-                    tooltip: '移除成员',
-                    icon: removingUserId == member.userId
-                        ? const SizedBox.square(
-                            dimension: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.person_remove_outlined, size: 20),
-                    onPressed:
-                        removingUserId == null ? () => onRemove!(member) : null,
-                  ),
+            trailing: SizedBox(
+              width: role == null ? 48 : 108,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (role != null) Flexible(child: role),
+                  if (!member.isOwner && !isSelf && onRemove != null) ...[
+                    const SizedBox(width: 4),
+                    IconButton(
+                      tooltip: '移除成员',
+                      icon: removingUserId == member.userId
+                          ? const SizedBox.square(
+                              dimension: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.person_remove_outlined, size: 20),
+                      onPressed: removingUserId == null
+                          ? () => onRemove!(member)
+                          : null,
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           );
         },

@@ -49,9 +49,7 @@ class ProfilePage extends ConsumerWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          user?.username != null
-                              ? '@${user!.username}'
-                              : (user?.account ?? ''),
+                          _usernameText(user?.username, user?.account),
                           style:
                               const TextStyle(color: LumoColors.textSecondary),
                         ),
@@ -77,9 +75,10 @@ class ProfilePage extends ConsumerWidget {
           ListTile(
             leading: const Icon(Icons.alternate_email_rounded),
             title: const Text('微光号'),
-            subtitle: Text(user?.username?.isNotEmpty == true
-                ? '@${user!.username}'
-                : '设置后可通过微光号添加好友'),
+            subtitle: Text(_usernameText(
+              user?.username,
+              '设置后可通过微光号添加好友',
+            )),
             trailing: const Icon(Icons.chevron_right),
             onTap: user == null ? null : () => _editUsername(context, ref),
           ),
@@ -96,9 +95,11 @@ class ProfilePage extends ConsumerWidget {
             ListTile(
               leading: const Icon(Icons.support_agent_rounded),
               title: const Text('坐席状态'),
-              subtitle: Text(_agentStatusLabel(user!.agentStatus)),
+              subtitle: Text(_agentStatusLabel(user?.agentStatus ?? 0)),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => _editAgentStatus(context, ref, user.agentStatus),
+              onTap: user == null
+                  ? null
+                  : () => _editAgentStatus(context, ref, user.agentStatus),
             ),
           ListTile(
             leading: const Icon(Icons.system_update),
@@ -125,6 +126,11 @@ class ProfilePage extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  String _usernameText(String? username, String? fallback) {
+    if (username != null && username.isNotEmpty) return '@$username';
+    return fallback ?? '';
   }
 
   String _updateLabel(UpdateResult? r) => switch (r) {

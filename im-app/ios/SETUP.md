@@ -21,3 +21,14 @@
 ```
 
 生产环境改用 `wss://` 后，应移除 `NSAppTransportSecurity` 例外。
+
+## 语音通话（D45）
+
+iOS 工程生成后必须在 `ios/Runner/Info.plist` 加入：
+
+```xml
+<key>NSMicrophoneUsageDescription</key>
+<string>语音通话需要使用麦克风</string>
+```
+
+（Android/macOS 的权限与 entitlements 已在仓库内配置。）

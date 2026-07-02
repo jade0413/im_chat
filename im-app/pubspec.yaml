@@ -50,6 +50,9 @@ dependencies:
   image_picker: ^1.1.2
   file_picker: ^8.0.6
 
+  # ── 实时通话（D45：1v1 语音，WebRTC P2P + coturn）────────
+  flutter_webrtc: ^0.11.7
+
   # ── 工具 ────────────────────────────────────────────────
   uuid: ^4.4.0
   intl: ^0.20.2 # 跟随 flutter_localizations 的 pin（避免 SDK 版本冲突）

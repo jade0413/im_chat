@@ -58,6 +58,11 @@
     </dependency>
     <dependency>
       <groupId>com.im</groupId>
+      <artifactId>im-call-service</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.im</groupId>
       <artifactId>im-proto-java</artifactId>
       <version>${project.version}</version>
     </dependency>

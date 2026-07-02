@@ -38,6 +38,11 @@ public enum ErrorCode {
   TENANT_QUOTA_EXCEEDED(com.im.proto.common.ErrorCode.TENANT_QUOTA_EXCEEDED.getNumber(), "tenant quota exceeded", HttpStatus.FORBIDDEN),
   CONTENT_REJECTED(com.im.proto.common.ErrorCode.CONTENT_REJECTED.getNumber(), "content rejected", HttpStatus.BAD_REQUEST),
 
+  CALL_BUSY(com.im.proto.common.ErrorCode.CALL_BUSY.getNumber(), "peer or caller is busy", HttpStatus.CONFLICT),
+  CALL_NOT_FOUND(com.im.proto.common.ErrorCode.CALL_NOT_FOUND.getNumber(), "call not found or ended", HttpStatus.NOT_FOUND),
+  CALL_STATE_INVALID(com.im.proto.common.ErrorCode.CALL_STATE_INVALID.getNumber(), "call state invalid", HttpStatus.CONFLICT),
+  CALL_PEER_OFFLINE(com.im.proto.common.ErrorCode.CALL_PEER_OFFLINE.getNumber(), "callee offline", HttpStatus.CONFLICT),
+
   VALIDATION_FAILED(9001, "validation failed", HttpStatus.BAD_REQUEST),
   INTERNAL_ERROR(9999, "internal server error", HttpStatus.INTERNAL_SERVER_ERROR);
 

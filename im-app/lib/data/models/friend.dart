@@ -20,9 +20,12 @@ class Friend {
 
   /// 展示名：备注 > 昵称 > @username；不把 userId 暴露成昵称。
   String get displayName {
-    if (remark != null && remark!.isNotEmpty) return remark!;
-    if (nickname != null && nickname!.isNotEmpty) return nickname!;
-    if (username != null && username!.isNotEmpty) return '@$username';
+    final r = remark;
+    if (r != null && r.isNotEmpty) return r;
+    final n = nickname;
+    if (n != null && n.isNotEmpty) return n;
+    final u = username;
+    if (u != null && u.isNotEmpty) return '@$u';
     return '未设置昵称';
   }
 
@@ -59,7 +62,7 @@ class SendFriendRequestResult {
   factory SendFriendRequestResult.fromJson(Map<String, dynamic>? j) =>
       SendFriendRequestResult(
         result: (j?['result'] ?? 'ok').toString(),
-        requestId: j?['requestId'] == null ? null : j!['requestId'].toString(),
+        requestId: j?['requestId']?.toString(),
       );
 }
 
@@ -97,10 +100,10 @@ class FriendRequest {
   bool get ignored => status == 3;
 
   String get displayName {
-    if (peerNickname != null && peerNickname!.isNotEmpty) return peerNickname!;
-    if (peerUsername != null && peerUsername!.isNotEmpty) {
-      return '@$peerUsername';
-    }
+    final nickname = peerNickname;
+    if (nickname != null && nickname.isNotEmpty) return nickname;
+    final username = peerUsername;
+    if (username != null && username.isNotEmpty) return '@$username';
     return '未设置昵称';
   }
 

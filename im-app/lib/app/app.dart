@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/theme/lumo_theme.dart';
+import '../data/call/call_engine.dart';
 import 'providers.dart';
 import 'router.dart';
 
@@ -38,6 +39,20 @@ class _LumoAppState extends ConsumerState<LumoApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
+
+    // D45：全局通话路由——来电振铃 / 去电发起时推入通话页（已在 /call 不重复推）。
+    ref.listen(callStateProvider, (prev, next) {
+      final phase = next.valueOrNull?.phase;
+      final prevPhase = prev?.valueOrNull?.phase ?? CallPhase.idle;
+      final entering =
+          (phase == CallPhase.incoming || phase == CallPhase.outgoing) &&
+              prevPhase == CallPhase.idle;
+      if (entering) {
+        final current = router.routerDelegate.currentConfiguration.uri.path;
+        if (current != '/call') router.push('/call');
+      }
+    });
+
     return MaterialApp.router(
       title: '微光 Lumo',
       debugShowCheckedModeBanner: false,

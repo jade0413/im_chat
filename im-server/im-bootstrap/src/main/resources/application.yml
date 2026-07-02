@@ -103,6 +103,13 @@ im:
     event-dedup-ttl: ${IM_PUSH_EVENT_DEDUP_TTL:24h}
     gateway-queue-prefix: ${IM_PUSH_GATEWAY_QUEUE_PREFIX:push.gw.}
     msg-saved-queue: ${IM_PUSH_MSG_SAVED_QUEUE:im.push.msg.saved}
+  call: # D45：1v1 语音通话（信令走 WS，媒体 WebRTC P2P + coturn）
+    ring-timeout: ${IM_CALL_RING_TIMEOUT:60s}
+    active-ttl: ${IM_CALL_ACTIVE_TTL:4h}
+    stun-urls: ${IM_CALL_STUN_URLS:stun:stun.l.google.com:19302}
+    turn-urls: ${IM_CALL_TURN_URLS:} # 如 turn:your-host:3478?transport=udp；为空=仅 STUN（仅限内网联调）
+    turn-secret: ${IM_CALL_TURN_SECRET:} # 必须与 coturn static-auth-secret 一致
+    turn-credential-ttl: ${IM_CALL_TURN_CREDENTIAL_TTL:1h}
   startup-check:
     enabled: ${IM_STARTUP_CHECK_ENABLED:false}
     mysql: ${IM_STARTUP_CHECK_MYSQL:true}

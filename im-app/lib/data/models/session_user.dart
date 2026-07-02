@@ -24,8 +24,10 @@ class SessionUser {
   final bool isAgent; // D34：坐席能力（决定是否显示「客服」Tab）
   final int agentStatus; // 0=离线 1=在线 2=忙碌
 
-  String get displayName =>
-      (nickname != null && nickname!.isNotEmpty) ? nickname! : account;
+  String get displayName {
+    final n = nickname;
+    return n != null && n.isNotEmpty ? n : account;
+  }
 
   factory SessionUser.fromJson(Map<String, dynamic> json) => SessionUser(
         id: (json['id'] ?? json['userId'] ?? '0').toString(),

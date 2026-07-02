@@ -41,7 +41,7 @@ class _AddFriendPageState extends ConsumerState<AddFriendPage> {
     final incoming = ref.watch(friendRequestsProvider('incoming'));
     final outgoing = ref.watch(friendRequestsProvider('outgoing'));
     return Scaffold(
-      appBar: AppBar(title: const Text('添加好友')),
+      appBar: AppBar(title: const Text('新的朋友')),
       body: SafeArea(
         top: false,
         child: RefreshIndicator(
@@ -49,6 +49,16 @@ class _AddFriendPageState extends ConsumerState<AddFriendPage> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
             children: [
+              const _SectionTitle('收到的申请'),
+              const SizedBox(height: 10),
+              _RequestList(
+                role: _RequestRole.incoming,
+                requests: incoming,
+                onAction: _handleRequestAction,
+              ),
+              const SizedBox(height: 22),
+              const _SectionTitle('添加好友'),
+              const SizedBox(height: 10),
               _SearchField(
                 controller: _keywordController,
                 searching: _searching,
@@ -66,14 +76,6 @@ class _AddFriendPageState extends ConsumerState<AddFriendPage> {
               _NoteCard(
                 controller: _noteController,
                 enabled: _selected != null && !_sending,
-              ),
-              const SizedBox(height: 22),
-              const _SectionTitle('收到的申请'),
-              const SizedBox(height: 10),
-              _RequestList(
-                role: _RequestRole.incoming,
-                requests: incoming,
-                onAction: _handleRequestAction,
               ),
               const SizedBox(height: 22),
               const _SectionTitle('发出的申请'),
@@ -260,7 +262,7 @@ class _SearchField extends StatelessWidget {
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
-      autofocus: true,
+      autofocus: false,
       textInputAction: TextInputAction.search,
       onSubmitted: onSubmitted,
       decoration: InputDecoration(
@@ -341,6 +343,7 @@ class _QuickActionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final badgeText = badge;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       leading: Container(
@@ -354,7 +357,7 @@ class _QuickActionRow extends StatelessWidget {
       ),
       title: Text(title, style: const TextStyle(fontSize: 18)),
       subtitle: Text(subtitle),
-      trailing: badge == null
+      trailing: badgeText == null
           ? const Icon(Icons.chevron_right, color: LumoColors.textSecondary)
           : Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -363,7 +366,7 @@ class _QuickActionRow extends StatelessWidget {
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
-                badge!,
+                badgeText,
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w700,
@@ -435,9 +438,7 @@ class _UserResultCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          user.username == null || user.username!.isEmpty
-                              ? '微光号：未设置'
-                              : '微光号：${user.username}',
+                          _usernameText(user.username),
                           style:
                               const TextStyle(color: LumoColors.textSecondary),
                         ),
@@ -465,6 +466,10 @@ class _UserResultCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _usernameText(String? username) {
+    return username == null || username.isEmpty ? '微光号：未设置' : '微光号：$username';
   }
 }
 
@@ -593,37 +598,68 @@ class _RequestTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      leading: LumoAvatar(
-        name: request.displayName,
-        url: request.peerAvatar,
-        size: 44,
-      ),
-      title: Text(request.displayName),
-      subtitle: Text(
-        request.note.isEmpty ? _statusText(request) : request.note,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      trailing: role == _RequestRole.incoming && request.pending
-          ? Wrap(
-              spacing: 6,
+    final pendingIncoming = role == _RequestRole.incoming && request.pending;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          LumoAvatar(
+            name: request.displayName,
+            url: request.peerAvatar,
+            size: 44,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  request.displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  request.note.isEmpty ? _statusText(request) : request.note,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: LumoColors.textSecondary),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          if (pendingIncoming)
+            Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 TextButton(
                   onPressed: () => onAction(request, _RequestAction.reject),
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(44, 32),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
                   child: const Text('拒绝'),
                 ),
+                const SizedBox(width: 4),
                 FilledButton(
                   onPressed: () => onAction(request, _RequestAction.accept),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(44, 32),
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                  ),
                   child: const Text('同意'),
                 ),
               ],
             )
-          : Text(
+          else
+            Text(
               _statusText(request),
               style: const TextStyle(color: LumoColors.textSecondary),
             ),
+        ],
+      ),
     );
   }
 

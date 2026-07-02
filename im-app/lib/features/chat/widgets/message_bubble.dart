@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/lumo_colors.dart';
 import '../../../core/theme/lumo_theme.dart';
@@ -138,8 +139,10 @@ class MessageBubble extends StatelessWidget {
 
   Widget _imageBox(ImageBody c) {
     final w = (c.width ?? 0) > 0 ? 200.0 : 160.0;
-    final preview = c.localPath != null && File(c.localPath!).existsSync()
-        ? Image.file(File(c.localPath!), width: w, fit: BoxFit.cover)
+    final localPath = c.localPath;
+    final localFile = localPath == null ? null : File(localPath);
+    final preview = localFile != null && localFile.existsSync()
+        ? Image.file(localFile, width: w, fit: BoxFit.cover)
         : Container(
             width: w,
             height: 140,
@@ -178,6 +181,7 @@ class MessageBubble extends StatelessWidget {
   }
 
   Widget _fileRow(FileBody c, Color fg) {
+    final size = c.size;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -194,9 +198,9 @@ class MessageBubble extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: fg),
               ),
-              if (c.size != null)
+              if (size != null)
                 Text(
-                  _fmtSize(c.size!),
+                  _fmtSize(size),
                   style:
                       TextStyle(color: fg.withValues(alpha: 0.7), fontSize: 11),
                 ),
@@ -286,23 +290,69 @@ class MessageBubble extends StatelessWidget {
   Widget _systemChip(BuildContext context) {
     final c = message.content as NotificationBody;
     final label = systemNotificationText(c);
+    final canOpenFriendRequests = c.eventType == 'friend.request';
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: LumoColors.surfaceAlt,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(
-            label,
-            style:
-                const TextStyle(fontSize: 12, color: LumoColors.textSecondary),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap:
+              canOpenFriendRequests ? () => _openFriendRequests(context) : null,
+          child: Container(
+            padding: EdgeInsets.fromLTRB(
+              10,
+              4,
+              10,
+              canOpenFriendRequests ? 8 : 4,
+            ),
+            decoration: BoxDecoration(
+              color: LumoColors.surfaceAlt,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: LumoColors.textSecondary,
+                  ),
+                ),
+                if (canOpenFriendRequests) ...[
+                  const SizedBox(height: 4),
+                  const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.person_add_alt_1_rounded,
+                        size: 14,
+                        color: LumoColors.primary,
+                      ),
+                      SizedBox(width: 4),
+                      Text(
+                        '查看申请',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: LumoColors.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  void _openFriendRequests(BuildContext context) {
+    Future<void>.delayed(Duration.zero, () {
+      if (context.mounted) context.push('/add-friend');
+    });
   }
 
   String _fmtSize(int bytes) {

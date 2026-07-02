@@ -66,7 +66,7 @@ Redis 结构（tenant 前缀走 RedisKeys 约定）：
 | 黑名单/好友限制 | MVP 不查（与 D17 开放单聊一致）；黑名单代答 REJECTED 挂 Open Question |
 | 通话中来电 | 即忙线（见上）；不做呼叫等待 |
 
-错误码（common/error.proto 追加）：`CALL_BUSY=1201`、`CALL_NOT_FOUND=1202`（已结束/不存在）、`CALL_STATE_INVALID=1203`（如对 ACTIVE 再 answer）。
+错误码（common/error.proto 新增 7xxx 通话段）：`CALL_BUSY=7001`、`CALL_NOT_FOUND=7002`、`CALL_STATE_INVALID=7003`、`CALL_PEER_OFFLINE=7004`（MVP 无离线推送，被叫全端离线时 INVITE 直接代答）。
 
 ## 5. TURN 凭证（coturn REST 机制，RFC "TURN REST API"）
 

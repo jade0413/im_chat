@@ -80,7 +80,7 @@ class _CsConversationSheetState extends ConsumerState<_CsConversationSheet> {
                   Text(
                     notes.valueOrNull == null
                         ? ''
-                        : '${notes.valueOrNull!.length}/100',
+                        : '${notes.valueOrNull?.length ?? 0}/100',
                     style: const TextStyle(color: LumoColors.textSecondary),
                   ),
                 ],
@@ -152,7 +152,8 @@ class _ConversationSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (conv == null) {
+    final c = conv;
+    if (c == null) {
       return const _InfoPanel(title: '会话不存在', body: '本地暂未同步到该会话。');
     }
     return DecoratedBox(
@@ -166,7 +167,7 @@ class _ConversationSummary extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              conv!.title,
+              c.title,
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 10),
@@ -174,21 +175,21 @@ class _ConversationSummary extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                _StatusChip(text: _statusLabel(conv!.csStatus)),
-                if (conv!.peerUserId != null)
-                  _StatusChip(text: '访客ID ${conv!.peerUserId}'),
-                _StatusChip(text: '访客已读 seq ${conv!.peerReadSeq ?? '0'}'),
+                _StatusChip(text: _statusLabel(c.csStatus)),
+                if (c.peerUserId != null)
+                  _StatusChip(text: '访客ID ${c.peerUserId}'),
+                _StatusChip(text: '访客已读 seq ${c.peerReadSeq ?? '0'}'),
               ],
             ),
             const SizedBox(height: 12),
             Text(
-              conv!.lastMsgAbstract.isEmpty ? '暂无消息' : conv!.lastMsgAbstract,
+              c.lastMsgAbstract.isEmpty ? '暂无消息' : c.lastMsgAbstract,
               style: const TextStyle(color: LumoColors.textSecondary),
             ),
-            if (conv!.lastMsgTime != null) ...[
+            if (c.lastMsgTime != null) ...[
               const SizedBox(height: 4),
               Text(
-                TimeFmt.chatTime(conv!.lastMsgTime),
+                TimeFmt.chatTime(c.lastMsgTime),
                 style: Theme.of(context).textTheme.labelSmall,
               ),
             ],

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/auth/login_page.dart';
+import '../features/call/call_page.dart';
 import '../features/chat/chat_page.dart';
 import '../features/contacts/add_friend_page.dart';
 import '../features/groups/create_group_page.dart';
@@ -47,6 +48,8 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/chat/:convId',
         builder: (_, s) => ChatPage(convId: s.pathParameters['convId']!),
       ),
+      // D45：语音通话页（来电由 LumoApp 全局监听推入，去电由聊天页发起）
+      GoRoute(path: '/call', builder: (_, __) => const CallPage()),
     ],
   );
 });
