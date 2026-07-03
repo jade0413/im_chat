@@ -1,31 +1,30 @@
 import { useState } from 'react';
-import { Button } from 'antd';
-import { DownloadOutlined, FileOutlined, LoadingOutlined, VideoCameraOutlined } from '@ant-design/icons';
-import { getDownloadUrl } from '../../../../api/file';
+import { App as AntApp, Button, Progress } from 'antd';
+import { DownloadOutlined, FileOutlined, LoadingOutlined } from '@ant-design/icons';
+import { downloadObject } from '../../../../api/file';
 import type { MessageContent } from '../../../../store/types';
+import { saveBlob } from '../../../../utils/download';
 import { formatFileSize } from '../../../../utils/file';
 
-type FileContent = Extract<MessageContent, { kind: 'file' | 'video' }>;
+type FileContent = Extract<MessageContent, { kind: 'file' }>;
 
 export function FileBubble({ content }: { content: FileContent }) {
-  const isVideo = content.kind === 'video';
+  const { message } = AntApp.useApp();
   const [downloading, setDownloading] = useState(false);
+  const [progress, setProgress] = useState<number | undefined>(undefined);
 
   async function handleDownload() {
     if (!content.objectKey) return;
     setDownloading(true);
+    setProgress(undefined);
     try {
-      const url = await getDownloadUrl(content.objectKey);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = content.fileName;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } catch {
-      // 静默失败，浏览器会显示网络错误
+      const { blob } = await downloadObject(content.objectKey, {
+        onProgress: (next) => setProgress(next.percent),
+      });
+      saveBlob(blob, content.fileName);
+      setProgress(100);
+    } catch (error) {
+      void message.error(error instanceof Error ? error.message : '文件下载失败');
     } finally {
       setDownloading(false);
     }
@@ -33,10 +32,18 @@ export function FileBubble({ content }: { content: FileContent }) {
 
   return (
     <div className="file-bubble">
-      {isVideo ? <VideoCameraOutlined style={{ fontSize: 24 }} /> : <FileOutlined style={{ fontSize: 24 }} />}
-      <div style={{ minWidth: 0, flex: 1 }}>
+      <FileOutlined style={{ fontSize: 24 }} />
+      <div className="file-main">
         <div className="file-name">{content.fileName}</div>
         <div className="file-size">{formatFileSize(content.size ?? 0)}</div>
+        {downloading && (
+          <Progress
+            percent={progress}
+            size="small"
+            showInfo={progress !== undefined}
+            status="active"
+          />
+        )}
       </div>
       <Button
         type="text"

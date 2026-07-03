@@ -3,6 +3,7 @@ package com.im.file.rest;
 import com.im.common.auth.UserContext;
 import com.im.common.web.ApiResponse;
 import com.im.file.dto.ConfirmFileRequest;
+import com.im.file.dto.DownloadFileResponse;
 import com.im.file.dto.FileMetaResponse;
 import com.im.file.dto.PresignFileRequest;
 import com.im.file.dto.PresignFileResponse;
@@ -35,7 +36,14 @@ public class FileController {
   }
 
   @GetMapping("/download")
-  public ApiResponse<String> download(@RequestParam("key") String objectKey) {
-    return ApiResponse.ok(fileService.presignDownload(UserContext.requiredUserId(), objectKey));
+  public ApiResponse<String> download(@RequestParam("key") String objectKey,
+      @RequestParam(value = "variant", required = false) String variant) {
+    return ApiResponse.ok(fileService.presignDownload(UserContext.requiredUserId(), objectKey, variant));
+  }
+
+  @GetMapping("/download-info")
+  public ApiResponse<DownloadFileResponse> downloadInfo(@RequestParam("key") String objectKey,
+      @RequestParam(value = "variant", required = false) String variant) {
+    return ApiResponse.ok(fileService.presignDownloadInfo(UserContext.requiredUserId(), objectKey, variant));
   }
 }

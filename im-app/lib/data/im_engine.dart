@@ -92,9 +92,12 @@ class ImEngine {
 
   /// Sync Cursor 全局分量（会话级分量是 conversation.syncSeq + sync_cursors）。
   String _convListVersion = '0';
+  final _omittedBackfills = <String, _OmittedBackfill>{};
 
   static const int _outboxMaxAgeMs = 7 * 24 * 3600 * 1000; // 7 天
   static const int _outboxMaxAttempts = 10;
+  static const int _omittedBackfillLimit = 20;
+  static const int _omittedBackfillMaxAttempts = 3;
   // TODO(im-app): 接入服务端送达/已读回执后，把 delivered/read 从会话
   // peerReadSeq 推导升级为消息级状态更新。
 
@@ -107,9 +110,16 @@ class ImEngine {
     await _socket.connect();
   }
 
-  Future<void> stop() => _socket.disconnect(manual: true);
+  Future<void> stop() {
+    _cancelOmittedBackfills();
+    return _socket.disconnect(manual: true);
+  }
+
   void onAppResumed() => _socket.onAppResumed();
-  Future<void> dispose() => _socket.dispose();
+  Future<void> dispose() {
+    _cancelOmittedBackfills();
+    return _socket.dispose();
+  }
 
   // ─── 上行：发送（乐观 + Outbox）─────────────────────────
 
@@ -119,8 +129,12 @@ class ImEngine {
   Future<void> sendImage(String convId, ImageBody image) =>
       _send(convId, image);
   Future<void> sendFile(String convId, FileBody file) => _send(convId, file);
+  Future<void> sendVideo(String convId, VideoBody video) =>
+      _send(convId, video);
   Future<void> sendVoice(String convId, VoiceBody voice) =>
       _send(convId, voice);
+  Future<void> sendContent(String convId, MessageContent content) =>
+      _send(convId, content);
 
   Future<void> _send(String convId, MessageContent content) async {
     final user = _currentUser();
@@ -241,8 +255,7 @@ class ImEngine {
   void _handleBusinessFrame(pb.Frame frame) {
     // frame.body 通常已是 Uint8List（protobuf 生成物内部表示），避免无谓整帧拷贝。
     final rawBody = frame.body;
-    final body =
-        rawBody is Uint8List ? rawBody : Uint8List.fromList(rawBody);
+    final body = rawBody is Uint8List ? rawBody : Uint8List.fromList(rawBody);
     switch (frame.cmd) {
       case pb.Cmd.MSG_PUSH:
         unawaited(_handleMsgPush(body, frame.reqId));
@@ -291,6 +304,10 @@ class ImEngine {
 
   Future<void> _handleMsgPush(Uint8List body, Int64 reqId) async {
     final push = pb.MsgPush.fromBuffer(body);
+    if (push.contentOmitted) {
+      await _handleOmittedMsgPush(push, reqId);
+      return;
+    }
     final msg = WsMappers.msgPushToChatMessage(push);
     final convId = msg.convId;
     final pushSeq = Ids.toStr(push.seq);
@@ -340,6 +357,59 @@ class ImEngine {
       WsMappers.buildRecvAck([(convId: convId, seq: pushSeq)]),
       reqId: reqId == Int64.ZERO ? null : reqId,
     );
+  }
+
+  Future<void> _handleOmittedMsgPush(pb.MsgPush push, Int64 reqId) async {
+    final convId = Ids.toStr(push.convId);
+    final pushSeq = Ids.toStr(push.seq);
+    final existing = await _convDao.getConversation(convId);
+    final currentSync =
+        Seqs.resolveLocal(existing?.syncSeq, await _msgDao.getSeqs(convId));
+    final sender =
+        WsMappers.senderToInfo(push.hasSender() ? push.sender : null);
+    final currentUserId = _currentUser()?.id;
+    final isMine = currentUserId != null && sender.userId == currentUserId;
+    final nextConv = (existing ??
+            Conversation(
+              convId: convId,
+              type: push.convType.value,
+              title: sender.nickname,
+              avatar: sender.avatar,
+              maxSeq: pushSeq,
+              readSeq: '0',
+            ))
+        .copyWith(
+      maxSeq: Seqs.max(existing?.maxSeq, pushSeq),
+      syncSeq: currentSync,
+      readSeq:
+          isMine ? Seqs.max(existing?.readSeq, pushSeq) : existing?.readSeq,
+      lastMsgAbstract: _omittedPushAbstract(push),
+      lastMsgTime: Ids.toStr(push.sendTime),
+    );
+    await _db.transaction(() async {
+      await _convDao.upsertConversation(nextConv);
+      await _syncCursorDao.upsertConversationCursor(
+        convId: convId,
+        localSeq: currentSync,
+        serverMaxSeq: nextConv.maxSeq,
+      );
+    });
+
+    // 轻量推送只证明 seq 存在，完整内容仍以 SYNC/历史接口为准。
+    _queueOmittedBackfill(convId, pushSeq);
+    unawaited(_socket.sendSyncReq());
+    _socket.send(
+      pb.Cmd.MSG_RECV_ACK,
+      WsMappers.buildRecvAck([(convId: convId, seq: pushSeq)]),
+      reqId: reqId == Int64.ZERO ? null : reqId,
+    );
+  }
+
+  String _omittedPushAbstract(pb.MsgPush push) {
+    final abstract = push.ext['__abstract'];
+    if (abstract != null && abstract.isNotEmpty) return abstract;
+    if (push.omittedReason == 'large_group_media') return '媒体消息同步中';
+    return '消息同步中';
   }
 
   Future<void> _handleMsgSendAck(Uint8List body) async {
@@ -431,6 +501,7 @@ class ImEngine {
       late final String nextSync;
       await _db.transaction(() async {
         if (msgs.isNotEmpty) await _msgDao.upsertAll(msgs);
+        _clearOmittedBackfills(msgs);
         nextSync = Seqs.contiguousFrom(
           await _msgDao.getSeqs(conv.convId),
           baseSeq: before,
@@ -454,6 +525,128 @@ class ImEngine {
       }
     }
     if (shouldContinue) unawaited(_socket.sendSyncReq());
+  }
+
+  void _queueOmittedBackfill(String convId, String seq) {
+    final key = _omittedKey(convId, seq);
+    if (_omittedBackfills.containsKey(key)) return;
+    final pending = _OmittedBackfill(convId: convId, seq: seq);
+    _omittedBackfills[key] = pending;
+    _scheduleOmittedBackfill(pending, const Duration(milliseconds: 600));
+  }
+
+  void _scheduleOmittedBackfill(_OmittedBackfill pending, Duration delay) {
+    pending.timer?.cancel();
+    pending.timer = Timer(delay, () {
+      unawaited(_runOmittedBackfill(pending));
+    });
+  }
+
+  Future<void> _runOmittedBackfill(_OmittedBackfill pending) async {
+    final key = _omittedKey(pending.convId, pending.seq);
+    if (!identical(_omittedBackfills[key], pending)) return;
+    if (await _msgDao.getBySeq(pending.convId, pending.seq) != null) {
+      _clearOmittedBackfill(key);
+      return;
+    }
+    pending.attempts++;
+    try {
+      await _socket.sendSyncReq();
+      if (await _msgDao.getBySeq(pending.convId, pending.seq) != null) {
+        _clearOmittedBackfill(key);
+        return;
+      }
+      final found =
+          await _backfillOmittedFromHistory(pending.convId, pending.seq);
+      if (found) {
+        _clearOmittedBackfill(key);
+        return;
+      }
+    } catch (e) {
+      _log.fine(
+        'omitted media backfill failed conv=${pending.convId} seq=${pending.seq}: $e',
+      );
+    }
+
+    if (pending.attempts >= _omittedBackfillMaxAttempts) {
+      _log.fine(
+        'omitted media backfill exhausted conv=${pending.convId} seq=${pending.seq}',
+      );
+      _clearOmittedBackfill(key);
+      return;
+    }
+    _scheduleOmittedBackfill(
+      pending,
+      Duration(seconds: pending.attempts * 2),
+    );
+  }
+
+  Future<bool> _backfillOmittedFromHistory(String convId, String seq) async {
+    final items = await _messageApi.history(
+      convId,
+      endSeq: _nextSeq(seq),
+      limit: _omittedBackfillLimit,
+    );
+    if (items.isEmpty) return false;
+    final mapped = items.map(_historyItemToMessage).toList();
+    final found = mapped.any((message) => message.seq == seq);
+    if (!found) return false;
+    await _db.transaction(() async {
+      await _msgDao.upsertAll(mapped);
+      final existing = await _convDao.getConversation(convId);
+      final seqs = await _msgDao.getSeqs(convId);
+      final nextSync = Seqs.contiguousFrom(
+        seqs,
+        baseSeq: existing?.syncSeq ?? '0',
+      );
+      if (existing != null) {
+        final target = mapped.firstWhere((message) => message.seq == seq);
+        final nextConv = existing.copyWith(
+          syncSeq: nextSync,
+          maxSeq: Seqs.max(existing.maxSeq, seq),
+          lastMsgAbstract: Ids.compare(existing.maxSeq, seq) <= 0
+              ? target.content.abstract
+              : existing.lastMsgAbstract,
+          lastMsgTime: Ids.compare(existing.maxSeq, seq) <= 0
+              ? target.sendTime
+              : existing.lastMsgTime,
+        );
+        await _convDao.upsertConversation(nextConv);
+        await _syncCursorDao.upsertConversationCursor(
+          convId: convId,
+          localSeq: nextSync,
+          serverMaxSeq: nextConv.maxSeq,
+        );
+      }
+    });
+    return true;
+  }
+
+  void _clearOmittedBackfills(Iterable<ChatMessage> messages) {
+    for (final message in messages) {
+      final seq = message.seq;
+      if (seq == null || seq.isEmpty) continue;
+      _clearOmittedBackfill(_omittedKey(message.convId, seq));
+    }
+  }
+
+  void _clearOmittedBackfill(String key) {
+    _omittedBackfills.remove(key)?.timer?.cancel();
+  }
+
+  void _cancelOmittedBackfills() {
+    for (final pending in _omittedBackfills.values) {
+      pending.timer?.cancel();
+    }
+    _omittedBackfills.clear();
+  }
+
+  String _omittedKey(String convId, String seq) => '$convId:$seq';
+
+  String _nextSeq(String seq) {
+    final value = BigInt.tryParse(seq);
+    if (value == null) return seq;
+    return (value + BigInt.one).toString();
   }
 
   Future<void> _handleReadNotify(Uint8List body) async {
@@ -567,15 +760,31 @@ class ImEngine {
       content = const NotificationBody(eventType: 'message.revoked');
     } else if (item.objectKey != null && item.objectKey!.isNotEmpty) {
       final mime = item.mime ?? '';
-      if (item.durationMs != null) {
+      if (mime.startsWith('image/')) {
+        content = ImageBody(
+          objectKey: item.objectKey!,
+          thumbKey: item.thumbKey,
+          width: item.width,
+          height: item.height,
+          size: item.size,
+          mime: item.mime,
+        );
+      } else if (mime.startsWith('video/')) {
+        content = VideoBody(
+          objectKey: item.objectKey!,
+          fileName: item.fileName ?? '未命名视频',
+          size: item.size,
+          mime: item.mime,
+          thumbKey: item.thumbKey,
+          durationMs: item.durationMs,
+        );
+      } else if (mime.startsWith('audio/') || item.msgType == 3) {
         content = VoiceBody(
           objectKey: item.objectKey!,
-          durationMs: item.durationMs!,
+          durationMs: item.durationMs ?? 0,
           size: item.size,
+          codec: item.codec,
         );
-      } else if (mime.startsWith('image/')) {
-        content =
-            ImageBody(objectKey: item.objectKey!, thumbKey: item.thumbKey);
       } else {
         content = FileBody(
           objectKey: item.objectKey!,
@@ -602,4 +811,16 @@ class ImEngine {
       status: revoked ? MessageStatus.revoked : MessageStatus.sent,
     );
   }
+}
+
+class _OmittedBackfill {
+  _OmittedBackfill({
+    required this.convId,
+    required this.seq,
+  });
+
+  final String convId;
+  final String seq;
+  int attempts = 0;
+  Timer? timer;
 }

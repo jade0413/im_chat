@@ -9,13 +9,17 @@ import com.im.file.config.FileProperties;
 import com.im.file.dao.entity.FileMetaEntity;
 import com.im.file.dao.mapper.FileMetaMapper;
 import com.im.file.dto.ConfirmFileRequest;
+import com.im.file.dto.DownloadFileResponse;
 import com.im.file.dto.FileMetaResponse;
 import com.im.file.dto.PresignFileRequest;
 import com.im.file.dto.PresignFileResponse;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -29,10 +33,13 @@ public class FileService {
 
   private static final int OBJECT_KEY_LIMIT = 255;
   private static final int MIME_LIMIT = 64;
+  private static final int SHA256_LENGTH = 64;
+  private static final String DOWNLOAD_VARIANT_PLAYBACK = "playback";
 
   private final FileMetaMapper fileMetaMapper;
   private final ObjectStorageClient storageClient;
   private final SnowflakeIdGenerator idGenerator;
+  private final FileTranscodeJobService transcodeJobService;
   private final FileProperties properties;
   private final TransactionTemplate transactionTemplate;
   private final Clock clock;
@@ -40,12 +47,14 @@ public class FileService {
   public FileService(FileMetaMapper fileMetaMapper,
       ObjectStorageClient storageClient,
       SnowflakeIdGenerator idGenerator,
+      FileTranscodeJobService transcodeJobService,
       FileProperties properties,
       TransactionTemplate transactionTemplate,
       @Qualifier("fileClock") Clock clock) {
     this.fileMetaMapper = fileMetaMapper;
     this.storageClient = storageClient;
     this.idGenerator = idGenerator;
+    this.transcodeJobService = transcodeJobService;
     this.properties = properties;
     this.transactionTemplate = transactionTemplate;
     this.clock = clock;
@@ -58,7 +67,19 @@ public class FileService {
     long size = request == null ? 0 : request.size();
     String fileName = request == null ? null : request.fileName();
     Integer durationMs = request == null ? null : request.durationMs();
+    String sha256 = validateSha256(request == null ? null : request.sha256());
     validateSize(mime, size);
+
+    FileMetaEntity reusable = findReusableFile(tenantId, uploaderId, sha256, size, mime);
+    if (reusable != null) {
+      return new PresignFileResponse(
+          reusable.getId(),
+          reusable.getObjectKey(),
+          "",
+          0L,
+          Map.of(),
+          true);
+    }
 
     String objectKey = newObjectKey(tenantId, fileName, mime);
     FileMetaEntity entity = new FileMetaEntity();
@@ -69,6 +90,7 @@ public class FileService {
     entity.setMime(mime);
     entity.setSize(size);
     entity.setDurationMs(durationMs);
+    entity.setSha256(sha256);
     entity.setStatus(FileMetaConstants.STATUS_PENDING);
     entity.setCreatedAt(LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC));
     FileMetaEntity inserted = Objects.requireNonNull(transactionTemplate.execute(status -> {
@@ -138,6 +160,26 @@ public class FileService {
     }
   }
 
+  private String validateSha256(String sha256) {
+    if (sha256 == null || sha256.isBlank()) {
+      return null;
+    }
+    String normalized = sha256.trim().toLowerCase(Locale.ROOT);
+    if (normalized.length() != SHA256_LENGTH || !normalized.matches("[0-9a-f]{64}")) {
+      throw new ImException(ErrorCode.VALIDATION_FAILED, "sha256 is invalid");
+    }
+    return normalized;
+  }
+
+  private FileMetaEntity findReusableFile(long tenantId, long uploaderId, String sha256, long size,
+      String mime) {
+    if (sha256 == null) {
+      return null;
+    }
+    return fileMetaMapper.selectConfirmedByUploaderHash(
+        tenantId, uploaderId, sha256, size, mime, FileMetaConstants.STATUS_CONFIRMED);
+  }
+
   private String validateObjectKey(long tenantId, String objectKey) {
     if (objectKey == null || objectKey.isBlank()) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "object_key is required");
@@ -176,12 +218,26 @@ public class FileService {
       case "audio/opus" -> ".opus";
       case "audio/wav" -> ".wav";
       case "audio/mp4" -> ".m4a";
+      case "video/mp4" -> ".mp4";
+      case "video/x-m4v" -> ".m4v";
+      case "video/webm" -> ".webm";
+      case "video/quicktime" -> ".mov";
+      case "video/x-matroska" -> ".mkv";
+      case "video/x-msvideo" -> ".avi";
+      case "video/3gpp" -> ".3gp";
+      case "video/3gpp2" -> ".3g2";
+      case "video/mpeg" -> ".mpeg";
       case "application/pdf" -> ".pdf";
       case "application/zip" -> ".zip";
+      case "application/vnd.rar" -> ".rar";
+      case "application/x-7z-compressed" -> ".7z";
       case "application/msword" -> ".doc";
       case "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> ".docx";
       case "application/vnd.ms-excel" -> ".xls";
       case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" -> ".xlsx";
+      case "application/vnd.ms-powerpoint" -> ".ppt";
+      case "application/vnd.openxmlformats-officedocument.presentationml.presentation" -> ".pptx";
+      case "text/csv" -> ".csv";
       case "text/plain" -> ".txt";
       default -> "";
     };
@@ -260,13 +316,23 @@ public class FileService {
       throw new ImException(ErrorCode.INTERNAL_ERROR, "file confirm update failed");
     }
     current.setStatus(FileMetaConstants.STATUS_CONFIRMED);
+    transcodeJobService.enqueueAfterConfirm(current);
     return toResponse(current);
   }
 
   /**
-   * 生成文件下载预签名 URL（15 分钟有效），仅允许已确认的文件。
+   * 生成文件下载 URL。默认返回对象存储预签名 GET；配置 cdnBaseUrl 后返回 CDN URL。
+   * 入口仍强制校验租户前缀和 CONFIRMED 状态，避免未确认对象被引用。
    */
   public String presignDownload(long requestUserId, String objectKey) {
+    return presignDownload(requestUserId, objectKey, null);
+  }
+
+  public String presignDownload(long requestUserId, String objectKey, String variant) {
+    return presignDownloadInfo(requestUserId, objectKey, variant).url();
+  }
+
+  public DownloadFileResponse presignDownloadInfo(long requestUserId, String objectKey, String variant) {
     long tenantId = TenantContext.requiredTenantId();
     validateUploader(requestUserId);
     String normalized = validateObjectKey(tenantId, objectKey);
@@ -274,7 +340,60 @@ public class FileService {
     if (entity == null || !isStatus(entity, FileMetaConstants.STATUS_CONFIRMED)) {
       throw new ImException(ErrorCode.VALIDATION_FAILED, "file not found or not confirmed");
     }
-    return storageClient.presignGet(properties.bucket(), normalized, java.time.Duration.ofMinutes(15));
+    String effectiveObjectKey = resolveDownloadObjectKey(tenantId, entity, variant);
+    return new DownloadFileResponse(
+        effectiveObjectKey,
+        downloadUrlFor(effectiveObjectKey),
+        clock.instant().plus(properties.downloadTtl()).toEpochMilli(),
+        !effectiveObjectKey.equals(entity.getObjectKey()));
+  }
+
+  private String downloadUrlFor(String objectKey) {
+    if (hasText(properties.cdnBaseUrl())) {
+      return cdnUrl(objectKey);
+    }
+    return storageClient.presignGet(properties.bucket(), objectKey, properties.downloadTtl());
+  }
+
+  private String resolveDownloadObjectKey(long tenantId, FileMetaEntity entity, String variant) {
+    if (!DOWNLOAD_VARIANT_PLAYBACK.equalsIgnoreCase(variant == null ? "" : variant.trim())) {
+      return entity.getObjectKey();
+    }
+    String mime = entity.getMime() == null ? "" : entity.getMime().trim().toLowerCase(Locale.ROOT);
+    if (!mime.startsWith("video/")) {
+      return entity.getObjectKey();
+    }
+    String tenantPrefix = tenantId + "/";
+    return transcodeJobService.succeededTargetObjectKey(
+            tenantId,
+            entity.getId(),
+            FileTranscodeConstants.PROFILE_MP4_720P)
+        .filter(FileService::hasTextStatic)
+        .filter(target -> target.startsWith(tenantPrefix) && !target.contains(".."))
+        .orElse(entity.getObjectKey());
+  }
+
+  private String cdnUrl(String objectKey) {
+    String base = properties.cdnBaseUrl();
+    if (base.endsWith("/")) {
+      base = base.substring(0, base.length() - 1);
+    }
+    return base + "/" + Arrays.stream(objectKey.split("/"))
+        .map(this::urlEncodePathSegment)
+        .reduce((left, right) -> left + "/" + right)
+        .orElse("");
+  }
+
+  private String urlEncodePathSegment(String segment) {
+    return URLEncoder.encode(segment, StandardCharsets.UTF_8).replace("+", "%20");
+  }
+
+  private boolean hasText(String value) {
+    return hasTextStatic(value);
+  }
+
+  private static boolean hasTextStatic(String value) {
+    return value != null && !value.isBlank();
   }
 
   private boolean isStatus(FileMetaEntity entity, int status) {

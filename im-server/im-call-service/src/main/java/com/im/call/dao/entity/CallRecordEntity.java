@@ -34,6 +34,9 @@ public class CallRecordEntity {
   @TableField("callee_user_id")
   private Long calleeUserId;
 
+  @TableField("group_id")
+  private Long groupId;
+
   @TableField("media_type")
   private Integer mediaType;
 

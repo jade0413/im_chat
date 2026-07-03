@@ -98,6 +98,8 @@ class WsMappers {
           fileName: f.fileName,
           size: f.size.toInt(),
           mime: mime,
+          thumbKey: f.thumbKey.isNotEmpty ? f.thumbKey : null,
+          durationMs: f.durationMs > 0 ? f.durationMs : null,
         );
       }
       return FileBody(
@@ -163,7 +165,9 @@ class WsMappers {
           ..objectKey = c.objectKey
           ..fileName = c.fileName
           ..size = Int64(c.size ?? 0)
-          ..mime = c.mime ?? 'video/mp4';
+          ..mime = c.mime ?? 'video/mp4'
+          ..thumbKey = c.thumbKey ?? ''
+          ..durationMs = c.durationMs ?? 0;
       case NotificationBody():
         mc.notification = pb.NotificationContent()
           ..eventType = c.eventType

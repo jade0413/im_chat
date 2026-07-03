@@ -44,12 +44,15 @@ class MessageItem {
     this.mime,
     this.size,
     this.durationMs,
+    this.width,
+    this.height,
+    this.codec,
   });
 
   final String convId;
   final String seq;
   final String senderId;
-  final int msgType; // 1 text / 2 image / 3 voice / 4 file
+  final int msgType; // 1 text / 2 image / 3 voice / 4 file/video
   final int status; // 1 normal / 2 revoked
   final String sendTime;
   final String? serverMsgId;
@@ -61,6 +64,9 @@ class MessageItem {
   final String? mime;
   final int? size;
   final int? durationMs;
+  final int? width;
+  final int? height;
+  final String? codec;
 
   factory MessageItem.fromJson(Map<String, dynamic> j) {
     String s(Object? v) => (v ?? '').toString();
@@ -81,6 +87,9 @@ class MessageItem {
       mime: j['mime'] as String?,
       size: i(j['size']),
       durationMs: i(j['durationMs']),
+      width: i(j['width']),
+      height: i(j['height']),
+      codec: j['codec'] as String?,
     );
   }
 }
@@ -91,17 +100,23 @@ class PresignResult {
     required this.uploadUrl,
     required this.objectKey,
     this.headers = const {},
+    this.instant = false,
   });
   final String uploadUrl;
   final String objectKey;
   final Map<String, String> headers;
+  final bool instant;
 
-  factory PresignResult.fromJson(Map<String, dynamic> j) => PresignResult(
-        uploadUrl: (j['uploadUrl'] ?? j['url'] ?? '') as String,
-        objectKey: (j['objectKey'] ?? j['key'] ?? '') as String,
-        headers: (j['headers'] as Map?)?.map(
-              (k, v) => MapEntry(k.toString(), v.toString()),
-            ) ??
-            const {},
-      );
+  factory PresignResult.fromJson(Map<String, dynamic> j) {
+    final rawHeaders = (j['requiredHeaders'] ?? j['headers']) as Map?;
+    return PresignResult(
+      uploadUrl: (j['uploadUrl'] ?? j['url'] ?? '') as String,
+      objectKey: (j['objectKey'] ?? j['key'] ?? '') as String,
+      instant: j['instant'] == true,
+      headers: rawHeaders?.map(
+            (k, v) => MapEntry(k.toString(), v.toString()),
+          ) ??
+          const {},
+    );
+  }
 }

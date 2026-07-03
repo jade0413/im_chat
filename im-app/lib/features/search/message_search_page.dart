@@ -9,6 +9,7 @@ import '../../core/theme/lumo_colors.dart';
 import '../../core/utils/time.dart';
 import '../../data/models/chat_message.dart';
 import '../../data/models/message_content.dart';
+import '../../data/models/message_payloads.dart';
 import '../../data/models/system_notification.dart';
 import '../../shared/widgets/lumo_avatar.dart';
 
@@ -178,7 +179,7 @@ class _SearchResultList extends StatelessWidget {
         VoiceBody() => '[语音]',
         FileBody(:final fileName) => '[文件] $fileName',
         VideoBody(:final fileName) => '[视频] $fileName',
-        CustomBody(:final customType) => '[$customType]',
+        CustomBody() => customPreview(content),
       };
 }
 

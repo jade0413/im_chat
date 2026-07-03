@@ -54,6 +54,12 @@ export const im = $root.im = (() => {
              * @property {number} READ_NOTIFY=23 READ_NOTIFY value
              * @property {number} REVOKE_NOTIFY=24 REVOKE_NOTIFY value
              * @property {number} CONV_NOTIFY=25 CONV_NOTIFY value
+             * @property {number} CALL_INVITE=40 CALL_INVITE value
+             * @property {number} CALL_ANSWER=41 CALL_ANSWER value
+             * @property {number} CALL_SIGNAL=42 CALL_SIGNAL value
+             * @property {number} CALL_HANGUP=43 CALL_HANGUP value
+             * @property {number} CALL_NOTIFY=45 CALL_NOTIFY value
+             * @property {number} CALL_ACK=49 CALL_ACK value
              * @property {number} ERROR=99 ERROR value
              */
             v1.Cmd = (function() {
@@ -74,6 +80,12 @@ export const im = $root.im = (() => {
                 values[valuesById[23] = "READ_NOTIFY"] = 23;
                 values[valuesById[24] = "REVOKE_NOTIFY"] = 24;
                 values[valuesById[25] = "CONV_NOTIFY"] = 25;
+                values[valuesById[40] = "CALL_INVITE"] = 40;
+                values[valuesById[41] = "CALL_ANSWER"] = 41;
+                values[valuesById[42] = "CALL_SIGNAL"] = 42;
+                values[valuesById[43] = "CALL_HANGUP"] = 43;
+                values[valuesById[45] = "CALL_NOTIFY"] = 45;
+                values[valuesById[49] = "CALL_ACK"] = 49;
                 values[valuesById[99] = "ERROR"] = 99;
                 return values;
             })();
@@ -294,6 +306,12 @@ export const im = $root.im = (() => {
                         case 23:
                         case 24:
                         case 25:
+                        case 40:
+                        case 41:
+                        case 42:
+                        case 43:
+                        case 45:
+                        case 49:
                         case 99:
                             break;
                         }
@@ -402,6 +420,30 @@ export const im = $root.im = (() => {
                     case "CONV_NOTIFY":
                     case 25:
                         message.cmd = 25;
+                        break;
+                    case "CALL_INVITE":
+                    case 40:
+                        message.cmd = 40;
+                        break;
+                    case "CALL_ANSWER":
+                    case 41:
+                        message.cmd = 41;
+                        break;
+                    case "CALL_SIGNAL":
+                    case 42:
+                        message.cmd = 42;
+                        break;
+                    case "CALL_HANGUP":
+                    case 43:
+                        message.cmd = 43;
+                        break;
+                    case "CALL_NOTIFY":
+                    case 45:
+                        message.cmd = 45;
+                        break;
+                    case "CALL_ACK":
+                    case 49:
+                        message.cmd = 49;
                         break;
                     case "ERROR":
                     case 99:
@@ -2431,6 +2473,8 @@ export const im = $root.im = (() => {
                  * @property {number|Long|null} [sendTime] MsgPush sendTime
                  * @property {im.common.v1.IMsgContent|null} [content] MsgPush content
                  * @property {Object.<string,string>|null} [ext] MsgPush ext
+                 * @property {boolean|null} [contentOmitted] MsgPush contentOmitted
+                 * @property {string|null} [omittedReason] MsgPush omittedReason
                  */
 
                 /**
@@ -2522,6 +2566,22 @@ export const im = $root.im = (() => {
                 MsgPush.prototype.ext = $util.emptyObject;
 
                 /**
+                 * MsgPush contentOmitted.
+                 * @member {boolean} contentOmitted
+                 * @memberof im.body.v1.MsgPush
+                 * @instance
+                 */
+                MsgPush.prototype.contentOmitted = false;
+
+                /**
+                 * MsgPush omittedReason.
+                 * @member {string} omittedReason
+                 * @memberof im.body.v1.MsgPush
+                 * @instance
+                 */
+                MsgPush.prototype.omittedReason = "";
+
+                /**
                  * Creates a new MsgPush instance using the specified properties.
                  * @function create
                  * @memberof im.body.v1.MsgPush
@@ -2568,6 +2628,10 @@ export const im = $root.im = (() => {
                     if (message.ext != null && Object.hasOwnProperty.call(message, "ext"))
                         for (let keys = Object.keys(message.ext), i = 0; i < keys.length; ++i)
                             writer.uint32(/* id 9, wireType 2 =*/74).fork().uint32(/* id 1, wireType 2 =*/10).string(keys[i]).uint32(/* id 2, wireType 2 =*/18).string(message.ext[keys[i]]).ldelim();
+                    if (message.contentOmitted != null && Object.hasOwnProperty.call(message, "contentOmitted"))
+                        writer.uint32(/* id 10, wireType 0 =*/80).bool(message.contentOmitted);
+                    if (message.omittedReason != null && Object.hasOwnProperty.call(message, "omittedReason"))
+                        writer.uint32(/* id 11, wireType 2 =*/90).string(message.omittedReason);
                     return writer;
                 };
 
@@ -2665,6 +2729,14 @@ export const im = $root.im = (() => {
                                 message.ext[key] = value;
                                 break;
                             }
+                        case 10: {
+                                message.contentOmitted = reader.bool();
+                                break;
+                            }
+                        case 11: {
+                                message.omittedReason = reader.string();
+                                break;
+                            }
                         default:
                             reader.skipType(tag & 7, long);
                             break;
@@ -2748,6 +2820,12 @@ export const im = $root.im = (() => {
                             if (!$util.isString(message.ext[key[i]]))
                                 return "ext: string{k:string} expected";
                     }
+                    if (message.contentOmitted != null && Object.hasOwnProperty.call(message, "contentOmitted"))
+                        if (typeof message.contentOmitted !== "boolean")
+                            return "contentOmitted: boolean expected";
+                    if (message.omittedReason != null && Object.hasOwnProperty.call(message, "omittedReason"))
+                        if (!$util.isString(message.omittedReason))
+                            return "omittedReason: string expected";
                     return null;
                 };
 
@@ -2855,6 +2933,10 @@ export const im = $root.im = (() => {
                             message.ext[keys[i]] = String(object.ext[keys[i]]);
                         }
                     }
+                    if (object.contentOmitted != null)
+                        message.contentOmitted = Boolean(object.contentOmitted);
+                    if (object.omittedReason != null)
+                        message.omittedReason = String(object.omittedReason);
                     return message;
                 };
 
@@ -2902,6 +2984,8 @@ export const im = $root.im = (() => {
                         } else
                             object.sendTime = options.longs === String ? "0" : typeof BigInt !== "undefined" && options.longs === BigInt ? BigInt("0") : 0;
                         object.content = null;
+                        object.contentOmitted = false;
+                        object.omittedReason = "";
                     }
                     if (message.convId != null && Object.hasOwnProperty.call(message, "convId"))
                         if (typeof BigInt !== "undefined" && options.longs === BigInt)
@@ -2948,6 +3032,10 @@ export const im = $root.im = (() => {
                             object.ext[keys2[j]] = message.ext[keys2[j]];
                         }
                     }
+                    if (message.contentOmitted != null && Object.hasOwnProperty.call(message, "contentOmitted"))
+                        object.contentOmitted = message.contentOmitted;
+                    if (message.omittedReason != null && Object.hasOwnProperty.call(message, "omittedReason"))
+                        object.omittedReason = message.omittedReason;
                     return object;
                 };
 
@@ -8882,6 +8970,8 @@ export const im = $root.im = (() => {
                  * @property {string|null} [fileName] FileContent fileName
                  * @property {number|Long|null} [size] FileContent size
                  * @property {string|null} [mime] FileContent mime
+                 * @property {string|null} [thumbKey] FileContent thumbKey
+                 * @property {number|null} [durationMs] FileContent durationMs
                  */
 
                 /**
@@ -8932,6 +9022,22 @@ export const im = $root.im = (() => {
                 FileContent.prototype.mime = "";
 
                 /**
+                 * FileContent thumbKey.
+                 * @member {string} thumbKey
+                 * @memberof im.common.v1.FileContent
+                 * @instance
+                 */
+                FileContent.prototype.thumbKey = "";
+
+                /**
+                 * FileContent durationMs.
+                 * @member {number} durationMs
+                 * @memberof im.common.v1.FileContent
+                 * @instance
+                 */
+                FileContent.prototype.durationMs = 0;
+
+                /**
                  * Creates a new FileContent instance using the specified properties.
                  * @function create
                  * @memberof im.common.v1.FileContent
@@ -8967,6 +9073,10 @@ export const im = $root.im = (() => {
                         writer.uint32(/* id 3, wireType 0 =*/24).uint64(message.size);
                     if (message.mime != null && Object.hasOwnProperty.call(message, "mime"))
                         writer.uint32(/* id 4, wireType 2 =*/34).string(message.mime);
+                    if (message.thumbKey != null && Object.hasOwnProperty.call(message, "thumbKey"))
+                        writer.uint32(/* id 5, wireType 2 =*/42).string(message.thumbKey);
+                    if (message.durationMs != null && Object.hasOwnProperty.call(message, "durationMs"))
+                        writer.uint32(/* id 6, wireType 0 =*/48).uint32(message.durationMs);
                     return writer;
                 };
 
@@ -9023,6 +9133,14 @@ export const im = $root.im = (() => {
                                 message.mime = reader.string();
                                 break;
                             }
+                        case 5: {
+                                message.thumbKey = reader.string();
+                                break;
+                            }
+                        case 6: {
+                                message.durationMs = reader.uint32();
+                                break;
+                            }
                         default:
                             reader.skipType(tag & 7, long);
                             break;
@@ -9074,6 +9192,12 @@ export const im = $root.im = (() => {
                     if (message.mime != null && Object.hasOwnProperty.call(message, "mime"))
                         if (!$util.isString(message.mime))
                             return "mime: string expected";
+                    if (message.thumbKey != null && Object.hasOwnProperty.call(message, "thumbKey"))
+                        if (!$util.isString(message.thumbKey))
+                            return "thumbKey: string expected";
+                    if (message.durationMs != null && Object.hasOwnProperty.call(message, "durationMs"))
+                        if (!$util.isInteger(message.durationMs))
+                            return "durationMs: integer expected";
                     return null;
                 };
 
@@ -9110,6 +9234,10 @@ export const im = $root.im = (() => {
                             message.size = new $util.LongBits(object.size.low >>> 0, object.size.high >>> 0).toNumber(true);
                     if (object.mime != null)
                         message.mime = String(object.mime);
+                    if (object.thumbKey != null)
+                        message.thumbKey = String(object.thumbKey);
+                    if (object.durationMs != null)
+                        message.durationMs = object.durationMs >>> 0;
                     return message;
                 };
 
@@ -9139,6 +9267,8 @@ export const im = $root.im = (() => {
                         } else
                             object.size = options.longs === String ? "0" : typeof BigInt !== "undefined" && options.longs === BigInt ? BigInt("0") : 0;
                         object.mime = "";
+                        object.thumbKey = "";
+                        object.durationMs = 0;
                     }
                     if (message.objectKey != null && Object.hasOwnProperty.call(message, "objectKey"))
                         object.objectKey = message.objectKey;
@@ -9153,6 +9283,10 @@ export const im = $root.im = (() => {
                             object.size = options.longs === String ? $util.Long.prototype.toString.call(message.size) : options.longs === Number ? new $util.LongBits(message.size.low >>> 0, message.size.high >>> 0).toNumber(true) : message.size;
                     if (message.mime != null && Object.hasOwnProperty.call(message, "mime"))
                         object.mime = message.mime;
+                    if (message.thumbKey != null && Object.hasOwnProperty.call(message, "thumbKey"))
+                        object.thumbKey = message.thumbKey;
+                    if (message.durationMs != null && Object.hasOwnProperty.call(message, "durationMs"))
+                        object.durationMs = message.durationMs;
                     return object;
                 };
 

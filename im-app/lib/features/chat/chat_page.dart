@@ -4,8 +4,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
 import '../../core/theme/lumo_colors.dart';
+import '../../data/call/call_engine.dart';
+import '../../data/models/chat_message.dart';
 import '../../data/models/conversation.dart';
 import '../../data/models/friend.dart';
+import '../../data/models/message_payloads.dart';
 import '../../shared/widgets/lumo_avatar.dart';
 import '../cs/cs_conversation_sheet.dart';
 import '../groups/group_info_dialog.dart';
@@ -26,6 +29,9 @@ class ChatPage extends ConsumerStatefulWidget {
 class _ChatPageState extends ConsumerState<ChatPage> {
   String? _lastMarkedConvId;
   String? _lastMarkedSeq;
+  ChatMessage? _quote;
+  bool _selectingMerge = false;
+  final Map<String, ChatMessage> _selectedForMerge = {};
 
   @override
   void didUpdateWidget(covariant ChatPage oldWidget) {
@@ -33,6 +39,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     if (oldWidget.convId != widget.convId) {
       _lastMarkedConvId = null;
       _lastMarkedSeq = null;
+      _quote = null;
+      _selectingMerge = false;
+      _selectedForMerge.clear();
     }
   }
 
@@ -67,9 +76,27 @@ class _ChatPageState extends ConsumerState<ChatPage> {
             key: ValueKey(convId),
             convId: convId,
             peerReadSeq: conv?.peerReadSeq,
+            selectionMode: _selectingMerge,
+            selectedIds: _selectedForMerge.keys.toSet(),
+            onSelectionToggle: _toggleMergeSelection,
+            onMergeForward: _startMergeSelection,
+            onQuote: (message) => setState(() => _quote = message),
           ),
         ),
-        InputBar(convId: convId),
+        if (_selectingMerge)
+          _MergeForwardBar(
+            count: _selectedForMerge.length,
+            onCancel: _cancelMergeSelection,
+            onSend: () => _sendMergeForward(context),
+          )
+        else
+          InputBar(
+            convId: convId,
+            quote: _quote,
+            onClearQuote: () {
+              if (mounted) setState(() => _quote = null);
+            },
+          ),
       ],
     );
 
@@ -91,6 +118,172 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       body: SafeArea(top: false, child: body),
     );
   }
+
+  void _startMergeSelection(ChatMessage message) {
+    if (!isForwardableMessage(message)) return;
+    setState(() {
+      _quote = null;
+      _selectingMerge = true;
+      _selectedForMerge[message.clientMsgId] = message;
+    });
+  }
+
+  void _toggleMergeSelection(ChatMessage message) {
+    if (!isForwardableMessage(message)) return;
+    setState(() {
+      if (_selectedForMerge.containsKey(message.clientMsgId)) {
+        _selectedForMerge.remove(message.clientMsgId);
+      } else {
+        _selectedForMerge[message.clientMsgId] = message;
+      }
+    });
+  }
+
+  void _cancelMergeSelection() {
+    if (!_selectingMerge && _selectedForMerge.isEmpty) return;
+    setState(() {
+      _selectingMerge = false;
+      _selectedForMerge.clear();
+    });
+  }
+
+  Future<void> _sendMergeForward(BuildContext context) async {
+    final selected = _selectedForMerge.values.toList();
+    if (selected.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请选择要合并转发的消息')));
+      return;
+    }
+    final target = await _pickTargetConversation(context, ref);
+    if (target == null || !context.mounted) return;
+    final content = mergeForwardContentFromMessages(selected);
+    try {
+      await ref
+          .read(messageRepositoryProvider)
+          .sendContent(target.convId, content);
+      if (!context.mounted) return;
+      _cancelMergeSelection();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已合并转发给 ${target.title}')),
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('合并转发失败：$e')));
+      }
+    }
+  }
+}
+
+class _MergeForwardBar extends StatelessWidget {
+  const _MergeForwardBar({
+    required this.count,
+    required this.onCancel,
+    required this.onSend,
+  });
+
+  final int count;
+  final VoidCallback onCancel;
+  final VoidCallback onSend;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: LumoColors.divider)),
+        ),
+        child: Row(
+          children: [
+            TextButton.icon(
+              onPressed: onCancel,
+              icon: const Icon(Icons.close),
+              label: const Text('取消'),
+            ),
+            Expanded(
+              child: Center(
+                child: Text(
+                  '已选 $count 条',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: count > 0 ? onSend : null,
+              icon: const Icon(Icons.library_books_outlined),
+              label: const Text('合并转发'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+Future<Conversation?> _pickTargetConversation(
+  BuildContext context,
+  WidgetRef ref,
+) async {
+  final convs = ref.read(conversationsProvider).valueOrNull ?? const [];
+  final targets = convs.where((conv) => !conv.isSystem).toList();
+  if (targets.isEmpty) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('没有可转发的会话')));
+    return null;
+  }
+  return showModalBottomSheet<Conversation>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 420),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '选择转发会话',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: targets.length,
+                itemBuilder: (_, index) {
+                  final conv = targets[index];
+                  return ListTile(
+                    leading: LumoAvatar(
+                        name: conv.title, url: conv.avatar, size: 36),
+                    title: Text(
+                      conv.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      conv.isGroup
+                          ? '群聊'
+                          : conv.isCs
+                              ? '客服会话'
+                              : '单聊',
+                    ),
+                    onTap: () => Navigator.pop(sheetContext, conv),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class _Header extends ConsumerWidget {
@@ -180,7 +373,61 @@ class _Header extends ConsumerWidget {
                 }
               },
             ),
-          if (conv?.isCs ?? false) ...[
+          if (isC2C && conv?.peerUserId != null)
+            IconButton(
+              tooltip: '视频通话',
+              icon: const Icon(Icons.videocam_outlined),
+              onPressed: () async {
+                final ok = await ref.read(callEngineProvider).startCall(
+                      conv!.peerUserId!,
+                      peerName: title,
+                      media: CallMedia.video,
+                    );
+                if (!ok && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('当前无法发起通话（连接未就绪或已在通话中）')),
+                  );
+                }
+              },
+            ),
+          if (groupConv != null) ...[
+            IconButton(
+              tooltip: '群语音',
+              icon: const Icon(Icons.groups_2_outlined),
+              onPressed: () async {
+                final ok = await ref.read(callEngineProvider).startGroupCall(
+                      groupConv.groupId!,
+                      groupName: title,
+                    );
+                if (!ok && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('当前无法发起通话（连接未就绪或已在通话中）')),
+                  );
+                }
+              },
+            ),
+            IconButton(
+              tooltip: '群视频',
+              icon: const Icon(Icons.video_call_outlined),
+              onPressed: () async {
+                final ok = await ref.read(callEngineProvider).startGroupCall(
+                      groupConv.groupId!,
+                      groupName: title,
+                      media: CallMedia.video,
+                    );
+                if (!ok && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('当前无法发起通话（连接未就绪或已在通话中）')),
+                  );
+                }
+              },
+            ),
+            IconButton(
+              tooltip: '群聊信息',
+              onPressed: () => _showGroupInfo(context, groupConv),
+              icon: const Icon(Icons.group_add_outlined),
+            ),
+          ] else if (conv?.isCs ?? false) ...[
             if (conv?.csStatus == '1')
               IconButton(
                 tooltip: '认领会话',
@@ -198,19 +445,68 @@ class _Header extends ConsumerWidget {
               onPressed: () => showCsConversationSheet(context, convId: convId),
               icon: const Icon(Icons.article_outlined),
             ),
-          ] else if (groupConv != null)
-            IconButton(
-              tooltip: '群聊信息',
-              onPressed: () => _showGroupInfo(context, groupConv),
-              icon: const Icon(Icons.group_add_outlined),
-            )
-          else if (embedded) ...[
+          ] else if (embedded)
             IconButton(onPressed: () {}, icon: const Icon(Icons.call_outlined)),
-            IconButton(onPressed: () {}, icon: const Icon(Icons.more_horiz)),
-          ],
+          PopupMenuButton<String>(
+            tooltip: '更多',
+            icon: const Icon(Icons.more_horiz),
+            onSelected: (value) {
+              if (value == 'clear') _clearLocalMessages(context, ref);
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'clear',
+                child: Row(
+                  children: [
+                    Icon(Icons.cleaning_services_outlined, size: 18),
+                    SizedBox(width: 8),
+                    Text('清空本地聊天记录'),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _clearLocalMessages(BuildContext context, WidgetRef ref) async {
+    final c = conv;
+    if (c == null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清空本地聊天记录'),
+        content: const Text('只会删除本机缓存，不会删除服务端漫游记录。重新同步或拉历史时仍可能恢复。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('清空'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !context.mounted) return;
+    final cleanup = await ref.read(messageRepositoryProvider).clearLocal(
+          c.convId,
+        );
+    await ref.read(conversationRepositoryProvider).clearPreview(c.convId);
+    if (context.mounted) {
+      final cleanedMedia =
+          cleanup.deletedFiles > 0 || cleanup.clearedDownloadUrlEntries > 0;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            cleanedMedia ? '已清空本地聊天记录，并清理媒体缓存' : '已清空本地聊天记录',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _claimCs(BuildContext context, WidgetRef ref) async {

@@ -98,4 +98,6 @@ class ConversationRepository {
   /// 本地重命名会话标题（C2C 备注 / 群改名后即时反映，等服务端下行再对齐）。
   Future<void> rename(String convId, String title) =>
       _convDao.updateTitle(convId, title);
+
+  Future<void> clearPreview(String convId) => _convDao.clearPreview(convId);
 }

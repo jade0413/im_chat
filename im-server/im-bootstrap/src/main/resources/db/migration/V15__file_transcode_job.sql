@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS file_transcode_job (
+  id                BIGINT       NOT NULL COMMENT 'snowflake',
+  tenant_id         BIGINT       NOT NULL,
+  file_id           BIGINT       NOT NULL,
+  source_object_key VARCHAR(255) NOT NULL,
+  source_mime       VARCHAR(64)  NOT NULL,
+  target_profile    VARCHAR(32)  NOT NULL COMMENT 'e.g. mp4_720p',
+  status            TINYINT      NOT NULL DEFAULT 0 COMMENT '0待处理 1处理中 2成功 3失败 4跳过',
+  target_object_key VARCHAR(255) NULL,
+  error_msg         VARCHAR(500) NULL,
+  retry_count       INT          NOT NULL DEFAULT 0,
+  next_retry_at     DATETIME(3)  NULL,
+  claim_owner       VARCHAR(80)  NULL,
+  claim_until       DATETIME(3)  NULL,
+  created_at        DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at        DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_tenant_file_profile (tenant_id, file_id, target_profile),
+  KEY idx_tenant_status_retry (tenant_id, status, next_retry_at, id),
+  KEY idx_claim_owner (claim_owner, claim_until)
+) ENGINE=InnoDB COMMENT='文件转码任务';

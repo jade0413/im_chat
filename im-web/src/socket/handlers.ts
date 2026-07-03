@@ -12,6 +12,7 @@ import {
   SyncResp,
   WsCmd,
 } from '../proto/codec';
+import { getMessageHistory } from '../api/message';
 import type { im } from '../proto/generated/bundle';
 import { useAuthStore } from '../store/authStore';
 import { useConvStore } from '../store/convStore';
@@ -21,8 +22,19 @@ import { useUiStore } from '../store/uiStore';
 import { useUserStore } from '../store/userStore';
 import { compareIdLike, idToString } from '../utils/id';
 import { contiguousSeqFromMessages, hasSeqGap, maxSeq, resolveLocalSyncSeq } from '../utils/seq';
-import { convInfoToConversation, msgPushToChatMessage } from './mappers';
+import { convInfoToConversation, historyItemToChatMessage, msgPushToChatMessage } from './mappers';
 import type { ImSocket } from './ImSocket';
+
+interface OmittedBackfill {
+  convId: string;
+  seq: string;
+  attempts: number;
+  timer: number | null;
+}
+
+const omittedBackfills = new Map<string, OmittedBackfill>();
+const OMITTED_BACKFILL_LIMIT = 20;
+const OMITTED_BACKFILL_MAX_ATTEMPTS = 3;
 
 export function dispatchFrame(socket: ImSocket, frame: im.ws.v1.IFrame) {
   switch (frame.cmd) {
@@ -97,6 +109,7 @@ function handleKick(socket: ImSocket, body: Uint8Array) {
   useSocketStore.getState().setEvent('收到 KICK', kick.message || '当前账号已在其他设备登录');
 
   // 网关按 conn_id 定向下发 KICK；当前连接收到 KICK 就应停止重连并提示用户。
+  clearOmittedBackfills();
   useUiStore.getState().setKickMessage(kick.message || '当前账号已在其他设备登录');
   useAuthStore.getState().logout();
   // manualClose=true：被踢是有意断开，不启动重连逻辑
@@ -105,6 +118,10 @@ function handleKick(socket: ImSocket, body: Uint8Array) {
 
 function handleMsgPush(socket: ImSocket, body: Uint8Array, reqId?: Long) {
   const push = MsgPush.decode(body);
+  if (push.contentOmitted) {
+    handleOmittedMsgPush(socket, push, reqId);
+    return;
+  }
   const message = msgPushToChatMessage(push);
   const convId = message.convId;
   const existing = useConvStore.getState().conversations.get(convId);
@@ -136,6 +153,31 @@ function handleMsgPush(socket: ImSocket, body: Uint8Array, reqId?: Long) {
     lastMsgTime: idToString(push.sendTime),
   });
   socket.sendRecvAck([{ convId, seq: idToString(push.seq) }], reqId);
+}
+
+function handleOmittedMsgPush(socket: ImSocket, push: im.body.v1.MsgPush, reqId?: Long) {
+  const convId = idToString(push.convId);
+  const pushSeq = idToString(push.seq);
+  const existing = useConvStore.getState().conversations.get(convId);
+  const currentSyncSeq = currentLocalSeq(convId, existing?.syncSeq);
+  useConvStore.getState().upsertConv({
+    convId,
+    type: Number(push.convType ?? 0),
+    title: existing?.title ?? push.sender?.nickname ?? '新会话',
+    avatar: existing?.avatar ?? push.sender?.avatar ?? undefined,
+    peerUserId: existing?.peerUserId,
+    groupId: existing?.groupId,
+    maxSeq: maxSeq(existing?.maxSeq, pushSeq),
+    syncSeq: currentSyncSeq,
+    readSeq: existing?.readSeq ?? '0',
+    pinned: existing?.pinned ?? false,
+    muted: existing?.muted ?? false,
+    lastMsgAbstract: omittedPushAbstract(push),
+    lastMsgTime: idToString(push.sendTime),
+  });
+  queueOmittedBackfill(socket, convId, pushSeq);
+  socket.sendSyncReq();
+  socket.sendRecvAck([{ convId, seq: pushSeq }], reqId);
 }
 
 function handleMsgSendAck(socket: ImSocket, body: Uint8Array) {
@@ -206,6 +248,7 @@ function handleSyncResp(socket: ImSocket, body: Uint8Array) {
     const messages = (delta.msgs ?? []).map(msgPushToChatMessage);
     if (messages.length) {
       useMessageStore.getState().appendMessages(conv.convId, messages);
+      clearOmittedBackfillsForMessages(messages);
     }
     const nextSyncSeq = syncSeqAfterDelta(
       beforeSyncSeq,
@@ -229,6 +272,144 @@ function handleSyncResp(socket: ImSocket, body: Uint8Array) {
   if (peerIds.length > 0) {
     void useUserStore.getState().ensureUsers(peerIds);
   }
+}
+
+function queueOmittedBackfill(socket: ImSocket, convId: string, seq: string) {
+  const key = omittedKey(convId, seq);
+  if (omittedBackfills.has(key)) return;
+  const pending: OmittedBackfill = { convId, seq, attempts: 0, timer: null };
+  omittedBackfills.set(key, pending);
+  scheduleOmittedBackfill(socket, pending, 600);
+}
+
+function scheduleOmittedBackfill(socket: ImSocket, pending: OmittedBackfill, delayMs: number) {
+  if (pending.timer !== null) {
+    window.clearTimeout(pending.timer);
+  }
+  pending.timer = window.setTimeout(() => {
+    void runOmittedBackfill(socket, pending);
+  }, delayMs);
+}
+
+async function runOmittedBackfill(socket: ImSocket, pending: OmittedBackfill) {
+  const key = omittedKey(pending.convId, pending.seq);
+  if (omittedBackfills.get(key) !== pending) return;
+  if (hasMessageBySeq(pending.convId, pending.seq)) {
+    clearOmittedBackfill(key);
+    return;
+  }
+
+  pending.attempts += 1;
+  try {
+    socket.sendSyncReq();
+    if (hasMessageBySeq(pending.convId, pending.seq)) {
+      clearOmittedBackfill(key);
+      return;
+    }
+    const found = await backfillOmittedFromHistory(pending.convId, pending.seq);
+    if (found) {
+      clearOmittedBackfill(key);
+      return;
+    }
+  } catch (error) {
+    console.debug('[im-web] omitted media backfill failed', {
+      convId: pending.convId,
+      seq: pending.seq,
+      error,
+    });
+  }
+
+  if (pending.attempts >= OMITTED_BACKFILL_MAX_ATTEMPTS) {
+    console.debug('[im-web] omitted media backfill exhausted', {
+      convId: pending.convId,
+      seq: pending.seq,
+    });
+    clearOmittedBackfill(key);
+    return;
+  }
+  scheduleOmittedBackfill(socket, pending, pending.attempts * 2000);
+}
+
+async function backfillOmittedFromHistory(convId: string, seq: string): Promise<boolean> {
+  const page = await getMessageHistory(convId, {
+    endSeq: nextSeq(seq),
+    limit: OMITTED_BACKFILL_LIMIT,
+  });
+  const messages = page.messages.map(historyItemToChatMessage);
+  const target = messages.find((message) => message.seq === seq);
+  if (!target) return false;
+
+  useMessageStore.getState().appendMessages(convId, messages);
+  const existing = useConvStore.getState().conversations.get(convId);
+  const nextSyncSeq = contiguousSeqFromMessages(
+    useMessageStore.getState().messages.get(convId),
+    existing?.syncSeq ?? '0',
+  );
+  const shouldRefreshSummary = compareIdLike(existing?.maxSeq, seq) <= 0;
+  useConvStore.getState().upsertConv({
+    convId,
+    type: existing?.type ?? 0,
+    title: existing?.title ?? target.sender.nickname,
+    avatar: existing?.avatar ?? target.sender.avatar,
+    peerUserId: existing?.peerUserId,
+    groupId: existing?.groupId,
+    maxSeq: maxSeq(existing?.maxSeq, seq),
+    syncSeq: nextSyncSeq,
+    readSeq: existing?.readSeq ?? idToString(page.readSeq),
+    pinned: existing?.pinned ?? false,
+    muted: existing?.muted ?? false,
+    lastMsgAbstract: shouldRefreshSummary ? msgAbstract(target.content) : existing?.lastMsgAbstract ?? '',
+    lastMsgTime: shouldRefreshSummary ? target.sendTime : existing?.lastMsgTime,
+    csStatus: existing?.csStatus,
+  });
+  clearOmittedBackfillsForMessages(messages);
+  return true;
+}
+
+function hasMessageBySeq(convId: string, seq: string): boolean {
+  return (useMessageStore.getState().messages.get(convId) ?? []).some((message) => message.seq === seq);
+}
+
+function clearOmittedBackfillsForMessages(messages: Iterable<{ convId: string; seq?: string | null }>) {
+  for (const message of messages) {
+    if (!message.seq) continue;
+    clearOmittedBackfill(omittedKey(message.convId, message.seq));
+  }
+}
+
+function clearOmittedBackfill(key: string) {
+  const pending = omittedBackfills.get(key);
+  if (!pending) return;
+  if (pending.timer !== null) {
+    window.clearTimeout(pending.timer);
+  }
+  omittedBackfills.delete(key);
+}
+
+function clearOmittedBackfills() {
+  for (const pending of omittedBackfills.values()) {
+    if (pending.timer !== null) {
+      window.clearTimeout(pending.timer);
+    }
+  }
+  omittedBackfills.clear();
+}
+
+function omittedKey(convId: string, seq: string): string {
+  return `${convId}:${seq}`;
+}
+
+function nextSeq(seq: string): string {
+  const value = BigInt(seq || '0');
+  return (value + 1n).toString();
+}
+
+function omittedPushAbstract(push: im.body.v1.IMsgPush): string {
+  const ext = push.ext as Record<string, string> | null | undefined;
+  const abstract = ext?.__abstract;
+  if (abstract) return abstract;
+  if (push.omittedReason === 'large_group_media') return '媒体消息同步中';
+  return '消息同步中';
 }
 
 function currentLocalSeq(convId: string, storedSyncSeq?: string): string {

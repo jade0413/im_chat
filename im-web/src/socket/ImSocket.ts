@@ -379,7 +379,7 @@ export class ImSocket {
     this._doSendMsg(clientMsgId, convId, body);
   }
 
-  sendFile(convId: string, opts: { objectKey: string; fileName: string; size?: number; mime?: string }) {
+  sendFile(convId: string, opts: { objectKey: string; fileName: string; size?: number; mime?: string; thumbKey?: string; durationMs?: number }) {
     const auth = useAuthStore.getState();
     const clientMsgId = createUuid();
     useMessageStore.getState().addOptimistic({
@@ -390,7 +390,16 @@ export class ImSocket {
       sendTime: String(Date.now()),
       status: 'sending',
     });
-    const content = MsgContent.create({ file: { objectKey: opts.objectKey, fileName: opts.fileName, size: opts.size ?? 0, mime: opts.mime ?? '' } });
+    const content = MsgContent.create({
+      file: {
+        objectKey: opts.objectKey,
+        fileName: opts.fileName,
+        size: opts.size ?? 0,
+        mime: opts.mime ?? '',
+        thumbKey: opts.thumbKey ?? '',
+        durationMs: opts.durationMs ?? 0,
+      },
+    });
     const body = MsgSend.encode(MsgSend.create({ clientMsgId, convId: idToLong(convId), content })).finish();
     this._doSendMsg(clientMsgId, convId, body);
   }
@@ -579,7 +588,14 @@ function rebuildMsgContent(content: import('../store/types').MessageContent): Re
     case 'file':
     case 'video':
       return MsgContent.create({
-        file: { objectKey: content.objectKey, fileName: content.fileName, size: content.size ?? 0, mime: content.mime ?? '' },
+        file: {
+          objectKey: content.objectKey,
+          fileName: content.fileName,
+          size: content.size ?? 0,
+          mime: content.mime ?? '',
+          thumbKey: content.kind === 'video' ? content.thumbKey ?? '' : '',
+          durationMs: content.kind === 'video' ? content.durationMs ?? 0 : 0,
+        },
       });
     case 'voice':
       return MsgContent.create({

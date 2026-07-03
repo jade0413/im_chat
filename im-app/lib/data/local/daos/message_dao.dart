@@ -110,6 +110,16 @@ class MessageDao extends DatabaseAccessor<AppDatabase> with _$MessageDaoMixin {
     return row?.toModel();
   }
 
+  Future<ChatMessage?> getBySeq(String convId, String seq) async {
+    final row = await (select(messages)
+          ..where((t) => t.convId.equals(convId) & t.seq.equals(seq)))
+        .getSingleOrNull();
+    return row?.toModel();
+  }
+
+  Future<void> deleteLocal(String clientMsgId) =>
+      (delete(messages)..where((t) => t.clientMsgId.equals(clientMsgId))).go();
+
   Future<List<ChatMessage>> searchMessages(
     String keyword, {
     int limit = 80,
@@ -138,6 +148,42 @@ class MessageDao extends DatabaseAccessor<AppDatabase> with _$MessageDaoMixin {
       ..where(messages.convId.equals(convId) & messages.seq.isNotNull());
     final rows = await query.get();
     return rows.map((r) => r.read(messages.seq)!).toList();
+  }
+
+  Future<List<String>> mediaObjectKeysForConv(String convId) async {
+    final query = selectOnly(messages)
+      ..addColumns([messages.contentJson])
+      ..where(messages.convId.equals(convId));
+    final rows = await query.get();
+    final keys = <String>{};
+
+    void add(String? key) {
+      final normalized = key?.trim();
+      if (normalized != null && normalized.isNotEmpty) {
+        keys.add(normalized);
+      }
+    }
+
+    for (final row in rows) {
+      final contentJson = row.read(messages.contentJson);
+      if (contentJson == null) continue;
+      switch (ContentJson.decode(contentJson)) {
+        case ImageBody(:final objectKey, :final thumbKey):
+          add(objectKey);
+          add(thumbKey);
+        case VoiceBody(:final objectKey):
+          add(objectKey);
+        case FileBody(:final objectKey):
+          add(objectKey);
+        case VideoBody(:final objectKey, :final thumbKey):
+          add(objectKey);
+          add(thumbKey);
+        case TextBody() || NotificationBody() || CustomBody():
+          break;
+      }
+    }
+
+    return keys.toList(growable: false);
   }
 
   Future<void> clearConv(String convId) =>

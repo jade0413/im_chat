@@ -84,6 +84,16 @@ im:
     access-key: ${IM_MINIO_ACCESS_KEY:${MINIO_ROOT_USER:im_minio}}
     secret-key: ${IM_MINIO_SECRET_KEY:${MINIO_ROOT_PASSWORD:im_dev_minio_pwd}}
     bucket: ${IM_MINIO_BUCKET:im-media}
+    presign-ttl: ${IM_FILE_PRESIGN_TTL:5m}
+    download-ttl: ${IM_FILE_DOWNLOAD_TTL:15m}
+    cdn-base-url: ${IM_FILE_CDN_BASE_URL:}
+    transcode:
+      enabled: ${IM_FILE_TRANSCODE_ENABLED:false}
+      ffmpeg-path: ${IM_FILE_FFMPEG_PATH:ffmpeg}
+      work-dir: ${IM_FILE_TRANSCODE_WORK_DIR:}
+      timeout: ${IM_FILE_TRANSCODE_TIMEOUT:10m}
+      poll-interval: ${IM_FILE_TRANSCODE_POLL_INTERVAL:10s}
+      batch-size: ${IM_FILE_TRANSCODE_BATCH_SIZE:4}
   message:
     retention:
       # 消息保留清理作业（按 tenant_config.msg_retention_days 周期删除过期消息）。
@@ -91,6 +101,21 @@ im:
       scan-interval-millis: ${IM_MSG_RETENTION_SCAN_INTERVAL_MILLIS:3600000}
       batch-size: ${IM_MSG_RETENTION_BATCH_SIZE:1000}
       max-batches-per-cycle: ${IM_MSG_RETENTION_MAX_BATCHES:50}
+  moderation:
+    enabled: ${IM_MODERATION_ENABLED:true}
+    event-dedup-ttl: ${IM_MODERATION_EVENT_DEDUP_TTL:24h}
+    msg-saved-queue: ${IM_MODERATION_MSG_SAVED_QUEUE:im.moderation.msg.saved}
+    word-reload-queue: ${IM_MODERATION_WORD_RELOAD_QUEUE:im.moderation.word.reload}
+    media-http:
+      enabled: ${IM_MODERATION_MEDIA_HTTP_ENABLED:false}
+      endpoint: ${IM_MODERATION_MEDIA_HTTP_ENDPOINT:}
+      provider: ${IM_MODERATION_MEDIA_HTTP_PROVIDER:http_media}
+      bearer-token: ${IM_MODERATION_MEDIA_HTTP_BEARER_TOKEN:}
+      hmac-secret: ${IM_MODERATION_MEDIA_HTTP_HMAC_SECRET:}
+      timeout: ${IM_MODERATION_MEDIA_HTTP_TIMEOUT:3s}
+      revoke-threshold: ${IM_MODERATION_MEDIA_HTTP_REVOKE_THRESHOLD:0.9}
+      # 默认 fail-open，第三方审核超时/异常不阻断发送；强监管场景可改 true。
+      fail-closed: ${IM_MODERATION_MEDIA_HTTP_FAIL_CLOSED:false}
   outbox:
     enabled: ${IM_OUTBOX_ENABLED:true}
     batch-size: ${IM_OUTBOX_BATCH_SIZE:100}
@@ -103,9 +128,13 @@ im:
     event-dedup-ttl: ${IM_PUSH_EVENT_DEDUP_TTL:24h}
     gateway-queue-prefix: ${IM_PUSH_GATEWAY_QUEUE_PREFIX:push.gw.}
     msg-saved-queue: ${IM_PUSH_MSG_SAVED_QUEUE:im.push.msg.saved}
-  call: # D45：1v1 语音通话（信令走 WS，媒体 WebRTC P2P + coturn）
+    # 群成员数达到阈值时，媒体消息只推轻量通知，客户端通过 SYNC 拉完整内容；默认 500 与 MVP 群上限一致，
+    # 等于默认近似不生效，租户/环境调小才启用；<=0 表示禁用。
+    large-group-media-light-push-threshold: ${IM_PUSH_LARGE_GROUP_MEDIA_LIGHT_THRESHOLD:500}
+  call: # D45/D50：实时音视频，小群通话走 mesh，默认最多 9 人。
     ring-timeout: ${IM_CALL_RING_TIMEOUT:60s}
     active-ttl: ${IM_CALL_ACTIVE_TTL:4h}
+    group-call-max-members: ${IM_CALL_GROUP_MAX_MEMBERS:9}
     stun-urls: ${IM_CALL_STUN_URLS:stun:stun.l.google.com:19302}
     turn-urls: ${IM_CALL_TURN_URLS:} # 如 turn:your-host:3478?transport=udp；为空=仅 STUN（仅限内网联调）
     turn-secret: ${IM_CALL_TURN_SECRET:} # 必须与 coturn static-auth-secret 一致

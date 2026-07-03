@@ -1,12 +1,21 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/theme/lumo_colors.dart';
+import '../../../data/attachment_sender.dart';
+import '../../../data/media_mime.dart';
+import '../../../data/models/chat_message.dart';
+import '../../../data/models/message_payloads.dart';
 import '../../../data/remote/rest/api_client.dart';
 import '../../../data/repositories/conversation_repository.dart';
 import '../../../data/repositories/message_repository.dart';
@@ -14,8 +23,15 @@ import 'mention_picker.dart';
 
 /// 输入栏：文本 + 发送 + 草稿（#13）+ 表情面板 + 图片/文件直传 + 群 @提及。
 class InputBar extends ConsumerStatefulWidget {
-  const InputBar({super.key, required this.convId});
+  const InputBar({
+    super.key,
+    required this.convId,
+    this.quote,
+    this.onClearQuote,
+  });
   final String convId;
+  final ChatMessage? quote;
+  final VoidCallback? onClearQuote;
 
   @override
   ConsumerState<InputBar> createState() => _InputBarState();
@@ -34,7 +50,15 @@ class _InputBarState extends ConsumerState<InputBar> {
   bool _hasText = false;
   bool _showEmoji = false;
   bool _uploading = false;
+  String? _uploadLabel;
+  double? _uploadProgress;
   bool _claiming = false;
+  bool _recording = false;
+  DateTime? _recordStartedAt;
+  String? _recordingPath;
+  Timer? _recordTimer;
+  Duration _recordElapsed = Duration.zero;
+  final AudioRecorder _recorder = AudioRecorder();
   late final MessageRepository _messages;
   late final ConversationRepository _convs;
 
@@ -68,6 +92,8 @@ class _InputBarState extends ConsumerState<InputBar> {
   @override
   void dispose() {
     _convs.saveDraft(widget.convId, _controller.text.trim());
+    _recordTimer?.cancel();
+    unawaited(_recorder.dispose());
     _controller.dispose();
     _focus.dispose();
     super.dispose();
@@ -138,7 +164,16 @@ class _InputBarState extends ConsumerState<InputBar> {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
     final atIds = _collectAtUserIds(text);
-    _messages.sendText(widget.convId, text, atUserIds: atIds);
+    final quote = widget.quote;
+    if (quote == null) {
+      _messages.sendText(widget.convId, text, atUserIds: atIds);
+    } else {
+      _messages.sendContent(
+        widget.convId,
+        quoteReplyContent(quoted: quote, text: text),
+      );
+      widget.onClearQuote?.call();
+    }
     _controller.clear();
     _lastText = '';
     _mentions.clear();
@@ -174,22 +209,30 @@ class _InputBarState extends ConsumerState<InputBar> {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.image,
         withData: true,
+        allowMultiple: true,
       );
       final files = result?.files ?? const <PlatformFile>[];
       if (files.isEmpty) return;
-      final file = files.first;
-      final bytes = await _readPickedFileBytes(file);
-      if (bytes == null) {
-        _toast('无法读取图片内容');
-        return;
-      }
-      await _runUpload(() => ref.read(attachmentSenderProvider).sendImage(
-            widget.convId,
-            bytes: bytes,
-            fileName: file.name,
-            mime: _mimeFromName(file.name),
-            localPath: file.path,
-          ));
+      await _runUpload(() async {
+        for (final file in files) {
+          final bytes = await _readPickedFileBytes(file);
+          if (bytes == null) {
+            _toast('无法读取图片内容：${file.name}');
+            continue;
+          }
+          final imageSize = await _decodeImageSize(bytes);
+          await ref.read(attachmentSenderProvider).sendImage(
+                widget.convId,
+                bytes: bytes,
+                fileName: file.name,
+                mime: _mimeFromName(file.name),
+                localPath: file.path,
+                width: imageSize?.width.round(),
+                height: imageSize?.height.round(),
+                onProgress: _onUploadProgress,
+              );
+        }
+      });
     } catch (e) {
       _toast('图片发送失败：${describeApiError(e)}');
     }
@@ -198,23 +241,161 @@ class _InputBarState extends ConsumerState<InputBar> {
   Future<void> _pickFile() async {
     if (_uploading) return;
     try {
-      final result = await FilePicker.platform.pickFiles(withData: true);
+      final result = await FilePicker.platform.pickFiles(
+        withData: true,
+        allowMultiple: true,
+      );
       final files = result?.files ?? const <PlatformFile>[];
       if (files.isEmpty) return;
-      final file = files.first;
-      final bytes = await _readPickedFileBytes(file);
-      if (bytes == null) {
-        _toast('无法读取文件内容');
-        return;
-      }
-      await _runUpload(() => ref.read(attachmentSenderProvider).sendFile(
-            widget.convId,
-            bytes: bytes,
-            fileName: file.name,
-            mime: _mimeFromName(file.name),
-          ));
+      await _runUpload(() async {
+        for (final file in files) {
+          final bytes = await _readPickedFileBytes(file);
+          if (bytes == null) {
+            _toast('无法读取文件内容：${file.name}');
+            continue;
+          }
+          final mime = _mimeFromName(file.name);
+          final sender = ref.read(attachmentSenderProvider);
+          if (mime.startsWith('video/')) {
+            await sender.sendVideo(
+              widget.convId,
+              bytes: bytes,
+              fileName: file.name,
+              mime: mime,
+              localPath: file.path,
+              onProgress: _onUploadProgress,
+            );
+          } else {
+            await sender.sendFile(
+              widget.convId,
+              bytes: bytes,
+              fileName: file.name,
+              mime: mime,
+              onProgress: _onUploadProgress,
+            );
+          }
+        }
+      });
     } catch (e) {
       _toast('文件发送失败：${describeApiError(e)}');
+    }
+  }
+
+  Future<void> _startRecording() async {
+    if (_uploading || _recording) return;
+    try {
+      final allowed = await _recorder.hasPermission();
+      if (!allowed) {
+        _toast('没有麦克风权限');
+        return;
+      }
+      final dir = await getTemporaryDirectory();
+      final fileName =
+          'lumo_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      final path = p.join(dir.path, fileName);
+      await _recorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          bitRate: 32000,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+        path: path,
+      );
+      _focus.unfocus();
+      _recordTimer?.cancel();
+      final startedAt = DateTime.now();
+      setState(() {
+        _showEmoji = false;
+        _recording = true;
+        _recordStartedAt = startedAt;
+        _recordingPath = path;
+        _recordElapsed = Duration.zero;
+      });
+      _recordTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
+        if (!mounted || !_recording || _recordStartedAt == null) return;
+        setState(() => _recordElapsed = DateTime.now().difference(startedAt));
+      });
+    } catch (e) {
+      _toast('开始录音失败：${describeApiError(e)}');
+    }
+  }
+
+  Future<void> _cancelRecording() async {
+    if (!_recording) return;
+    try {
+      await _recorder.cancel();
+    } catch (_) {
+      final path = _recordingPath;
+      if (path != null) {
+        unawaited(File(path).delete().catchError((_) => File(path)));
+      }
+    } finally {
+      _recordTimer?.cancel();
+      if (mounted) {
+        setState(() {
+          _recording = false;
+          _recordStartedAt = null;
+          _recordingPath = null;
+          _recordElapsed = Duration.zero;
+        });
+      }
+    }
+  }
+
+  Future<void> _stopAndSendVoice() async {
+    if (!_recording || _uploading) return;
+    final startedAt = _recordStartedAt;
+    final fallbackPath = _recordingPath;
+    _recordTimer?.cancel();
+    try {
+      final path = await _recorder.stop() ?? fallbackPath;
+      final durationMs = startedAt == null
+          ? _recordElapsed.inMilliseconds
+          : DateTime.now().difference(startedAt).inMilliseconds;
+      if (mounted) {
+        setState(() {
+          _recording = false;
+          _recordStartedAt = null;
+          _recordingPath = null;
+          _recordElapsed = Duration.zero;
+        });
+      }
+      if (path == null || path.isEmpty) {
+        _toast('录音文件不存在');
+        return;
+      }
+      final file = File(path);
+      if (!await file.exists()) {
+        _toast('录音文件不存在');
+        return;
+      }
+      if (durationMs < 700) {
+        unawaited(file.delete().catchError((_) => file));
+        _toast('语音太短');
+        return;
+      }
+      final bytes = await file.readAsBytes();
+      await _runUpload(() => ref.read(attachmentSenderProvider).sendVoice(
+            widget.convId,
+            bytes: bytes,
+            fileName: p.basename(path),
+            mime: 'audio/mp4',
+            durationMs: durationMs,
+            codec: 'aac',
+            localPath: path,
+            onProgress: _onUploadProgress,
+          ));
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _recording = false;
+          _recordStartedAt = null;
+          _recordingPath = null;
+          _recordElapsed = Duration.zero;
+        });
+      }
+      _toast('语音发送失败：${describeApiError(e)}');
     }
   }
 
@@ -226,13 +407,44 @@ class _InputBarState extends ConsumerState<InputBar> {
     return File(path).readAsBytes();
   }
 
+  Future<ui.Size?> _decodeImageSize(Uint8List bytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final image = frame.image;
+      final size = ui.Size(image.width.toDouble(), image.height.toDouble());
+      image.dispose();
+      return size;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _runUpload(Future<void> Function() task) async {
-    setState(() => _uploading = true);
+    setState(() {
+      _uploading = true;
+      _uploadLabel = '准备上传';
+      _uploadProgress = null;
+    });
     try {
       await task();
     } finally {
-      if (mounted) setState(() => _uploading = false);
+      if (mounted) {
+        setState(() {
+          _uploading = false;
+          _uploadLabel = null;
+          _uploadProgress = null;
+        });
+      }
     }
+  }
+
+  void _onUploadProgress(AttachmentTransferProgress progress) {
+    if (!mounted) return;
+    setState(() {
+      _uploadLabel = progress.label;
+      _uploadProgress = progress.fraction;
+    });
   }
 
   Future<void> _claimCsConversation() async {
@@ -309,70 +521,100 @@ class _InputBarState extends ConsumerState<InputBar> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                IconButton(
-                  onPressed: _toggleEmoji,
-                  icon: Icon(_showEmoji
-                      ? Icons.keyboard_outlined
-                      : Icons.emoji_emotions_outlined),
-                  color: LumoColors.textSecondary,
-                ),
-                if (_isGroup)
-                  IconButton(
-                    tooltip: '提醒谁看',
-                    onPressed: () => _openMention(),
-                    icon: const Icon(Icons.alternate_email),
-                    color: LumoColors.textSecondary,
-                  ),
-                Expanded(
-                  child: CallbackShortcuts(
-                    bindings: {
-                      const SingleActivator(LogicalKeyboardKey.enter): _send,
-                    },
-                    child: TextField(
-                      controller: _controller,
-                      focusNode: _focus,
-                      minLines: 1,
-                      maxLines: 5,
-                      textInputAction: TextInputAction.newline,
-                      onTap: () {
-                        if (_showEmoji) setState(() => _showEmoji = false);
-                      },
-                      decoration: const InputDecoration(
-                        hintText: '输入消息…',
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            if (_recording)
+              _RecordingBar(
+                elapsed: _recordElapsed,
+                onCancel: _cancelRecording,
+                onSend: _stopAndSendVoice,
+              )
+            else
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (widget.quote != null)
+                    _QuoteDraftBar(
+                      message: widget.quote!,
+                      onClear: widget.onClearQuote,
+                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        onPressed: _toggleEmoji,
+                        icon: Icon(_showEmoji
+                            ? Icons.keyboard_outlined
+                            : Icons.emoji_emotions_outlined),
+                        color: LumoColors.textSecondary,
                       ),
-                    ),
+                      if (_isGroup)
+                        IconButton(
+                          tooltip: '提醒谁看',
+                          onPressed: () => _openMention(),
+                          icon: const Icon(Icons.alternate_email),
+                          color: LumoColors.textSecondary,
+                        ),
+                      Expanded(
+                        child: CallbackShortcuts(
+                          bindings: {
+                            const SingleActivator(LogicalKeyboardKey.enter):
+                                _send,
+                          },
+                          child: TextField(
+                            controller: _controller,
+                            focusNode: _focus,
+                            minLines: 1,
+                            maxLines: 5,
+                            textInputAction: TextInputAction.newline,
+                            onTap: () {
+                              if (_showEmoji) {
+                                setState(() => _showEmoji = false);
+                              }
+                            },
+                            decoration: const InputDecoration(
+                              hintText: '输入消息…',
+                              contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 10),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      if (_uploading)
+                        const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      else if (!_hasText) ...[
+                        IconButton(
+                          onPressed: _startRecording,
+                          icon: const Icon(Icons.mic_none),
+                          color: LumoColors.textSecondary,
+                        ),
+                        IconButton(
+                          onPressed: _pickImage,
+                          icon: const Icon(Icons.image_outlined),
+                          color: LumoColors.textSecondary,
+                        ),
+                        IconButton(
+                          onPressed: _pickFile,
+                          icon: const Icon(Icons.add_circle_outline),
+                          color: LumoColors.textSecondary,
+                        ),
+                      ] else
+                        _SendButton(onTap: _send),
+                    ],
                   ),
-                ),
-                const SizedBox(width: 4),
-                if (_uploading)
-                  const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                else if (!_hasText) ...[
-                  IconButton(
-                    onPressed: _pickImage,
-                    icon: const Icon(Icons.image_outlined),
-                    color: LumoColors.textSecondary,
-                  ),
-                  IconButton(
-                    onPressed: _pickFile,
-                    icon: const Icon(Icons.add_circle_outline),
-                    color: LumoColors.textSecondary,
-                  ),
-                ] else
-                  _SendButton(onTap: _send),
-              ],
-            ),
+                ],
+              ),
+            if (_uploading && !_recording)
+              _UploadProgressBar(
+                label: _uploadLabel ?? '上传中',
+                progress: _uploadProgress,
+              ),
             if (_showEmoji) _EmojiPanel(onPick: _insertText),
           ],
         ),
@@ -380,46 +622,7 @@ class _InputBarState extends ConsumerState<InputBar> {
     );
   }
 
-  String _mimeFromName(String name) {
-    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
-    switch (ext) {
-      case 'jpg':
-      case 'jpeg':
-        return 'image/jpeg';
-      case 'png':
-        return 'image/png';
-      case 'gif':
-        return 'image/gif';
-      case 'webp':
-        return 'image/webp';
-      case 'heic':
-        return 'image/heic';
-      case 'heif':
-        return 'image/heif';
-      case 'mp4':
-        return 'video/mp4';
-      case 'mov':
-        return 'video/quicktime';
-      case 'pdf':
-        return 'application/pdf';
-      case 'doc':
-        return 'application/msword';
-      case 'docx':
-        return 'application/vnd.openxmlformats-officedocument'
-            '.wordprocessingml.document';
-      case 'xls':
-        return 'application/vnd.ms-excel';
-      case 'xlsx':
-        return 'application/vnd.openxmlformats-officedocument'
-            '.spreadsheetml.sheet';
-      case 'zip':
-        return 'application/zip';
-      case 'txt':
-        return 'text/plain';
-      default:
-        return 'application/octet-stream';
-    }
-  }
+  String _mimeFromName(String name) => mediaMimeFromFileName(name);
 
   String _csDisabledText(String? csStatus, int agentStatus) {
     if (csStatus == '1') {
@@ -429,6 +632,161 @@ class _InputBarState extends ConsumerState<InputBar> {
     }
     if (csStatus == '3') return '会话已结单，不能继续发送消息';
     return '客服会话状态异常，暂不可回复';
+  }
+}
+
+class _UploadProgressBar extends StatelessWidget {
+  const _UploadProgressBar({required this.label, required this.progress});
+
+  final String label;
+  final double? progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final percent =
+        progress == null ? '' : ' ${(progress! * 100).clamp(0, 100).round()}%';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(48, 6, 48, 0),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '$label$percent',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: LumoColors.textSecondary,
+              fontSize: 11,
+            ),
+          ),
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: LinearProgressIndicator(
+              minHeight: 3,
+              value: progress,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuoteDraftBar extends StatelessWidget {
+  const _QuoteDraftBar({required this.message, this.onClear});
+
+  final ChatMessage message;
+  final VoidCallback? onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(48, 0, 48, 8),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+        decoration: BoxDecoration(
+          color: LumoColors.surfaceAlt,
+          borderRadius: BorderRadius.circular(8),
+          border: const Border(
+            left: BorderSide(color: LumoColors.primary, width: 3),
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    message.sender.nickname,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: LumoColors.primary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    messagePreview(message.content),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: LumoColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: '取消引用',
+              onPressed: onClear,
+              icon: const Icon(Icons.close_rounded),
+              iconSize: 18,
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RecordingBar extends StatelessWidget {
+  const _RecordingBar({
+    required this.elapsed,
+    required this.onCancel,
+    required this.onSend,
+  });
+
+  final Duration elapsed;
+  final VoidCallback onCancel;
+  final VoidCallback onSend;
+
+  @override
+  Widget build(BuildContext context) {
+    final secs = elapsed.inSeconds.clamp(0, 599);
+    final label =
+        '${(secs ~/ 60).toString().padLeft(2, '0')}:${(secs % 60).toString().padLeft(2, '0')}';
+    return Row(
+      children: [
+        const Icon(Icons.mic, color: LumoColors.danger),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  color: LumoColors.ink,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 5),
+              const LinearProgressIndicator(minHeight: 3),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          tooltip: '取消',
+          onPressed: onCancel,
+          icon: const Icon(Icons.close),
+        ),
+        IconButton.filled(
+          tooltip: '发送',
+          onPressed: onSend,
+          icon: const Icon(Icons.send),
+        ),
+      ],
+    );
   }
 }
 

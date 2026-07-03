@@ -6,7 +6,8 @@
 // - 媒体走 WebRTC P2P + coturn 中继，本文件只定义信令；SDP/ICE 以
 //   不透明字符串透传（服务端不解析，仅校验参与者身份后中转给对端）
 // - call_id 服务端生成（UUID）；client_call_id 客户端生成用于 INVITE 幂等
-// - media_type 预留 VIDEO；group 通话不在本协议内（届时开 v2 或扩展）
+// - media_type 支持 VOICE / VIDEO；群通话通过 group_id + participant_user_ids
+//   扩展，单聊 callee_user_id 兼容保留。
 // ============================================================
 syntax = "proto3";
 package im.body.v1;
@@ -53,6 +54,7 @@ message CallInvite {
   int64 callee_user_id    = 1;
   CallMediaType media     = 2;
   string client_call_id   = 3;  // UUID，重试幂等：同 id 重复 INVITE 返回同一 call
+  int64 group_id          = 4;  // 群通话目标；与 callee_user_id 二选一
 }
 
 message CallAnswer {
@@ -64,6 +66,7 @@ message CallSignal {
   string call_id       = 1;
   CallSignalType type  = 2;
   string payload       = 3;  // SDP 原文 / ICE candidate JSON，服务端不解析
+  int64 target_user_id = 4;  // 群通话时指定接收方；单聊可为空
 }
 
 message CallHangup {
@@ -79,6 +82,7 @@ message CallAck {
   string call_id                = 3;
   repeated IceServer ice_servers = 4;  // INVITE 与 ANSWER(accept) 的 ack 携带
   int64 server_ts               = 5;
+  int64 group_id                = 6;   // 群通话所属群；单聊为 0
 }
 
 // 服务端推送（Cmd=CALL_NOTIFY，need_ack=true）
@@ -91,4 +95,6 @@ message CallNotify {
   repeated IceServer ice_servers = 6;  // event=INVITE / ACCEPTED 时携带
   int64 server_ts               = 7;
   int32 duration_sec            = 8;  // event=HANGUP/TIMEOUT 时的已通话时长（未接通=0）
+  int64 group_id                = 9;  // 群通话所属群；单聊为 0
+  repeated int64 participant_user_ids = 10; // 群通话候选/已加入成员
 }

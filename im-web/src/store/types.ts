@@ -45,7 +45,7 @@ export type MessageContent =
   | { kind: 'image'; objectKey: string; thumbKey?: string; width?: number; height?: number; size?: number; mime?: string; previewUrl?: string }
   | { kind: 'voice'; objectKey: string; durationMs: number; size?: number; codec?: string }
   | { kind: 'file'; objectKey: string; fileName: string; size?: number; mime?: string }
-  | { kind: 'video'; objectKey: string; fileName: string; size?: number; mime?: string; previewUrl?: string }
+  | { kind: 'video'; objectKey: string; fileName: string; size?: number; mime?: string; thumbKey?: string; durationMs?: number; previewUrl?: string }
   | { kind: 'notification'; eventType: string; payload?: string }
   | { kind: 'custom'; customType: string; payload?: string };
 

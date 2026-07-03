@@ -19,6 +19,25 @@ public interface FileMetaMapper extends BaseMapper<FileMetaEntity> {
   FileMetaEntity selectByObjectKey(@Param("tenantId") long tenantId,
       @Param("objectKey") String objectKey);
 
+  @Select("""
+      SELECT *
+      FROM file_meta
+      WHERE tenant_id = #{tenantId}
+        AND uploader_id = #{uploaderId}
+        AND sha256 = #{sha256}
+        AND size = #{size}
+        AND mime = #{mime}
+        AND status = #{status}
+      ORDER BY id DESC
+      LIMIT 1
+      """)
+  FileMetaEntity selectConfirmedByUploaderHash(@Param("tenantId") long tenantId,
+      @Param("uploaderId") long uploaderId,
+      @Param("sha256") String sha256,
+      @Param("size") long size,
+      @Param("mime") String mime,
+      @Param("status") int status);
+
   @Update("""
       UPDATE file_meta
       SET status = #{toStatus}

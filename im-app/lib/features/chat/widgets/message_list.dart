@@ -9,9 +9,23 @@ import 'message_bubble.dart';
 
 /// 消息列表：响应式订阅本地 DB，新消息自动滚到底，滚到顶加载更早历史。
 class MessageList extends ConsumerStatefulWidget {
-  const MessageList({super.key, required this.convId, this.peerReadSeq});
+  const MessageList({
+    super.key,
+    required this.convId,
+    this.peerReadSeq,
+    this.onQuote,
+    this.selectionMode = false,
+    this.selectedIds = const {},
+    this.onSelectionToggle,
+    this.onMergeForward,
+  });
   final String convId;
   final String? peerReadSeq;
+  final ValueChanged<ChatMessage>? onQuote;
+  final bool selectionMode;
+  final Set<String> selectedIds;
+  final ValueChanged<ChatMessage>? onSelectionToggle;
+  final ValueChanged<ChatMessage>? onMergeForward;
 
   @override
   ConsumerState<MessageList> createState() => _MessageListState();
@@ -114,7 +128,12 @@ class _MessageListState extends ConsumerState<MessageList> {
                 MessageBubble(
                   message: msg,
                   isSelf: isSelf,
+                  selectionMode: widget.selectionMode,
+                  selected: widget.selectedIds.contains(msg.clientMsgId),
+                  onSelectionToggle: widget.onSelectionToggle,
+                  onMergeForward: widget.onMergeForward,
                   peerReadSeq: widget.peerReadSeq,
+                  onQuote: widget.onQuote,
                   onRetry: () => ref
                       .read(messageRepositoryProvider)
                       .retry(widget.convId, msg.clientMsgId),

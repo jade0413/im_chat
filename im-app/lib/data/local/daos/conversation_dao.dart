@@ -82,5 +82,13 @@ class ConversationDao extends DatabaseAccessor<AppDatabase>
       (update(conversations)..where((t) => t.convId.equals(convId)))
           .write(ConversationsCompanion(title: Value(title)));
 
+  Future<void> clearPreview(String convId) =>
+      (update(conversations)..where((t) => t.convId.equals(convId))).write(
+        const ConversationsCompanion(
+          lastMsgAbstract: Value(''),
+          lastMsgTimeMs: Value(null),
+        ),
+      );
+
   Future<void> clearAll() => delete(conversations).go();
 }

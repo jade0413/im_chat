@@ -40,6 +40,7 @@ public class MessageFileReferenceValidator {
     MessageFileMetaEntity meta = confirmedFile(tenantId, image.getObjectKey());
     validateSize(meta, image.getSize());
     validateMime(meta, mime);
+    validateThumbnailIfPresent(tenantId, image.getThumbKey());
   }
 
   private void validateVoice(long tenantId, VoiceContent voice) {
@@ -66,6 +67,7 @@ public class MessageFileReferenceValidator {
     MessageFileMetaEntity meta = confirmedFile(tenantId, file.getObjectKey());
     validateSize(meta, file.getSize());
     validateMime(meta, mime);
+    validateThumbnailIfPresent(tenantId, file.getThumbKey());
   }
 
   private MessageFileMetaEntity confirmedFile(long tenantId, String objectKey) {
@@ -105,6 +107,16 @@ public class MessageFileReferenceValidator {
   private void validateMime(MessageFileMetaEntity meta, String expectedMime) {
     if (!normalizeMime(meta.getMime()).equals(expectedMime)) {
       throw new ImException(ErrorCode.MIME_NOT_ALLOWED, "file mime mismatch");
+    }
+  }
+
+  private void validateThumbnailIfPresent(long tenantId, String thumbKey) {
+    if (thumbKey == null || thumbKey.isBlank()) {
+      return;
+    }
+    MessageFileMetaEntity thumb = confirmedFile(tenantId, thumbKey);
+    if (!normalizeMime(thumb.getMime()).startsWith("image/")) {
+      throw new ImException(ErrorCode.MIME_NOT_ALLOWED, "thumbnail mime is invalid");
     }
   }
 

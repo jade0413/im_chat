@@ -44,6 +44,8 @@ message MsgPush {
   int64  send_time = 7;
   im.common.v1.MsgContent content = 8;
   map<string, string> ext = 9;
+  bool content_omitted = 10;         // 大群媒体等场景仅推轻量通知，客户端收到后 SYNC 拉完整消息
+  string omitted_reason = 11;        // "large_group_media" 等，便于客户端/日志区分触发原因
 }
 
 message Sender {

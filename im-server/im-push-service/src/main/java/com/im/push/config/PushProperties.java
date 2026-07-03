@@ -9,7 +9,8 @@ public record PushProperties(
     Duration eventDedupTtl,
     String gatewayQueuePrefix,
     String msgSavedQueue,
-    String msgRevokedQueue
+    String msgRevokedQueue,
+    Integer largeGroupMediaLightPushThreshold
 ) {
 
   public PushProperties {
@@ -18,6 +19,8 @@ public record PushProperties(
     gatewayQueuePrefix = textOrDefault(gatewayQueuePrefix, "push.gw.");
     msgSavedQueue = textOrDefault(msgSavedQueue, "im.push.msg.saved");
     msgRevokedQueue = textOrDefault(msgRevokedQueue, "im.push.msg.revoked");
+    largeGroupMediaLightPushThreshold =
+        largeGroupMediaLightPushThreshold == null ? 500 : largeGroupMediaLightPushThreshold;
   }
 
   private static Duration normalize(Duration value, Duration fallback) {

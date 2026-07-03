@@ -64,23 +64,50 @@ export function historyItemToChatMessage(item: MessageItemResponse): ChatMessage
 
 /**
  * 将历史消息 REST 响应转为 MessageContent。
- * 后端目前只返回 text 字段，对非文本消息按 msgType 生成占位内容。
- * 后端补全 objectKey 等字段后，这里可直接解析富媒体。
+ * 后端直接从 MsgContent 拆出富媒体字段，历史页与实时推送使用同一套渲染模型。
  */
-function historyContent(item: import('../api/types').MessageItemResponse): import('../store/types').MessageContent {
-  // 后端已返回 objectKey 等字段（未来）
-  const ext = item as unknown as Record<string, unknown>;
-  if (ext.objectKey) {
-    const mime = (ext.mime as string | undefined) ?? '';
-    if (ext.durationMs !== undefined) {
-      return { kind: 'voice', objectKey: ext.objectKey as string, durationMs: Number(ext.durationMs), size: Number(ext.size ?? 0) };
-    }
+function historyContent(item: MessageItemResponse): import('../store/types').MessageContent {
+  if (item.objectKey) {
+    const mime = item.mime ?? '';
     if (mime.startsWith('image/')) {
-      return { kind: 'image', objectKey: ext.objectKey as string, thumbKey: ext.thumbKey as string | undefined };
+      return {
+        kind: 'image',
+        objectKey: item.objectKey,
+        thumbKey: item.thumbKey,
+        width: Number(item.width ?? 0),
+        height: Number(item.height ?? 0),
+        size: Number(item.size ?? 0),
+        mime,
+      };
     }
-    return { kind: 'file', objectKey: ext.objectKey as string, fileName: (ext.fileName as string | undefined) ?? '未命名文件', size: Number(ext.size ?? 0), mime };
+    if (mime.startsWith('video/')) {
+      return {
+        kind: 'video',
+        objectKey: item.objectKey,
+        fileName: item.fileName ?? '未命名视频',
+        thumbKey: item.thumbKey,
+        durationMs: item.durationMs === undefined ? undefined : Number(item.durationMs),
+        size: Number(item.size ?? 0),
+        mime,
+      };
+    }
+    if (mime.startsWith('audio/') || item.msgType === 3) {
+      return {
+        kind: 'voice',
+        objectKey: item.objectKey,
+        durationMs: Number(item.durationMs ?? 0),
+        size: Number(item.size ?? 0),
+        codec: item.codec,
+      };
+    }
+    return {
+      kind: 'file',
+      objectKey: item.objectKey,
+      fileName: item.fileName ?? '未命名文件',
+      size: Number(item.size ?? 0),
+      mime,
+    };
   }
-  // 按 msgType 展示占位（等待后端补全字段）
   switch (item.msgType) {
     case 1: return { kind: 'text', text: item.text || '' };
     case 2: return { kind: 'notification', eventType: 'message.unsupported', payload: '图片消息（请在手机端查看）' };
@@ -121,8 +148,19 @@ export function protoContentToMessageContent(
   }
   if (content.file) {
     const mime = content.file.mime || undefined;
+    if (mime?.startsWith('video/')) {
+      return {
+        kind: 'video',
+        objectKey: content.file.objectKey ?? '',
+        fileName: content.file.fileName ?? '未命名视频',
+        size: Number(content.file.size ?? 0),
+        mime,
+        thumbKey: content.file.thumbKey || undefined,
+        durationMs: content.file.durationMs ? Number(content.file.durationMs) : undefined,
+      };
+    }
     return {
-      kind: mime?.startsWith('video/') ? 'video' : 'file',
+      kind: 'file',
       objectKey: content.file.objectKey ?? '',
       fileName: content.file.fileName ?? '未命名文件',
       size: Number(content.file.size ?? 0),

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'enums.dart';
 
 /// 消息内容（移植 im-web MessageContent 联合类型）。
@@ -16,7 +18,7 @@ sealed class MessageContent {
         FileBody(:final fileName) => '[文件] $fileName',
         VideoBody() => '[视频]',
         NotificationBody() => '[系统消息]',
-        CustomBody(:final customType) => '[$customType]',
+        CustomBody() => _customAbstract(this as CustomBody),
       };
 }
 
@@ -55,11 +57,13 @@ class VoiceBody extends MessageContent {
     required this.durationMs,
     this.size,
     this.codec,
+    this.localPath,
   });
   final String objectKey;
   final int durationMs;
   final int? size;
   final String? codec;
+  final String? localPath;
   @override
   ContentKind get kind => ContentKind.voice;
 }
@@ -86,12 +90,16 @@ class VideoBody extends MessageContent {
     this.size,
     this.mime,
     this.thumbKey,
+    this.durationMs,
+    this.localPath,
   });
   final String objectKey;
   final String fileName;
   final int? size;
   final String? mime;
   final String? thumbKey;
+  final int? durationMs;
+  final String? localPath;
   @override
   ContentKind get kind => ContentKind.video;
 }
@@ -111,4 +119,24 @@ class CustomBody extends MessageContent {
   final String? payload;
   @override
   ContentKind get kind => ContentKind.custom;
+}
+
+String _customAbstract(CustomBody body) {
+  final raw = body.payload;
+  if (raw == null || raw.isEmpty) return '[${body.customType}]';
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) return '[${body.customType}]';
+    if (body.customType == 'quote.reply') {
+      final text = (decoded['text'] ?? '').toString();
+      return text.isEmpty ? '[引用回复]' : text;
+    }
+    if (body.customType == 'merge.forward') {
+      final title = (decoded['title'] ?? '合并转发').toString();
+      return '[合并转发] $title';
+    }
+  } catch (_) {
+    return '[${body.customType}]';
+  }
+  return '[${body.customType}]';
 }

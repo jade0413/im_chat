@@ -4,6 +4,7 @@ import com.im.common.tenant.TenantContext;
 import com.im.proto.common.ConvType;
 import com.im.proto.events.MsgSavedEvent;
 import com.im.proto.ws.Cmd;
+import com.im.push.config.PushProperties;
 import com.im.push.service.ConversationMemberClient;
 import com.im.push.service.ConversationMemberClient.ConvMembersResult;
 import com.im.push.service.OnlineAgentClient;
@@ -12,6 +13,7 @@ import com.im.push.service.PushEventDeduplicator;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.messaging.handler.annotation.Header;
@@ -31,22 +33,28 @@ import org.springframework.stereotype.Service;
 public class MsgSavedEventConsumer {
 
   private static final int CONV_TYPE_CS = ConvType.CS_SESSION.getNumber();  // 3
+  private static final int CONV_TYPE_GROUP = ConvType.GROUP.getNumber();  // 2
   private static final int CS_STATUS_OPEN     = 1;
   private static final int CS_STATUS_ASSIGNED = 2;
+  private static final String OMITTED_REASON_LARGE_GROUP_MEDIA = "large_group_media";
+  private static final String EXT_ABSTRACT = "__abstract";
 
   private final ConversationMemberClient conversationMemberClient;
   private final OnlineAgentClient onlineAgentClient;
   private final PushDispatchService pushDispatchService;
   private final PushEventDeduplicator deduplicator;
+  private final PushProperties properties;
 
   public MsgSavedEventConsumer(ConversationMemberClient conversationMemberClient,
       OnlineAgentClient onlineAgentClient,
       PushDispatchService pushDispatchService,
-      PushEventDeduplicator deduplicator) {
+      PushEventDeduplicator deduplicator,
+      PushProperties properties) {
     this.conversationMemberClient = conversationMemberClient;
     this.onlineAgentClient = onlineAgentClient;
     this.pushDispatchService = pushDispatchService;
     this.deduplicator = deduplicator;
+    this.properties = properties;
   }
 
   @RabbitListener(queues = "${im.push.msg-saved-queue:im.push.msg.saved}")
@@ -66,6 +74,7 @@ public class MsgSavedEventConsumer {
       // 获取会话成员列表及 CS 路由元数据（D33）
       ConvMembersResult result = conversationMemberClient.getMembersResult(event.getConvId());
       List<Long> recipients = buildRecipients(result, event);
+      byte[] pushBody = buildPushBody(result, event);
 
       // 排除发起连接：发送方其发起连接已通过 MSG_SEND_ACK 获知结果，无需再收自己消息的 MSG_PUSH 回显。
       // 仅排"发起连接"（excludeConnId），保留发送方其他端的实时多端同步；系统消息 sender_conn_id 为空串时不排除。
@@ -73,7 +82,7 @@ public class MsgSavedEventConsumer {
           event.getTenantId(),
           recipients,
           Cmd.MSG_PUSH_VALUE,
-          event.getPushReady().toByteArray(),
+          pushBody,
           true,
           event.getSenderId(),
           event.getSenderConnId());
@@ -112,5 +121,52 @@ public class MsgSavedEventConsumer {
     // resolved (3)：仅访客，无需补充坐席
 
     return new ArrayList<>(recipients);
+  }
+
+  private byte[] buildPushBody(ConvMembersResult result, MsgSavedEvent event) {
+    if (!shouldUseLightPush(result, event)) {
+      return event.getPushReady().toByteArray();
+    }
+    return event.getPushReady().toBuilder()
+        .clearContent()
+        .setContentOmitted(true)
+        .setOmittedReason(OMITTED_REASON_LARGE_GROUP_MEDIA)
+        .putExt(EXT_ABSTRACT, omittedAbstract(event))
+        .build()
+        .toByteArray();
+  }
+
+  private boolean shouldUseLightPush(ConvMembersResult result, MsgSavedEvent event) {
+    int threshold = properties.largeGroupMediaLightPushThreshold();
+    return threshold > 0
+        && result.convType() == CONV_TYPE_GROUP
+        && result.userIds().size() >= threshold
+        && isMediaMessage(event);
+  }
+
+  private boolean isMediaMessage(MsgSavedEvent event) {
+    if (!event.hasPushReady() || !event.getPushReady().hasContent()) {
+      return false;
+    }
+    var content = event.getPushReady().getContent();
+    return content.hasImage() || content.hasVoice() || content.hasFile();
+  }
+
+  private String omittedAbstract(MsgSavedEvent event) {
+    var content = event.getPushReady().getContent();
+    if (content.hasImage()) {
+      return "[图片]";
+    }
+    if (content.hasVoice()) {
+      return "[语音]";
+    }
+    if (content.hasFile()) {
+      String mime = content.getFile().getMime();
+      if (mime != null && mime.toLowerCase(Locale.ROOT).startsWith("video/")) {
+        return "[视频]";
+      }
+      return "[文件]";
+    }
+    return "[消息]";
   }
 }

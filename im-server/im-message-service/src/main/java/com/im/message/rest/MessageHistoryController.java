@@ -8,9 +8,12 @@ import com.im.message.service.MessagePage;
 import com.im.message.service.MessageQueryService;
 import com.im.message.service.MessageRevokeService;
 import com.im.proto.body.MsgPush;
+import com.im.proto.common.FileContent;
+import com.im.proto.common.ImageContent;
 import com.im.proto.common.MsgContent;
 import com.im.proto.common.MsgStatus;
 import com.im.proto.common.RevokeReason;
+import com.im.proto.common.VoiceContent;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -68,6 +71,9 @@ public class MessageHistoryController {
     int status = intExt(push, "status", MsgStatus.NORMAL.getNumber());
     int revokeReason = intExt(push, "revoke_reason", RevokeReason.REVOKE_REASON_UNSPECIFIED.getNumber());
     String text = content.hasText() ? content.getText().getText() : "";
+    ImageContent image = content.hasImage() ? content.getImage() : null;
+    VoiceContent voice = content.hasVoice() ? content.getVoice() : null;
+    FileContent file = content.hasFile() ? content.getFile() : null;
     return new MessageItemResponse(
         push.getConvId(),
         push.getSeq(),
@@ -78,7 +84,52 @@ public class MessageHistoryController {
         msgType,
         status,
         revokeReason,
-        text);
+        text,
+        firstNonBlank(image == null ? "" : image.getObjectKey(),
+            voice == null ? "" : voice.getObjectKey(),
+            file == null ? "" : file.getObjectKey()),
+        firstNonBlank(image == null ? "" : image.getThumbKey(),
+            file == null ? "" : file.getThumbKey()),
+        file == null ? "" : file.getFileName(),
+        firstNonBlank(image == null ? "" : image.getMime(),
+            file == null ? "" : file.getMime()),
+        mediaSize(image, voice, file),
+        mediaDuration(voice, file),
+        image == null ? null : image.getWidth(),
+        image == null ? null : image.getHeight(),
+        voice == null ? "" : voice.getCodec());
+  }
+
+  private Long mediaSize(ImageContent image, VoiceContent voice, FileContent file) {
+    if (image != null) {
+      return image.getSize();
+    }
+    if (voice != null) {
+      return voice.getSize();
+    }
+    if (file != null) {
+      return file.getSize();
+    }
+    return null;
+  }
+
+  private Integer mediaDuration(VoiceContent voice, FileContent file) {
+    if (voice != null) {
+      return voice.getDurationMs();
+    }
+    if (file != null && file.getDurationMs() > 0) {
+      return file.getDurationMs();
+    }
+    return null;
+  }
+
+  private String firstNonBlank(String... values) {
+    for (String value : values) {
+      if (value != null && !value.isBlank()) {
+        return value;
+      }
+    }
+    return "";
   }
 
   private int intExt(MsgPush push, String key, int fallback) {

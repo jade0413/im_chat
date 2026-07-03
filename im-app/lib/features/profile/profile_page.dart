@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,6 +9,8 @@ import '../../app/update_providers.dart';
 import '../../core/platform/platform_info.dart';
 import '../../core/theme/lumo_colors.dart';
 import '../../core/update/update_service.dart';
+import '../../data/file_hash.dart';
+import '../../data/remote/rest/api_client.dart';
 import '../../shared/widgets/lumo_avatar.dart';
 
 /// 「我」页：资料 + 平台信息 + 热更新检查 + 退出登录。
@@ -21,46 +26,80 @@ class ProfilePage extends ConsumerWidget {
       child: ListView(
         children: [
           const SizedBox(height: 12),
-          InkWell(
-            onTap: user == null
-                ? null
-                : () => _editNickname(context, ref, user.nickname),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  LumoAvatar(
-                    name: user?.displayName ?? '我',
-                    url: user?.avatar,
-                    size: 60,
-                    radius: 16,
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          user?.displayName ?? '未登录',
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap:
+                      user == null ? null : () => _changeAvatar(context, ref),
+                  child: Stack(
+                    children: [
+                      LumoAvatar(
+                        name: user?.displayName ?? '我',
+                        url: user?.avatar,
+                        size: 60,
+                        radius: 16,
+                      ),
+                      if (user != null)
+                        Positioned(
+                          right: 4,
+                          bottom: 4,
+                          child: Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.primary,
+                              borderRadius: BorderRadius.circular(11),
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
+                            child: const Icon(
+                              Icons.camera_alt,
+                              color: Colors.white,
+                              size: 13,
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _usernameText(user?.username, user?.account),
-                          style:
-                              const TextStyle(color: LumoColors.textSecondary),
-                        ),
-                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: user == null
+                        ? null
+                        : () => _editNickname(context, ref, user.nickname),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            user?.displayName ?? '未登录',
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _usernameText(user?.username, user?.account),
+                            style: const TextStyle(
+                                color: LumoColors.textSecondary),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  if (user != null)
-                    const Icon(Icons.edit_outlined,
-                        size: 18, color: LumoColors.textSecondary),
-                ],
-              ),
+                ),
+                if (user != null)
+                  IconButton(
+                    tooltip: '修改昵称',
+                    onPressed: () => _editNickname(context, ref, user.nickname),
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                  ),
+              ],
             ),
           ),
           const Divider(),
@@ -114,6 +153,13 @@ class ProfilePage extends ConsumerWidget {
                 : const Icon(Icons.chevron_right),
             onTap: () => ref.invalidate(startupUpdateCheckProvider),
           ),
+          ListTile(
+            leading: const Icon(Icons.cleaning_services_outlined),
+            title: const Text('清理媒体缓存'),
+            subtitle: const Text('自动保留 30 天 / 最多 512MB，可手动清空'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _clearMediaCache(context, ref),
+          ),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.logout, color: LumoColors.danger),
@@ -140,6 +186,94 @@ class ProfilePage extends ConsumerWidget {
         UpdateUnavailable() => '点击检查更新',
         _ => '检查中…',
       };
+
+  Future<void> _changeAvatar(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        withData: true,
+      );
+      final files = result?.files ?? const <PlatformFile>[];
+      if (files.isEmpty) return;
+      final file = files.first;
+      final bytes = file.bytes ??
+          (file.path == null ? null : await File(file.path!).readAsBytes());
+      if (bytes == null || bytes.isEmpty) {
+        messenger.showSnackBar(const SnackBar(content: Text('无法读取头像图片')));
+        return;
+      }
+      final mime = _avatarMimeFromName(file.name);
+      final oldAvatar = ref.read(authControllerProvider).user?.avatar;
+      final fileApi = ref.read(fileApiProvider);
+      final sha256 = await sha256Hex(bytes);
+      final presign = await fileApi.presign(
+        fileName: file.name,
+        mime: mime,
+        size: bytes.length,
+        sha256: sha256,
+      );
+      if (!presign.instant) {
+        await fileApi.uploadDirect(presign, bytes);
+        await fileApi.confirm(
+          objectKey: presign.objectKey,
+          size: bytes.length,
+          mime: mime,
+        );
+      }
+      final ok = await ref
+          .read(authControllerProvider.notifier)
+          .updateAvatar(presign.objectKey);
+      if (ok) {
+        await _evictOldAvatarCache(ref, oldAvatar, presign.objectKey);
+      }
+      final message =
+          ok ? (presign.instant ? '头像已更新（秒传）' : '头像已更新') : '头像保存失败，请重试';
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(message),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('头像上传失败：${describeApiError(e)}')),
+      );
+    }
+  }
+
+  String _avatarMimeFromName(String name) {
+    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+    return switch (ext) {
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'png' => 'image/png',
+      'gif' => 'image/gif',
+      'webp' => 'image/webp',
+      'heic' => 'image/heic',
+      'heif' => 'image/heif',
+      _ => 'image/jpeg',
+    };
+  }
+
+  Future<void> _evictOldAvatarCache(
+    WidgetRef ref,
+    String? oldAvatar,
+    String newAvatar,
+  ) async {
+    final avatar = oldAvatar?.trim();
+    if (avatar == null ||
+        avatar.isEmpty ||
+        avatar == newAvatar ||
+        _isHttpUrl(avatar)) {
+      return;
+    }
+    ref.invalidate(fileCacheProvider(avatar));
+    await ref.read(mediaCacheServiceProvider).evictObjectKeys([avatar]);
+  }
+
+  bool _isHttpUrl(String value) {
+    final uri = Uri.tryParse(value);
+    return uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
+  }
 
   /// 修改自己的昵称：弹窗输入 → 写服务端 → 刷新本地资料。
   Future<void> _editNickname(
@@ -202,6 +336,42 @@ class ProfilePage extends ConsumerWidget {
       ),
     );
     if (ok == true) await ref.read(authControllerProvider.notifier).logout();
+  }
+
+  Future<void> _clearMediaCache(BuildContext context, WidgetRef ref) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清理媒体缓存'),
+        content:
+            const Text('只会删除本机已缓存的媒体文件，不会删除聊天记录或服务端文件。之后打开图片、语音、视频、文件时会重新下载。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('清理'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final result = await ref.read(mediaCacheServiceProvider).clearAll();
+      if (!context.mounted) return;
+      final urlSuffix = result.clearedDownloadUrlEntries > 0
+          ? '，刷新 ${result.clearedDownloadUrlEntries} 条下载地址'
+          : '';
+      messenger.showSnackBar(
+        SnackBar(content: Text('已清理媒体缓存 ${result.displaySize}$urlSuffix')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text('清理失败：$e')));
+    }
   }
 
   Future<void> _editUsername(BuildContext context, WidgetRef ref) async {

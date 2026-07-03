@@ -18,6 +18,12 @@ class KvDao extends DatabaseAccessor<AppDatabase> with _$KvDaoMixin {
     return row?.v;
   }
 
+  Stream<String?> watch(String key) {
+    return (select(appKv)..where((t) => t.k.equals(key)))
+        .watchSingleOrNull()
+        .map((row) => row?.v);
+  }
+
   Future<void> set(String key, String value) =>
       into(appKv).insertOnConflictUpdate(
         AppKvCompanion(k: Value(key), v: Value(value)),

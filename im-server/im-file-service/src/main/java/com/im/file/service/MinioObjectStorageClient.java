@@ -1,11 +1,14 @@
 package com.im.file.service;
 
+import io.minio.DownloadObjectArgs;
 import io.minio.GetPresignedObjectUrlArgs;
 import io.minio.MinioClient;
 import io.minio.StatObjectArgs;
 import io.minio.StatObjectResponse;
+import io.minio.UploadObjectArgs;
 import io.minio.errors.ErrorResponseException;
 import io.minio.http.Method;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -64,6 +67,36 @@ public class MinioObjectStorageClient implements ObjectStorageClient {
       throw new ObjectStorageException("object storage stat failed", ex, isNotFound(ex));
     } catch (Exception ex) {
       throw new ObjectStorageException("object storage stat failed", ex, false);
+    }
+  }
+
+  @Override
+  public void downloadObject(String bucket, String objectKey, Path destination) {
+    try {
+      internalClient.downloadObject(DownloadObjectArgs.builder()
+          .bucket(bucket)
+          .object(objectKey)
+          .filename(destination.toString())
+          .overwrite(true)
+          .build());
+    } catch (ErrorResponseException ex) {
+      throw new ObjectStorageException("object storage download failed", ex, isNotFound(ex));
+    } catch (Exception ex) {
+      throw new ObjectStorageException("object storage download failed", ex, false);
+    }
+  }
+
+  @Override
+  public void uploadObject(String bucket, String objectKey, Path source, String contentType) {
+    try {
+      internalClient.uploadObject(UploadObjectArgs.builder()
+          .bucket(bucket)
+          .object(objectKey)
+          .filename(source.toString())
+          .contentType(contentType)
+          .build());
+    } catch (Exception ex) {
+      throw new ObjectStorageException("object storage upload failed", ex, false);
     }
   }
 

@@ -14,6 +14,7 @@ import { formatMessageClock } from '../../../utils/time';
 import { TextBubble } from './bubbles/TextBubble';
 import { FileBubble } from './bubbles/FileBubble';
 import { ImageBubble } from './bubbles/ImageBubble';
+import { VideoBubble } from './bubbles/VideoBubble';
 import { VoiceBubble } from './bubbles/VoiceBubble';
 import { SystemBubble } from './bubbles/SystemBubble';
 
@@ -176,10 +177,17 @@ function renderContent(content: MessageContent, timeLabel: React.ReactNode) {
       );
 
     case 'file':
-    case 'video':
       return (
         <>
           <FileBubble content={content} />
+          <div className="message-time-below">{timeLabel}</div>
+        </>
+      );
+
+    case 'video':
+      return (
+        <>
+          <VideoBubble content={content} />
           <div className="message-time-below">{timeLabel}</div>
         </>
       );

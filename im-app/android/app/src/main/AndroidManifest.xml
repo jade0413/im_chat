@@ -2,8 +2,9 @@
     <!-- 网关 WebSocket / REST 需要联网（验收：网络连接）-->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-    <!-- D45 语音通话：麦克风采集 + 音频路由（听筒/免提）+ 蓝牙耳机 -->
+    <!-- D45 音视频通话：麦克风/摄像头采集 + 音频路由（听筒/免提）+ 蓝牙耳机 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
 

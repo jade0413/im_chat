@@ -17,7 +17,8 @@ public record CallProperties(
     List<String> stunUrls,
     List<String> turnUrls,
     String turnSecret,
-    Duration turnCredentialTtl
+    Duration turnCredentialTtl,
+    int groupCallMaxMembers
 ) {
 
   public CallProperties {
@@ -27,6 +28,7 @@ public record CallProperties(
     turnUrls = listOrDefault(turnUrls, List.of());
     turnSecret = turnSecret == null ? "" : turnSecret;
     turnCredentialTtl = normalize(turnCredentialTtl, Duration.ofHours(1));
+    groupCallMaxMembers = normalizeGroupCallMaxMembers(groupCallMaxMembers);
   }
 
   private static Duration normalize(Duration value, Duration fallback) {
@@ -35,5 +37,12 @@ public record CallProperties(
 
   private static List<String> listOrDefault(List<String> value, List<String> fallback) {
     return value == null || value.isEmpty() ? fallback : List.copyOf(value);
+  }
+
+  private static int normalizeGroupCallMaxMembers(int value) {
+    if (value <= 0) {
+      return 9;
+    }
+    return Math.min(Math.max(value, 2), 9);
   }
 }

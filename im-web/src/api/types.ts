@@ -102,6 +102,15 @@ export interface MessageItemResponse {
   status: number;
   revokeReason: number;
   text: string;
+  objectKey?: string;
+  thumbKey?: string;
+  fileName?: string;
+  mime?: string;
+  size?: number;
+  durationMs?: number;
+  width?: number;
+  height?: number;
+  codec?: string;
 }
 
 export interface PresignFileRequest {
@@ -109,6 +118,7 @@ export interface PresignFileRequest {
   mime: string;
   size: number;
   durationMs?: number;
+  sha256?: string;
 }
 
 export interface PresignFileResponse {
@@ -117,6 +127,7 @@ export interface PresignFileResponse {
   uploadUrl: string;
   expiresAt: number;
   requiredHeaders?: Record<string, string>;
+  instant?: boolean;
 }
 
 export interface ConfirmFileRequest {
@@ -132,6 +143,13 @@ export interface FileMetaResponse {
   size: number;
   durationMs?: number;
   status: number;
+}
+
+export interface DownloadFileResponse {
+  objectKey: string;
+  url: string;
+  expiresAt: number;
+  transformed: boolean;
 }
 
 export interface CreateGroupRequest {

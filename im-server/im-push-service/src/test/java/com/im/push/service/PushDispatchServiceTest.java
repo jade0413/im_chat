@@ -42,7 +42,7 @@ class PushDispatchServiceTest {
   void setUp() {
     service = new PushDispatchService(routeRepository, gatewayPushPublisher,
         new PushProperties(Duration.ofSeconds(90), Duration.ofHours(24),
-            "push.gw.", "im.push.msg.saved", "im.push.msg.revoked"),
+            "push.gw.", "im.push.msg.saved", "im.push.msg.revoked", 500),
         tokenVersionService);
   }
 

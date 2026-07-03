@@ -12,10 +12,13 @@ import com.im.message.service.MessageQueryService;
 import com.im.message.service.MessageRevokeService;
 import com.im.proto.body.MsgPush;
 import com.im.proto.body.Sender;
+import com.im.proto.common.ImageContent;
+import com.im.proto.common.FileContent;
 import com.im.proto.common.MsgContent;
 import com.im.proto.common.MsgStatus;
 import com.im.proto.common.RevokeReason;
 import com.im.proto.common.TextContent;
+import com.im.proto.common.VoiceContent;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -90,6 +93,68 @@ class MessageHistoryControllerTest {
     assertThat(response.data().messages().getFirst().status()).isEqualTo(MsgStatus.REVOKED.getNumber());
     assertThat(response.data().messages().getFirst().revokeReason()).isEqualTo(
         RevokeReason.BY_SENDER.getNumber());
+  }
+
+  @Test
+  void returnsMediaFieldsInHistory() {
+    when(messageQueryService.history(100L, 501L, 9L, 20)).thenReturn(new MessagePage(List.of(
+        MsgPush.newBuilder()
+            .setConvId(501L)
+            .setSeq(9L)
+            .setServerMsgId(9009L)
+            .setSender(Sender.newBuilder().setUserId(100L))
+            .setSendTime(1000L)
+            .setContent(MsgContent.newBuilder()
+                .setImage(ImageContent.newBuilder()
+                    .setObjectKey("1/202607/a.png")
+                    .setThumbKey("1/202607/a-thumb.jpg")
+                    .setMime("image/png")
+                    .setWidth(640)
+                    .setHeight(480)
+                    .setSize(4096L)))
+            .build(),
+        MsgPush.newBuilder()
+            .setConvId(501L)
+            .setSeq(8L)
+            .setServerMsgId(9008L)
+            .setSender(Sender.newBuilder().setUserId(100L))
+            .setSendTime(900L)
+            .setContent(MsgContent.newBuilder()
+                .setVoice(VoiceContent.newBuilder()
+                    .setObjectKey("1/202607/a.m4a")
+                    .setDurationMs(2100)
+                    .setCodec("aac")
+                    .setSize(2048L)))
+            .build(),
+        MsgPush.newBuilder()
+            .setConvId(501L)
+            .setSeq(7L)
+            .setServerMsgId(9007L)
+            .setSender(Sender.newBuilder().setUserId(100L))
+            .setSendTime(800L)
+            .setContent(MsgContent.newBuilder()
+                .setFile(FileContent.newBuilder()
+                    .setObjectKey("1/202607/a.mp4")
+                    .setFileName("a.mp4")
+                    .setMime("video/mp4")
+                    .setThumbKey("1/202607/a-cover.jpg")
+                    .setDurationMs(3200)
+                    .setSize(8192L)))
+            .build()), false, 8L));
+
+    ApiResponse<MessageHistoryResponse> response = controller().history(501L, 9L, 20);
+
+    assertThat(response.data().messages().get(0).objectKey()).isEqualTo("1/202607/a.png");
+    assertThat(response.data().messages().get(0).thumbKey()).isEqualTo("1/202607/a-thumb.jpg");
+    assertThat(response.data().messages().get(0).width()).isEqualTo(640);
+    assertThat(response.data().messages().get(0).height()).isEqualTo(480);
+    assertThat(response.data().messages().get(0).size()).isEqualTo(4096L);
+    assertThat(response.data().messages().get(1).objectKey()).isEqualTo("1/202607/a.m4a");
+    assertThat(response.data().messages().get(1).durationMs()).isEqualTo(2100);
+    assertThat(response.data().messages().get(1).codec()).isEqualTo("aac");
+    assertThat(response.data().messages().get(2).objectKey()).isEqualTo("1/202607/a.mp4");
+    assertThat(response.data().messages().get(2).thumbKey()).isEqualTo("1/202607/a-cover.jpg");
+    assertThat(response.data().messages().get(2).durationMs()).isEqualTo(3200);
   }
 
   @Test

@@ -1,8 +1,13 @@
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../app/providers.dart';
 
 /// Lumo 头像：有图显图，无图显首字母 + 按名稳定取色（对齐设计稿的彩色字母头像）。
-class LumoAvatar extends StatelessWidget {
+class LumoAvatar extends ConsumerWidget {
   const LumoAvatar({
     super.key,
     required this.name,
@@ -33,9 +38,26 @@ class LumoAvatar extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final borderRadius = BorderRadius.circular(radius);
     if (url != null && url!.isNotEmpty) {
+      if (!_isHttpUrl(url!)) {
+        final cached = ref.watch(fileCacheProvider(url!));
+        return ClipRRect(
+          borderRadius: borderRadius,
+          child: cached.when(
+            data: (file) => Image.file(
+              File(file.path),
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _initials(),
+            ),
+            loading: _initials,
+            error: (_, __) => _initials(),
+          ),
+        );
+      }
       return ClipRRect(
         borderRadius: borderRadius,
         child: CachedNetworkImage(
@@ -49,6 +71,11 @@ class LumoAvatar extends StatelessWidget {
       );
     }
     return _initials();
+  }
+
+  bool _isHttpUrl(String value) {
+    final uri = Uri.tryParse(value);
+    return uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
   }
 
   Widget _initials() {

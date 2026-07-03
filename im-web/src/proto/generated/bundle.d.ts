@@ -27,6 +27,12 @@ export namespace im {
                 READ_NOTIFY = 23,
                 REVOKE_NOTIFY = 24,
                 CONV_NOTIFY = 25,
+                CALL_INVITE = 40,
+                CALL_ANSWER = 41,
+                CALL_SIGNAL = 42,
+                CALL_HANGUP = 43,
+                CALL_NOTIFY = 45,
+                CALL_ACK = 49,
                 ERROR = 99
             }
 
@@ -802,6 +808,12 @@ export namespace im {
 
                 /** MsgPush ext */
                 ext?: ({ [k: string]: string }|null);
+
+                /** MsgPush contentOmitted */
+                contentOmitted?: (boolean|null);
+
+                /** MsgPush omittedReason */
+                omittedReason?: (string|null);
             }
 
             /** Represents a MsgPush. */
@@ -839,6 +851,12 @@ export namespace im {
 
                 /** MsgPush ext. */
                 public ext: { [k: string]: string };
+
+                /** MsgPush contentOmitted. */
+                public contentOmitted: boolean;
+
+                /** MsgPush omittedReason. */
+                public omittedReason: string;
 
                 /**
                  * Creates a new MsgPush instance using the specified properties.
@@ -2946,6 +2964,12 @@ export namespace im {
 
                 /** FileContent mime */
                 mime?: (string|null);
+
+                /** FileContent thumbKey */
+                thumbKey?: (string|null);
+
+                /** FileContent durationMs */
+                durationMs?: (number|null);
             }
 
             /** Represents a FileContent. */
@@ -2968,6 +2992,12 @@ export namespace im {
 
                 /** FileContent mime. */
                 public mime: string;
+
+                /** FileContent thumbKey. */
+                public thumbKey: string;
+
+                /** FileContent durationMs. */
+                public durationMs: number;
 
                 /**
                  * Creates a new FileContent instance using the specified properties.

@@ -117,8 +117,9 @@ flutter run -d android --dart-define=API_BASE_URL=https://im.example.com \
 - **Android · 联网**：`android/app/src/main/AndroidManifest.xml` 加
   `<uses-permission android:name="android.permission.INTERNET"/>`；
   开发若用明文 `ws://`（如 10.0.2.2），再加 `android:usesCleartextTraffic="true"` 或网络安全配置。
-- **iOS · ATS**：生产用 `wss://` 无需配置；开发若用明文 `ws://`，在 `ios/Runner/Info.plist`
-  添加 `NSAppTransportSecurity` 例外。麦克风/相册（语音、图片）按需加 `NSMicrophoneUsageDescription` 等。
+- **iOS · ATS / 权限**：生产用 `wss://` 无需配置；开发若用明文 `ws://`，在 `ios/Runner/Info.plist`
+  添加 `NSAppTransportSecurity` 例外。聊天语音/语音通话需要 `NSMicrophoneUsageDescription`；
+  视频通话需要 `NSCameraUsageDescription`；图片按需加 `NSPhotoLibraryUsageDescription`。
 - **Windows**：开箱即用，无额外权限。打 MSIX 时勾选 `internetClient` 能力。
 
 ---

@@ -1,5 +1,10 @@
 package com.im.file.config;
 
+import com.im.file.service.FfmpegFileTranscoder;
+import com.im.file.service.FileTranscoder;
+import com.im.file.service.NoopFileTranscoder;
+import com.im.file.service.ObjectStorageClient;
+import com.im.file.service.ProcessFfmpegRunner;
 import io.minio.MinioClient;
 import java.time.Clock;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -32,5 +37,14 @@ public class FileServiceConfig {
   @Bean
   public Clock fileClock() {
     return Clock.systemUTC();
+  }
+
+  @Bean
+  public FileTranscoder fileTranscoder(FileProperties properties,
+      ObjectStorageClient storageClient) {
+    if (properties.transcode().enabled()) {
+      return new FfmpegFileTranscoder(properties, storageClient, new ProcessFfmpegRunner());
+    }
+    return new NoopFileTranscoder();
   }
 }

@@ -20,4 +20,14 @@ public interface ModerationLogMapper extends BaseMapper<ModerationLogEntity> {
   ModerationLogEntity selectByMessageAndProvider(@Param("tenantId") long tenantId,
       @Param("messageId") long messageId,
       @Param("provider") String provider);
+
+  @Select("""
+      SELECT *
+      FROM moderation_log
+      WHERE tenant_id = #{tenantId}
+        AND message_id = #{messageId}
+      LIMIT 1
+      """)
+  ModerationLogEntity selectFirstByMessage(@Param("tenantId") long tenantId,
+      @Param("messageId") long messageId);
 }

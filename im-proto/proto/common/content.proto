@@ -43,6 +43,8 @@ message FileContent {
   string file_name  = 2;
   uint64 size       = 3;
   string mime       = 4;
+  string thumb_key  = 5;  // 视频封面缩略图；普通文件为空
+  uint32 duration_ms = 6; // 视频时长；普通文件为空
 }
 
 // 系统事件消息：建群/进群/改群名/坐席分配/会话解决...

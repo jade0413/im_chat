@@ -25,4 +25,9 @@ class MessageApi {
         .map((e) => MessageItem.fromJson(e as Map<String, dynamic>))
         .toList();
   }
+
+  Future<void> revoke(String convId, String seq) async {
+    await _client.dio
+        .post<dynamic>('/api/v1/convs/$convId/messages/$seq/revoke');
+  }
 }

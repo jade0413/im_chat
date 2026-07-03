@@ -38,6 +38,7 @@ class ContentJson {
             'durationMs': c.durationMs,
             'size': c.size,
             'codec': c.codec,
+            'localPath': c.localPath,
           },
         FileBody() => {
             'kind': 'file',
@@ -53,6 +54,8 @@ class ContentJson {
             'size': c.size,
             'mime': c.mime,
             'thumbKey': c.thumbKey,
+            'durationMs': c.durationMs,
+            'localPath': c.localPath,
           },
         NotificationBody(:final eventType, :final payload) => {
             'kind': 'notification',
@@ -92,6 +95,7 @@ class ContentJson {
           durationMs: asInt(j['durationMs']) ?? 0,
           size: asInt(j['size']),
           codec: j['codec'] as String?,
+          localPath: j['localPath'] as String?,
         );
       case 'file':
         return FileBody(
@@ -107,6 +111,8 @@ class ContentJson {
           size: asInt(j['size']),
           mime: j['mime'] as String?,
           thumbKey: j['thumbKey'] as String?,
+          durationMs: asInt(j['durationMs']),
+          localPath: j['localPath'] as String?,
         );
       case 'notification':
         return NotificationBody(

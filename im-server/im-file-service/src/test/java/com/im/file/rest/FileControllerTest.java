@@ -1,10 +1,12 @@
 package com.im.file.rest;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.im.common.auth.UserContext;
 import com.im.common.web.ApiResponse;
+import com.im.file.dto.DownloadFileResponse;
 import com.im.file.dto.PresignFileRequest;
 import com.im.file.dto.PresignFileResponse;
 import com.im.file.service.FileService;
@@ -46,5 +48,34 @@ class FileControllerTest {
     ApiResponse<PresignFileResponse> response = new FileController(fileService).presign(request);
 
     assertThat(response.data()).isSameAs(expected);
+  }
+
+  @Test
+  void downloadPassesVariantForCurrentUser() {
+    when(fileService.presignDownload(100L, "1/202606/a.mov", "playback"))
+        .thenReturn("http://playback");
+
+    ApiResponse<String> response = new FileController(fileService)
+        .download("1/202606/a.mov", "playback");
+
+    assertThat(response.data()).isEqualTo("http://playback");
+    verify(fileService).presignDownload(100L, "1/202606/a.mov", "playback");
+  }
+
+  @Test
+  void downloadInfoReturnsResolvedObjectForCurrentUser() {
+    DownloadFileResponse expected = new DownloadFileResponse(
+        "1/202606/transcoded/a_mp4_720p.mp4",
+        "http://playback",
+        1_781_309_700_000L,
+        true);
+    when(fileService.presignDownloadInfo(100L, "1/202606/a.mov", "playback"))
+        .thenReturn(expected);
+
+    ApiResponse<DownloadFileResponse> response = new FileController(fileService)
+        .downloadInfo("1/202606/a.mov", "playback");
+
+    assertThat(response.data()).isSameAs(expected);
+    verify(fileService).presignDownloadInfo(100L, "1/202606/a.mov", "playback");
   }
 }

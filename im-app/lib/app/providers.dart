@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io' as io;
 
 import 'package:dio/dio.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -20,6 +22,9 @@ import '../data/models/cs_models.dart';
 import '../data/models/enums.dart';
 import '../data/models/friend.dart';
 import '../data/models/session_user.dart';
+import '../data/download_url_cache_service.dart';
+import '../data/media_cache_service.dart';
+import '../data/voice_playback_coordinator.dart';
 import '../data/remote/rest/api_client.dart';
 import '../data/remote/rest/auth_api.dart';
 import '../data/remote/rest/credential_storage.dart';
@@ -33,6 +38,7 @@ import '../data/remote/rest/token_store.dart';
 import '../data/attachment_sender.dart';
 import '../data/repositories/conversation_repository.dart';
 import '../data/repositories/message_repository.dart';
+import '../data/repositories/voice_message_state_repository.dart';
 
 // ─── 基础设施 ─────────────────────────────────────────────
 
@@ -93,6 +99,9 @@ final messageApiProvider =
     Provider<MessageApi>((ref) => MessageApi(ref.watch(apiClientProvider)));
 final fileApiProvider =
     Provider<FileApi>((ref) => FileApi(ref.watch(apiClientProvider)));
+final downloadUrlCacheProvider = Provider<DownloadUrlCacheService>((ref) {
+  return DownloadUrlCacheService(ref.watch(fileApiProvider));
+});
 final friendApiProvider =
     Provider<FriendApi>((ref) => FriendApi(ref.watch(apiClientProvider)));
 final groupApiProvider =
@@ -101,6 +110,70 @@ final convApiProvider =
     Provider<ConvApi>((ref) => ConvApi(ref.watch(apiClientProvider)));
 final csApiProvider =
     Provider<CsApi>((ref) => CsApi(ref.watch(apiClientProvider)));
+
+final fileDownloadUrlProvider =
+    FutureProvider.autoDispose.family<String, String>((ref, objectKey) {
+  return ref.watch(downloadUrlCacheProvider).url(objectKey);
+});
+
+final mediaCacheManagerProvider = Provider<BaseCacheManager>((ref) {
+  return CacheManager(
+    Config(
+      'lumoMediaCache',
+      stalePeriod: const Duration(days: 180),
+      maxNrOfCacheObjects: 2000,
+    ),
+  );
+});
+
+final mediaCachePolicyProvider = Provider<MediaCachePolicy>((ref) {
+  return const MediaCachePolicy(
+    maxAge: Duration(days: 30),
+    maxBytes: 512 * 1024 * 1024,
+  );
+});
+
+final fileCacheProvider =
+    FutureProvider.autoDispose.family<io.File, String>((ref, objectKey) async {
+  final cacheKey = 'im-media:$objectKey';
+  final manager = ref.watch(mediaCacheManagerProvider);
+  final cached = await manager.getFileFromCache(cacheKey);
+  if (cached != null) {
+    final file = io.File(cached.file.path);
+    if (await file.exists() && await file.length() > 0) return file;
+  }
+
+  final info = await ref.watch(downloadUrlCacheProvider).resolve(objectKey);
+  final downloaded = await manager.downloadFile(info.url, key: cacheKey);
+  return io.File(downloaded.file.path);
+});
+
+final mediaCacheServiceProvider = Provider<MediaCacheService>((ref) {
+  return MediaCacheService(
+    ref.watch(mediaCacheManagerProvider),
+    downloadUrlCache: ref.watch(downloadUrlCacheProvider),
+    policy: ref.watch(mediaCachePolicyProvider),
+  );
+});
+
+final voicePlaybackCoordinatorProvider =
+    Provider<VoicePlaybackCoordinator>((ref) {
+  final coordinator = VoicePlaybackCoordinator();
+  ref.onDispose(() => unawaited(coordinator.dispose()));
+  return coordinator;
+});
+
+final voiceMessageStateRepositoryProvider =
+    Provider<VoiceMessageStateRepository>((ref) {
+  return VoiceMessageStateRepository(ref.watch(kvDaoProvider));
+});
+
+final voiceMessagePlayedProvider =
+    StreamProvider.autoDispose.family<bool, String>((ref, clientMsgId) {
+  return ref
+      .watch(voiceMessageStateRepositoryProvider)
+      .watchPlayed(clientMsgId);
+});
 
 /// 好友列表（REST 拉取；下拉刷新用 ref.invalidate）。
 final friendsProvider = FutureProvider<List<Friend>>(
@@ -188,6 +261,8 @@ final messageRepositoryProvider = Provider<MessageRepository>(
   (ref) => MessageRepository(
     ref.watch(imEngineProvider),
     ref.watch(messageDaoProvider),
+    ref.watch(messageApiProvider),
+    mediaCacheService: ref.watch(mediaCacheServiceProvider),
   ),
 );
 
@@ -269,6 +344,7 @@ class AuthController extends Notifier<AuthState> {
 
   /// 冷启动：有 token 就恢复会话并连上网关；本地缓存让界面先离线渲染。
   Future<void> _bootstrap() async {
+    unawaited(_trimMediaCache());
     final token = await _tokens.readAccessToken();
     if (token == null || token.isEmpty) {
       state = state.copyWith(bootstrapping: false);
@@ -282,6 +358,21 @@ class AuthController extends Notifier<AuthState> {
     );
     unawaited(_refreshProfile());
     unawaited(_engine.start());
+  }
+
+  Future<void> _trimMediaCache() async {
+    try {
+      final result = await ref.read(mediaCacheServiceProvider).trim();
+      if (result.deletedFiles > 0 || result.clearedDownloadUrlEntries > 0) {
+        _log.fine(
+          'trim media cache files=${result.deletedFiles}, '
+          'bytes=${result.deletedBytes}, '
+          'url_entries=${result.clearedDownloadUrlEntries}',
+        );
+      }
+    } catch (e) {
+      _log.fine('trim media cache failed: $e');
+    }
   }
 
   Future<void> _refreshProfile() async {
@@ -303,6 +394,22 @@ class AuthController extends Notifier<AuthState> {
       return true;
     } catch (e) {
       _log.warning('update nickname failed: $e');
+      return false;
+    }
+  }
+
+  Future<bool> updateAvatar(String avatarObjectKey) async {
+    final avatar = avatarObjectKey.trim();
+    final user = state.user;
+    if (avatar.isEmpty || user == null) return false;
+    try {
+      await ref
+          .read(authApiProvider)
+          .updateProfile(nickname: user.displayName, avatar: avatar);
+      await _refreshProfile();
+      return true;
+    } catch (e) {
+      _log.warning('update avatar failed: $e');
       return false;
     }
   }

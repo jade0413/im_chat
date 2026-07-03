@@ -34,6 +34,9 @@ public class FileMetaEntity {
   @TableField("duration_ms")
   private Integer durationMs;
 
+  @TableField("sha256")
+  private String sha256;
+
   @TableField("status")
   private Integer status;
 

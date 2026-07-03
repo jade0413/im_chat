@@ -26,28 +26,58 @@ export function useFileUpload() {
         width = size.width;
         height = size.height;
         const thumb = await createImageThumbnail(file);
-        const thumbPresign = await presignFile({
+        thumbKey = await uploadObject({
           fileName: `${file.name}.thumb.jpg`,
           mime: 'image/jpeg',
-          size: thumb.size,
+          blob: thumb,
         });
-        await putPresignedObject(thumbPresign.uploadUrl, thumb, thumbPresign.requiredHeaders);
-        await confirmFile({ objectKey: thumbPresign.objectKey, size: thumb.size, mime: 'image/jpeg' });
-        thumbKey = thumbPresign.objectKey;
       }
 
-      const presign = await presignFile({
+      const objectKey = await uploadObject({
         fileName: file.name,
         mime: file.type || 'application/octet-stream',
-        size: file.size,
+        blob: file,
+        onProgress: setProgress,
       });
-      await putPresignedObject(presign.uploadUrl, file, presign.requiredHeaders, setProgress);
-      await confirmFile({ objectKey: presign.objectKey, size: file.size, mime: file.type });
-      return { objectKey: presign.objectKey, thumbKey, width, height };
+      return { objectKey, thumbKey, width, height };
     } finally {
       setUploading(false);
     }
   }
 
   return { upload, uploading, progress };
+}
+
+async function uploadObject({
+  fileName,
+  mime,
+  blob,
+  onProgress,
+}: {
+  fileName: string;
+  mime: string;
+  blob: Blob;
+  onProgress?: (percent: number) => void;
+}): Promise<string> {
+  const presign = await presignFile({
+    fileName,
+    mime,
+    size: blob.size,
+    sha256: await sha256Hex(blob),
+  });
+  if (!presign.instant) {
+    await putPresignedObject(presign.uploadUrl, blob, presign.requiredHeaders, onProgress);
+    await confirmFile({ objectKey: presign.objectKey, size: blob.size, mime });
+  } else {
+    onProgress?.(100);
+  }
+  return presign.objectKey;
+}
+
+async function sha256Hex(blob: Blob): Promise<string | undefined> {
+  if (!globalThis.crypto?.subtle) return undefined;
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
