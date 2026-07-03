@@ -2,7 +2,14 @@
 # im-project MVP 编排
 # 用法：
 #   仅中间件（日常开发）：docker compose up -d
-#   含应用：            docker compose --profile app up -d --build
+#   首次含应用：        docker compose --profile app build im-server im-gateway im-web
+#                      docker compose --profile app up -d --no-deps im-server
+#                      docker compose --profile app up -d --no-deps im-gateway
+#                      docker compose --profile app up -d --no-deps coturn im-web
+#   日常只发后端：      docker compose --profile app build im-server
+#                      docker compose --profile app up -d --no-deps im-server
+#   注意：不要在生产重发版本时直接 docker compose --profile app up -d --build；
+#         它会把 build 与容器重建绑在一起，且可能重启 im-gateway 导致所有 WebSocket 断开。
 #   含观测栈（§13.4）：  docker compose --profile obs up -d
 # 配置见 .env（从 .env.example 复制）
 # ============================================================

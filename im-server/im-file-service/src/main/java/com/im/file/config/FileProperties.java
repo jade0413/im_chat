@@ -5,6 +5,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 @ConfigurationProperties(prefix = "im.file")
 public record FileProperties(
@@ -57,6 +58,7 @@ public record FileProperties(
       "text/csv",
       "text/plain");
 
+  @ConstructorBinding
   public FileProperties {
     endpoint = firstText(endpoint, env("IM_MINIO_ENDPOINT"), env("MINIO_ENDPOINT"), "http://localhost:9000");
     publicEndpoint = firstText(publicEndpoint, env("IM_MINIO_PUBLIC_ENDPOINT"), env("MINIO_PUBLIC_ENDPOINT"), endpoint);
@@ -155,6 +157,7 @@ public record FileProperties(
       Duration pollInterval,
       Integer batchSize) {
 
+    @ConstructorBinding
     public Transcode {
       enabled = enabled != null && enabled;
       ffmpegPath = firstText(ffmpegPath, env("IM_FILE_FFMPEG_PATH"), env("FFMPEG_PATH"), "ffmpeg");

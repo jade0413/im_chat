@@ -4,6 +4,9 @@
 #
 # 用法：
 #   ./deploy.sh                # 完整部署：中间件 + 应用（本机编译镜像）
+#   ./deploy.sh --server-only  # 只发布 Java im-server；不重启网关，避免踢掉现有 WS 连接
+#   ./deploy.sh --gateway-only # 只发布 Rust 网关；会断开现有 WS 连接，谨慎用于网关改动
+#   ./deploy.sh --web-only     # 只发布 Web/nginx
 #   ./deploy.sh --obs          # 额外启动观测栈（Prometheus/Grafana/Loki）
 #   ./deploy.sh --no-build     # 应用用预构建镜像（方式C），服务器不编译
 #   ./deploy.sh --mw-only      # 只起中间件（MySQL/Redis/RabbitMQ/MinIO）
@@ -41,12 +44,15 @@ IMAGE_IM_WEB=""        # 例：.../im-web:1.0
 # ╚════════════════ 以下一般不用改 ══════════════════════════════════════════╝
 
 # ---- 解析参数 ----
-WITH_OBS="no"; DO_BUILD="yes"; MW_ONLY="no"
+WITH_OBS="no"; DO_BUILD="yes"; MW_ONLY="no"; APP_SCOPE="all"
 for arg in "$@"; do
   case "$arg" in
     --obs)      WITH_OBS="yes" ;;
     --no-build) DO_BUILD="no" ;;
     --mw-only)  MW_ONLY="yes" ;;
+    --server-only)  APP_SCOPE="server" ;;
+    --gateway-only) APP_SCOPE="gateway" ;;
+    --web-only)     APP_SCOPE="web" ;;
     *) echo "未知参数：$arg"; exit 1 ;;
   esac
 done
@@ -144,17 +150,49 @@ if [[ "$MW_ONLY" == "yes" ]]; then
 fi
 
 # ---- 4. 起应用 ----
+APP_UP_SERVICES=()
+APP_BUILD_SERVICES=()
+case "$APP_SCOPE" in
+  server)
+    APP_UP_SERVICES=(im-server)
+    APP_BUILD_SERVICES=(im-server)
+    ;;
+  gateway)
+    APP_UP_SERVICES=(im-gateway)
+    APP_BUILD_SERVICES=(im-gateway)
+    warn "即将重启 im-gateway，现有 WebSocket 连接会断开。只有网关代码/配置变化时才用 --gateway-only。"
+    ;;
+  web)
+    APP_UP_SERVICES=(im-web)
+    APP_BUILD_SERVICES=(im-web)
+    ;;
+  all)
+    APP_UP_SERVICES=(im-server im-gateway coturn im-web)
+    APP_BUILD_SERVICES=(im-server im-gateway im-web)
+    warn "完整应用发布会重建 im-gateway/im-web；在线 WebSocket 会短暂断开。日常后端发版建议用 --server-only。"
+    ;;
+esac
+
 if [[ "$DO_BUILD" == "yes" ]]; then
-  log "构建并启动应用镜像（首次 Rust/Maven 编译较慢，请耐心）…"
-  docker compose --profile app up -d --build
+  log "先构建应用镜像：${APP_BUILD_SERVICES[*]}（build 成功前不会触碰现有容器）…"
+  docker compose --profile app build "${APP_BUILD_SERVICES[@]}"
+  log "构建成功，启动/替换服务：${APP_UP_SERVICES[*]} …"
 else
   # --no-build：若填了镜像地址，导出为 compose 可覆盖的环境变量（需 compose 文件支持 image 覆盖）
   [[ -n "$IMAGE_IM_SERVER"  ]] && warn "镜像模式：请确认已把 compose 中 im-server 的 build 改为 image:$IMAGE_IM_SERVER"
   log "启动应用（使用预构建镜像，不编译）…"
-  docker compose --profile app up -d
 fi
-wait_healthy im-server 100
-wait_healthy im-gateway 40
+if [[ "$APP_SCOPE" == "all" ]]; then
+  docker compose --profile app up -d --no-deps im-server
+  wait_healthy im-server 100
+  docker compose --profile app up -d --no-deps im-gateway
+  wait_healthy im-gateway 40
+  docker compose --profile app up -d --no-deps coturn im-web
+else
+  docker compose --profile app up -d --no-deps "${APP_UP_SERVICES[@]}"
+  if [[ "$APP_SCOPE" == "server" ]]; then wait_healthy im-server 100; fi
+  if [[ "$APP_SCOPE" == "gateway" ]]; then wait_healthy im-gateway 40; fi
+fi
 
 # ---- 5. 观测栈（可选）----
 if [[ "$WITH_OBS" == "yes" ]]; then
