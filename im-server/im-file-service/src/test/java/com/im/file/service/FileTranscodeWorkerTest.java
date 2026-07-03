@@ -8,8 +8,12 @@ import static org.mockito.Mockito.when;
 
 import com.im.file.config.FileProperties;
 import java.time.Duration;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -18,6 +22,27 @@ class FileTranscodeWorkerTest {
 
   @Mock
   private FileTranscodeProcessor processor;
+
+  @Test
+  void springCanInstantiateProductionConstructor() {
+    new ApplicationContextRunner()
+        .withUserConfiguration(WorkerBindingConfig.class)
+        .withBean(FileTranscodeProcessor.class, () -> processor)
+        .withBean(FileProperties.class, () -> new FileProperties(
+            "http://minio:9000",
+            "http://localhost:9000",
+            "ak",
+            "sk",
+            "im-media",
+            Duration.ofMinutes(5),
+            Set.of("video/mp4"),
+            null))
+        .run(context -> {
+          assertThat(context).hasNotFailed();
+          assertThat(context).hasSingleBean(FileTranscodeWorker.class);
+          assertThat(context.getBean(FileTranscodeWorker.class).isRunning()).isFalse();
+        });
+  }
 
   @Test
   void startDoesNothingWhenTranscodeDisabled() {
@@ -73,5 +98,10 @@ class FileTranscodeWorkerTest {
             Duration.ofMillis(50),
             batchSize),
         "worker-a");
+  }
+
+  @Configuration(proxyBeanMethods = false)
+  @Import(FileTranscodeWorker.class)
+  static class WorkerBindingConfig {
   }
 }

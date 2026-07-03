@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Service;
 
@@ -22,6 +23,7 @@ public class FileTranscodeWorker implements SmartLifecycle {
   private final AtomicBoolean running = new AtomicBoolean(false);
   private ExecutorService executor;
 
+  @Autowired
   public FileTranscodeWorker(FileTranscodeProcessor processor,
       FileProperties properties) {
     this(processor, properties.transcode(), defaultClaimOwner());
