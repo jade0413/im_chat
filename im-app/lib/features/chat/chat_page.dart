@@ -300,6 +300,12 @@ class _Header extends ConsumerWidget {
         ? const EdgeInsets.symmetric(horizontal: 16, vertical: 12)
         : EdgeInsets.zero;
     final isC2C = conv?.isC2C ?? false;
+    final peerUserId = isC2C && (conv?.peerUserId?.isNotEmpty ?? false)
+        ? conv!.peerUserId!
+        : null;
+    final peerOnline = peerUserId == null
+        ? false
+        : ref.watch(userOnlineProvider(peerUserId)).valueOrNull == true;
     final groupConv =
         conv?.isGroup == true && conv?.groupId != null ? conv : null;
     final titleBlock = Column(
@@ -326,7 +332,7 @@ class _Header extends ConsumerWidget {
             ],
           ],
         ),
-        if (isC2C)
+        if (peerOnline)
           const Row(
             children: [
               Icon(Icons.circle, size: 7, color: LumoColors.success),

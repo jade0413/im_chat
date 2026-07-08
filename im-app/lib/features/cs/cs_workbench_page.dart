@@ -254,8 +254,10 @@ class _CsTileState extends ConsumerState<_CsTile> {
               Row(
                 children: [
                   _CsStatusChip(status: item.csStatus),
-                  const SizedBox(width: 8),
-                  _VisitorChip(online: item.visitorOnline),
+                  if (item.visitorOnline) ...[
+                    const SizedBox(width: 8),
+                    const _VisitorChip(),
+                  ],
                   const Spacer(),
                   if (item.isOpen)
                     TextButton.icon(
@@ -338,14 +340,12 @@ class _CsStatusChip extends StatelessWidget {
 }
 
 class _VisitorChip extends StatelessWidget {
-  const _VisitorChip({required this.online});
-
-  final bool online;
+  const _VisitorChip();
 
   @override
-  Widget build(BuildContext context) => _Chip(
-        text: online ? '访客在线' : '访客离线',
-        color: online ? LumoColors.success : LumoColors.textSecondary,
+  Widget build(BuildContext context) => const _Chip(
+        text: '访客在线',
+        color: LumoColors.success,
       );
 }
 

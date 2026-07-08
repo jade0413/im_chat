@@ -27,7 +27,7 @@ enum CallEvent {
   CALL_EVENT_REJECTED    = 3;  // 对方拒接（推主叫）
   CALL_EVENT_CANCELED    = 4;  // 主叫在接听前取消（推被叫）
   CALL_EVENT_HANGUP      = 5;  // 通话中对方挂断
-  CALL_EVENT_TIMEOUT     = 6;  // 60s 无人接听（推双方）
+  CALL_EVENT_TIMEOUT     = 6;  // 振铃超时无人接听（默认 30s，推双方）
   CALL_EVENT_BUSY        = 7;  // 对方忙线（推主叫；由服务端代答，不打扰被叫）
   CALL_EVENT_SIGNAL      = 8;  // SDP/ICE 信令中转（signal 字段有值）
   CALL_EVENT_ANSWERED_ELSEWHERE = 9;  // 本账号其他端已接听（推被叫其余端收铃）

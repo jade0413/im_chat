@@ -61,6 +61,46 @@ class CallServiceTest {
   }
 
   @Test
+  void inviteKeepsRingingWhenCalleeOffline() throws Exception {
+    CallSession session = new CallSession(
+        "call-offline",
+        1L,
+        2L,
+        0L,
+        List.of(),
+        List.of(),
+        CallMediaType.CALL_MEDIA_VOICE_VALUE,
+        CallSession.STATE_INVITING,
+        "client-call-offline",
+        System.currentTimeMillis(),
+        0L);
+    when(sessions.create(
+        1L,
+        1L,
+        2L,
+        CallMediaType.CALL_MEDIA_VOICE_VALUE,
+        "client-call-offline"))
+        .thenReturn(Optional.of(session));
+    when(turn.iceServersFor(1L, 1L)).thenReturn(List.of(ice("turn-caller")));
+    when(turn.iceServersFor(1L, 2L)).thenReturn(List.of(ice("turn-callee")));
+    when(push.notifyUsers(anyCollection(), any(CallNotify.class))).thenReturn(0);
+
+    CallAck ack = TenantContext.callWithTenant(1L,
+        () -> service.invite(
+            conn(1L),
+            CallInvite.newBuilder()
+                .setCalleeUserId(2L)
+                .setMedia(CallMediaType.CALL_MEDIA_VOICE)
+                .setClientCallId("client-call-offline")
+                .build()));
+
+    assertEquals(ErrorCode.OK.code(), ack.getCode());
+    assertEquals("call-offline", ack.getCallId());
+    assertEquals("turn-caller", ack.getIceServers(0).getUsername());
+    verify(sessions, never()).end(1L, session);
+  }
+
+  @Test
   void groupInviteSendsRecipientScopedIceServers() throws Exception {
     CallSession session = new CallSession(
         "call-1",
@@ -356,7 +396,7 @@ class CallServiceTest {
 
   private static CallProperties callProperties(int groupCallMaxMembers) {
     return new CallProperties(
-        Duration.ofSeconds(60),
+        Duration.ofSeconds(30),
         Duration.ofHours(4),
         List.of("stun:stun.example.com"),
         List.of(),

@@ -30,9 +30,7 @@ export function ConvItem({ conv }: { conv: Conversation }) {
         <div className="conv-name-line">
           <span className="conv-name">{displayTitle}</span>
           {conv.type === CONV_TYPE_CS && <Tag color={csStatusColor(conv.csStatus)}>{csStatusLabel(conv.csStatus)}</Tag>}
-          {conv.type === CONV_TYPE_CS && (
-            <Tag color={conv.visitorOnline ? 'green' : 'default'}>{conv.visitorOnline ? '访客在线' : '访客离线'}</Tag>
-          )}
+          {conv.type === CONV_TYPE_CS && conv.visitorOnline && <Tag color="green">访客在线</Tag>}
           {conv.muted && <span style={{ color: '#9aa4b2', fontSize: 12 }}>免打扰</span>}
         </div>
         <div className="conv-preview">{conv.lastMsgAbstract || '暂无消息'}</div>

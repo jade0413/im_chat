@@ -40,7 +40,7 @@ A                    server                        B(全端)
 INVITING ──answer(accept)──> ACTIVE ──hangup/断连──> ENDED(写CDR)
     │──answer(reject)──> ENDED(rejected)
     │──caller hangup──> ENDED(canceled)
-    │──60s 超时──────> ENDED(timeout)
+    │──30s 超时──────> ENDED(timeout)
     │──callee 忙线────> 不建状态，INVITE 直接代答 BUSY
 ```
 
@@ -59,7 +59,7 @@ Redis 结构（tenant 前缀走 RedisKeys 约定）：
 | 忙线 | 主叫或被叫已有占线标记 → CALL_ACK code=CALL_BUSY，**不打扰被叫**；不写 CDR（可选二阶段记未接来电） |
 | 多端振铃 | CALL_NOTIFY(INVITE) 推被叫全端（need_ack=true）；先 accept 者赢，其余端收 ANSWERED_ELSEWHERE 停铃 |
 | 拒接 | 任一端 reject 即整体拒接（推主叫 REJECTED，其余端 ANSWERED_ELSEWHERE 停铃）|
-| 超时 | 振铃 60s 无人应答 → 双方推 TIMEOUT，CDR result=timeout |
+| 超时 | 振铃 30s 无人应答 → 双方推 TIMEOUT，CDR result=timeout |
 | 主叫取消 | INVITING 期 CALL_HANGUP → 被叫全端推 CANCELED |
 | 通话中断连 | MVP 不做服务端断连联动挂断（WebRTC 侧 ICE disconnected 自行感知）；ACTIVE TTL 4h 兜底清状态。**二阶段**：订阅 ConnEvent.OnDisconnected 联动 |
 | SIGNAL 路由 | 校验 sender ∈ {caller,callee} 且 state=ACTIVE（或 INVITING 允许提前 candidates？MVP：仅 ACTIVE）→ 推对端 user 全端，非通话端按未知 call_id 忽略 |
@@ -69,14 +69,14 @@ Redis 结构（tenant 前缀走 RedisKeys 约定）：
 | 群通话上限 | `im.call.group-call-max-members` 默认 9，配置也被限制在 2~9；超过直接 CALL_ACK VALIDATION_FAILED，防止 500 人群触发推送风暴与 mesh 爆炸 |
 | 群通话拒接 | 只代表当前用户不加入，服务端不结束整场；同时给本账号其他端推 ANSWERED_ELSEWHERE 停铃 |
 
-错误码（common/error.proto 新增 7xxx 通话段）：`CALL_BUSY=7001`、`CALL_NOT_FOUND=7002`、`CALL_STATE_INVALID=7003`、`CALL_PEER_OFFLINE=7004`（MVP 无离线推送，被叫全端离线时 INVITE 直接代答）。
+错误码（common/error.proto 新增 7xxx 通话段）：`CALL_BUSY=7001`、`CALL_NOT_FOUND=7002`、`CALL_STATE_INVALID=7003`、`CALL_PEER_OFFLINE=7004`（预留给明确不可达；普通全端离线不直接代答，主叫保持振铃等待超时）。
 
 ## 5. TURN 凭证（coturn REST 机制，RFC "TURN REST API"）
 
 - coturn 配置 `use-auth-secret` + `static-auth-secret=<secret>`；
 - 服务端签发：`username = {unixExpiry}:{tenantId}-{userId}`，`credential = base64(HMAC-SHA1(secret, username))`，时效 1h；
 - 在 CALL_ACK(INVITE) 与 CALL_NOTIFY(INVITE)/ACK(accept) 中下发 `ice_servers`（stun + turn udp/tcp）；
-- 配置项：`im.call.turn.urls`（逗号分隔）、`im.call.turn.secret`、`im.call.stun.urls`、`im.call.ring-timeout=60s`、`im.call.group-call-max-members=9`。
+- 配置项：`im.call.turn.urls`（逗号分隔）、`im.call.turn.secret`、`im.call.stun.urls`、`im.call.ring-timeout=30s`、`im.call.group-call-max-members=9`。
 
 ## 6. 数据（MySQL，V13 迁移）
 
@@ -112,14 +112,14 @@ CREATE TABLE call_record (
 
 ```
 idle ─invite→ outgoing(响铃音) ─ACCEPTED→ connecting(createOffer/ICE) ─ICE connected→ active
-idle ─NOTIFY(INVITE)→ incoming(振铃，本地60s兜底超时) ─用户接→ connecting(等 offer→createAnswer) → active
+idle ─NOTIFY(INVITE)→ incoming(振铃，本地30s兜底超时) ─用户接→ connecting(等 offer→createAnswer) → active
 任意态 ─HANGUP/CANCELED/TIMEOUT/BUSY/REJECTED/挂断→ ended → idle
 ```
 依赖 `flutter_webrtc`；权限：Android RECORD_AUDIO、iOS NSMicrophoneUsageDescription、macOS mic entitlement。CallKit/ConnectionService 原生来电界面与离线推送唤醒 = 二阶段（依赖推送通道选型）。
 
 ## 9. Open Questions（通话相关）
 
-- [ ] 离线被叫：当前仅在线可达（无第三方推送通道，D 项待选型后接 VoIP push/FCM）
+- [ ] 离线被叫：主叫可发起并等待 30s 超时；被叫离线期间无法收到响铃（无第三方推送通道，D 项待选型后接 VoIP push/FCM/CallKit 唤醒）
 - [ ] 黑名单来电代答策略；通话记录气泡入会话
 - [ ] 通话中 WS 断连的服务端联动挂断（订阅 OnDisconnected）
 - [ ] 大群/正式会议：SFU、主持人/禁麦/成员列表、主叫退出后会议继续等会议语义，二阶段独立设计

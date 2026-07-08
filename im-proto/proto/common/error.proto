@@ -25,5 +25,5 @@ enum ErrorCode {
   CALL_BUSY = 7001;            // 主叫或被叫正在通话/振铃中
   CALL_NOT_FOUND = 7002;       // call_id 不存在或已结束
   CALL_STATE_INVALID = 7003;   // 当前状态不允许该操作（如重复接听）
-  CALL_PEER_OFFLINE = 7004;    // 被叫全端离线（MVP 无离线推送，直接代答）
+  CALL_PEER_OFFLINE = 7004;    // 被叫明确不可达（预留；普通离线 INVITE 等振铃超时）
 }

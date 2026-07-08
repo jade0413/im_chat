@@ -22,7 +22,7 @@ public record CallProperties(
 ) {
 
   public CallProperties {
-    ringTimeout = normalize(ringTimeout, Duration.ofSeconds(60));
+    ringTimeout = normalize(ringTimeout, Duration.ofSeconds(30));
     activeTtl = normalize(activeTtl, Duration.ofHours(4));
     stunUrls = listOrDefault(stunUrls, List.of("stun:stun.l.google.com:19302"));
     turnUrls = listOrDefault(turnUrls, List.of());

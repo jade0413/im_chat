@@ -1,8 +1,13 @@
+use crate::proto::im::ws::v1::Cmd;
 use dashmap::DashMap;
 use std::sync::{
     atomic::{AtomicI64, AtomicU64, Ordering},
     Arc,
 };
+
+/// P1-3：cmd 来自客户端任意填写，未知值统一归并到本桶（渲染为 cmd="other"），
+/// 防止恶意客户端遍历 u32 空间把指标表撑爆。
+const UNKNOWN_CMD_KEY: u32 = u32::MAX;
 
 #[derive(Clone, Default)]
 pub struct Metrics {
@@ -16,6 +21,7 @@ pub struct Metrics {
     handshake_rejected_rate_limit: Arc<AtomicU64>,
     handshake_rejected_per_ip_rate_limit: Arc<AtomicU64>,
     handshake_rejected_origin: Arc<AtomicU64>,
+    handshake_rejected_capacity: Arc<AtomicU64>,
     dispatch_ok: Arc<AtomicU64>,
     dispatch_failed: Arc<AtomicU64>,
     dispatch_duration_ms_sum: Arc<AtomicU64>,
@@ -40,8 +46,13 @@ impl Metrics {
     }
 
     pub fn uplink_frame(&self, cmd: u32) {
+        // 只有 frame.proto 已知的 Cmd 值才按值展开标签，未知值归并（P1-3）。
+        let key = i32::try_from(cmd)
+            .ok()
+            .and_then(|value| Cmd::try_from(value).ok())
+            .map_or(UNKNOWN_CMD_KEY, |_| cmd);
         self.uplink_frames
-            .entry(cmd)
+            .entry(key)
             .or_insert_with(|| AtomicU64::new(0))
             .fetch_add(1, Ordering::Relaxed);
     }
@@ -80,6 +91,11 @@ impl Metrics {
 
     pub fn handshake_rejected_origin(&self) {
         self.handshake_rejected_origin
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn handshake_rejected_capacity(&self) {
+        self.handshake_rejected_capacity
             .fetch_add(1, Ordering::Relaxed);
     }
 
@@ -124,10 +140,17 @@ impl Metrics {
             .collect::<Vec<_>>();
         cmds.sort_by_key(|(cmd, _)| *cmd);
         for (cmd, value) in cmds {
-            output.push_str(&format!(
-                "im_gateway_uplink_frames_total{{cmd=\"{}\"}} {}\n",
-                cmd, value
-            ));
+            if cmd == UNKNOWN_CMD_KEY {
+                output.push_str(&format!(
+                    "im_gateway_uplink_frames_total{{cmd=\"other\"}} {}\n",
+                    value
+                ));
+            } else {
+                output.push_str(&format!(
+                    "im_gateway_uplink_frames_total{{cmd=\"{}\"}} {}\n",
+                    cmd, value
+                ));
+            }
         }
 
         output.push_str("# TYPE im_gateway_push_delivered_total counter\n");
@@ -168,6 +191,10 @@ impl Metrics {
             "im_gateway_handshake_rejected_total{{reason=\"origin\"}} {}\n",
             self.handshake_rejected_origin.load(Ordering::Relaxed)
         ));
+        output.push_str(&format!(
+            "im_gateway_handshake_rejected_total{{reason=\"capacity\"}} {}\n",
+            self.handshake_rejected_capacity.load(Ordering::Relaxed)
+        ));
         output.push_str("# TYPE im_gateway_dispatch_total counter\n");
         output.push_str(&format!(
             "im_gateway_dispatch_total{{result=\"ok\"}} {}\n",
@@ -202,6 +229,7 @@ mod tests {
         metrics.handshake_rejected_rate_limit();
         metrics.handshake_rejected_per_ip_rate_limit();
         metrics.handshake_rejected_origin();
+        metrics.handshake_rejected_capacity();
         metrics.dispatch_completed(true, 12);
         metrics.dispatch_completed(false, 7);
 
@@ -214,8 +242,23 @@ mod tests {
         assert!(rendered.contains("im_gateway_push_failed_total 1"));
         assert!(rendered.contains("im_gateway_ack_timeout_disconnects_total 1"));
         assert!(rendered.contains("im_gateway_handshake_rejected_total{reason=\"draining\"} 1"));
+        assert!(rendered.contains("im_gateway_handshake_rejected_total{reason=\"capacity\"} 1"));
         assert!(rendered.contains("im_gateway_dispatch_total{result=\"ok\"} 1"));
         assert!(rendered.contains("im_gateway_dispatch_total{result=\"failed\"} 1"));
         assert!(rendered.contains("im_gateway_dispatch_duration_ms_sum 19"));
+    }
+
+    /// P1-3：未知 cmd 归并到 "other" 桶，不按值展开标签。
+    #[test]
+    fn buckets_unknown_uplink_cmds_into_other() {
+        let metrics = Metrics::default();
+        metrics.uplink_frame(10); // MSG_SEND，已知
+        metrics.uplink_frame(123_456); // 未知
+        metrics.uplink_frame(987_654); // 未知，与上一条同桶
+
+        let rendered = metrics.render_prometheus(0, 0);
+        assert!(rendered.contains("im_gateway_uplink_frames_total{cmd=\"10\"} 1"));
+        assert!(rendered.contains("im_gateway_uplink_frames_total{cmd=\"other\"} 2"));
+        assert!(!rendered.contains("cmd=\"123456\""));
     }
 }

@@ -90,15 +90,15 @@ public class CallService {
     }
     CallSession session = created.get();
 
-    // 推被叫全端振铃；全端离线 = 代答（MVP 无离线推送通道）
+    // 推被叫全端振铃；全端离线也保持呼叫态，由 ring-timeout 统一结束，避免主叫一拨即断。
     int online = push.notifyUsers(
         List.of(calleeId),
         notifyBuilder(session, CallEvent.CALL_EVENT_INVITE, callerId)
             .addAllIceServers(turn.iceServersFor(tenantId, calleeId))
             .build());
     if (online == 0) {
-      sessions.end(tenantId, session);
-      return ack(ErrorCode.CALL_PEER_OFFLINE, session.callId(), List.of());
+      log.info("call invite target offline, wait timeout, tenant_id={}, call_id={}, caller={}, callee={}",
+          tenantId, session.callId(), callerId, calleeId);
     }
     log.info("call invited, tenant_id={}, call_id={}, caller={}, callee={}, online_ends={}",
         tenantId, session.callId(), callerId, calleeId, online);
@@ -138,8 +138,8 @@ public class CallService {
         CallEvent.CALL_EVENT_INVITE,
         callerId);
     if (online == 0) {
-      sessions.end(tenantId, session);
-      return ack(ErrorCode.CALL_PEER_OFFLINE, session.callId(), session.groupId(), List.of());
+      log.info("group call invite targets offline, wait timeout, tenant_id={}, call_id={}, caller={}, group_id={}",
+          tenantId, session.callId(), callerId, target.groupId());
     }
     log.info("group call invited, tenant_id={}, call_id={}, caller={}, group_id={}, online_ends={}",
         tenantId, session.callId(), callerId, target.groupId(), online);

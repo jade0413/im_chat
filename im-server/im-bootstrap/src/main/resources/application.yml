@@ -132,7 +132,7 @@ im:
     # 等于默认近似不生效，租户/环境调小才启用；<=0 表示禁用。
     large-group-media-light-push-threshold: ${IM_PUSH_LARGE_GROUP_MEDIA_LIGHT_THRESHOLD:500}
   call: # D45/D50：实时音视频，小群通话走 mesh，默认最多 9 人。
-    ring-timeout: ${IM_CALL_RING_TIMEOUT:60s}
+    ring-timeout: ${IM_CALL_RING_TIMEOUT:30s}
     active-ttl: ${IM_CALL_ACTIVE_TTL:4h}
     group-call-max-members: ${IM_CALL_GROUP_MAX_MEMBERS:9}
     stun-urls: ${IM_CALL_STUN_URLS:stun:stun.l.google.com:19302}

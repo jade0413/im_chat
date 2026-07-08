@@ -1,4 +1,4 @@
-use crate::frame_codec::DEFAULT_MAX_FRAME_BYTES;
+use crate::{client_ip::IpNet, frame_codec::DEFAULT_MAX_FRAME_BYTES};
 use anyhow::{Context, Result};
 use std::{env, net::SocketAddr, time::Duration};
 
@@ -29,8 +29,14 @@ pub struct Config {
     pub drain_timeout: Duration,
     pub rabbitmq_prefetch_count: u16,
     pub min_protocol_version: u32,
-    /// 单帧最大字节数，超过则拒绝解码（防恶意超大帧 OOM）
+    /// 单帧最大字节数，超过则拒绝解码（防恶意超大帧 OOM）；
+    /// 同时作为 WS 传输层 max_message_size/max_frame_size（P0-2）。
     pub max_frame_bytes: usize,
+    /// P2-4：可信反向代理网段。peer 在段内才信任 X-Forwarded-For/X-Real-IP
+    /// 还原真实客户端 IP（per-IP 限流用）。默认为空 = 不信任任何转发头。
+    pub trusted_proxy_cidrs: Vec<IpNet>,
+    /// 全局最大连接数（内存保护的最后闸门），达到后握手直接 503。
+    pub max_connections: usize,
 }
 
 impl Config {
@@ -109,11 +115,54 @@ impl Config {
             )
             .parse()
             .context("invalid max frame bytes")?,
+            trusted_proxy_cidrs: read_csv_env(&["IM_GATEWAY_TRUSTED_PROXY_CIDRS"], "")
+                .iter()
+                .map(|value| {
+                    IpNet::parse(value)
+                        .with_context(|| format!("invalid trusted proxy cidr: {value}"))
+                })
+                .collect::<Result<Vec<_>>>()?,
+            max_connections: read_env(&["IM_GATEWAY_MAX_CONNECTIONS"], "50000")
+                .parse()
+                .context("invalid max connections")?,
         })
     }
 
     pub fn push_queue_name(&self) -> String {
         format!("{}{}", self.gateway_queue_prefix, self.instance_id)
+    }
+
+    /// 测试基准配置（config/connection 两处测试共用，避免加字段要改多处字面量）。
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        Self {
+            instance_id: "gw-test".to_string(),
+            ws_bind: "127.0.0.1:8080".parse().unwrap(),
+            upstream_grpc: vec!["http://127.0.0.1:9091".to_string()],
+            rabbitmq_url: "amqp://localhost:5672/%2f".to_string(),
+            gateway_queue_prefix: "push.gw.".to_string(),
+            allowed_origins: vec!["*".to_string()],
+            handshake_rate_limit_per_sec: 200,
+            handshake_rate_limit_burst: 400,
+            per_ip_handshake_rate_limit_per_sec: 20,
+            per_ip_handshake_rate_limit_burst: 40,
+            per_ip_handshake_limiter_idle_ttl: Duration::from_secs(600),
+            auth_timeout: Duration::from_secs(5),
+            auth_replay_window: Duration::from_secs(300),
+            push_ack_timeout: Duration::from_secs(10),
+            dispatch_timeout: Duration::from_secs(10),
+            verify_timeout: Duration::from_secs(5),
+            conn_event_timeout: Duration::from_secs(5),
+            outbound_queue_size: 256,
+            outbound_queue_full_disconnect_threshold: 3,
+            route_renew_heartbeat_interval: 3,
+            drain_timeout: Duration::from_secs(1),
+            rabbitmq_prefetch_count: 16,
+            min_protocol_version: 1,
+            max_frame_bytes: 64 * 1024,
+            trusted_proxy_cidrs: Vec::new(),
+            max_connections: 50_000,
+        }
     }
 }
 
@@ -147,32 +196,8 @@ mod tests {
 
     #[test]
     fn derives_push_queue_from_prefix_and_instance() {
-        let config = Config {
-            instance_id: "gw-a".to_string(),
-            ws_bind: "127.0.0.1:8080".parse().unwrap(),
-            upstream_grpc: vec!["http://127.0.0.1:9091".to_string()],
-            rabbitmq_url: "amqp://localhost:5672/%2f".to_string(),
-            gateway_queue_prefix: "push.gw.".to_string(),
-            allowed_origins: vec!["*".to_string()],
-            handshake_rate_limit_per_sec: 200,
-            handshake_rate_limit_burst: 400,
-            per_ip_handshake_rate_limit_per_sec: 20,
-            per_ip_handshake_rate_limit_burst: 40,
-            per_ip_handshake_limiter_idle_ttl: std::time::Duration::from_secs(600),
-            auth_timeout: std::time::Duration::from_secs(5),
-            auth_replay_window: std::time::Duration::from_secs(300),
-            push_ack_timeout: std::time::Duration::from_secs(10),
-            dispatch_timeout: std::time::Duration::from_secs(10),
-            verify_timeout: std::time::Duration::from_secs(5),
-            conn_event_timeout: std::time::Duration::from_secs(5),
-            outbound_queue_size: 256,
-            outbound_queue_full_disconnect_threshold: 3,
-            route_renew_heartbeat_interval: 3,
-            drain_timeout: std::time::Duration::from_secs(10),
-            rabbitmq_prefetch_count: 256,
-            min_protocol_version: 1,
-            max_frame_bytes: 65536,
-        };
+        let mut config = Config::for_test();
+        config.instance_id = "gw-a".to_string();
 
         assert_eq!(config.push_queue_name(), "push.gw.gw-a");
     }

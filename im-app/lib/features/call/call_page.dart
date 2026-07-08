@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -170,18 +171,48 @@ class _CallPageState extends ConsumerState<CallPage> {
 
   Widget _voiceLayout(CallState state, CallEngine engine, ThemeData theme) {
     final title = _callTitle(state);
-    return Column(
-      children: [
-        const Spacer(flex: 2),
-        LumoAvatar(name: title, size: 96),
-        const SizedBox(height: 16),
-        Text(title, style: theme.textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        Text(_statusText(state), style: theme.textTheme.bodyLarge),
-        const Spacer(flex: 3),
-        _actions(state, engine),
-        const SizedBox(height: 48),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final contentHeight = math.max(360.0, constraints.maxHeight);
+        return SingleChildScrollView(
+          child: SizedBox(
+            width: constraints.maxWidth,
+            height: contentHeight,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const SizedBox(height: 24),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      LumoAvatar(name: title, size: 96),
+                      const SizedBox(height: 16),
+                      Text(
+                        title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.headlineSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _statusText(state),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyLarge,
+                      ),
+                    ],
+                  ),
+                  _actions(state, engine),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 

@@ -142,12 +142,107 @@ wait_healthy() {  # $1=服务名 $2=最多重试次数
   docker compose logs --tail=30 "$svc" || true
   die "中间件未就绪，终止。"
 }
+wait_completed() {  # $1=服务名 $2=最多重试次数
+  local svc="$1" tries="${2:-40}" cid status exit_code
+  for ((i=1; i<=tries; i++)); do
+    cid="$(docker compose ps -a -q "$svc" 2>/dev/null | head -n1 || true)"
+    if [[ -n "$cid" ]]; then
+      status="$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || true)"
+      exit_code="$(docker inspect -f '{{.State.ExitCode}}' "$cid" 2>/dev/null || true)"
+      if [[ "$status" == "exited" && "$exit_code" == "0" ]]; then
+        log "  ✓ $svc completed"
+        return 0
+      fi
+      if [[ "$status" == "exited" && "$exit_code" != "0" ]]; then
+        warn "  ✗ $svc 执行失败，最近日志："
+        docker compose logs --tail=30 "$svc" || true
+        die "$svc 未完成，终止。"
+      fi
+    fi
+    sleep 3
+  done
+  warn "  ✗ $svc 未在预期时间内完成，最近日志："
+  docker compose logs --tail=30 "$svc" || true
+  die "$svc 未完成，终止。"
+}
 for s in mysql redis rabbitmq minio; do wait_healthy "$s"; done
+wait_completed minio-init 40
 log "中间件就绪。MySQL 首启已自动建表，MinIO 已建 bucket im-media。"
 
 if [[ "$MW_ONLY" == "yes" ]]; then
   log "仅中间件模式完成。"; exit 0
 fi
+
+preflight_im_server() {
+  local image network name running
+  image="$(docker compose --profile app images -q im-server | head -n1)"
+  [[ -n "$image" ]] || die "找不到 im-server 镜像，无法做发布前预检。"
+
+  network="${COMPOSE_PROJECT_NAME:-im-project}_default"
+  docker network inspect "$network" >/dev/null 2>&1 || die "找不到 compose 网络：$network"
+
+  # 只读取本目录 .env。deploy.sh 生成的值都是 shell-safe；手工改 .env 时也应保持 KEY=VALUE 格式。
+  set -a
+  set -f
+  # shellcheck disable=SC1091
+  source ./.env
+  set +f
+  set +a
+
+  name="im-server-preflight-$(date +%s)"
+  docker rm -f "$name" >/dev/null 2>&1 || true
+
+  log "发布前预检 im-server 新镜像（通过前不会停止旧容器）…"
+  docker run -d \
+    --name "$name" \
+    --network "$network" \
+    -e SPRING_PROFILES_ACTIVE=docker \
+    -e IM_STARTUP_CHECK_ENABLED=true \
+    -e MYSQL_URL=jdbc:mysql://mysql:3306/im \
+    -e MYSQL_PASSWORD="${MYSQL_ROOT_PASSWORD}" \
+    -e REDIS_HOST=redis \
+    -e REDIS_PASSWORD="${REDIS_PASSWORD}" \
+    -e RABBITMQ_HOST=rabbitmq \
+    -e RABBITMQ_USER="${RABBITMQ_USER}" \
+    -e RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD}" \
+    -e MINIO_ENDPOINT=http://minio:9000 \
+    -e MINIO_PUBLIC_ENDPOINT="${MINIO_PUBLIC_ENDPOINT:-http://localhost:9000}" \
+    -e MINIO_ROOT_USER="${MINIO_ROOT_USER}" \
+    -e MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD}" \
+    -e MINIO_BUCKET="${MINIO_BUCKET:-im-media}" \
+    -e IM_AUTH_JWT_SECRET="${JWT_SECRET}" \
+    -e IM_CALL_TURN_URLS="${IM_CALL_TURN_URLS:-turn:${EXTERNAL_IP:-127.0.0.1}:3478?transport=udp}" \
+    -e IM_CALL_TURN_SECRET="${TURN_SECRET:-dev-turn-secret-change-me}" \
+    -e IM_RABBITMQ_LISTENER_AUTO_STARTUP=false \
+    -e OUTBOX_ENABLED=false \
+    -e IM_OUTBOX_ENABLED=false \
+    -e IM_MSG_RETENTION_ENABLED=false \
+    -e IM_FILE_TRANSCODE_ENABLED=false \
+    -e IM_WORKER_ID=1023 \
+    "$image" >/dev/null
+
+  for ((i=1; i<=40; i++)); do
+    if docker exec "$name" curl -fsS http://127.0.0.1:8081/actuator/health/readiness >/dev/null 2>&1; then
+      docker rm -f "$name" >/dev/null 2>&1 || true
+      log "  ✓ im-server 新镜像预检通过"
+      return 0
+    fi
+
+    running="$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null || echo false)"
+    if [[ "$running" != "true" ]]; then
+      warn "im-server 新镜像预检失败，旧容器未被替换。最近日志："
+      docker logs --tail=120 "$name" 2>/dev/null || true
+      docker rm -f "$name" >/dev/null 2>&1 || true
+      die "新版本启动失败，已终止发布。"
+    fi
+    sleep 3
+  done
+
+  warn "im-server 新镜像预检超时，旧容器未被替换。最近日志："
+  docker logs --tail=120 "$name" 2>/dev/null || true
+  docker rm -f "$name" >/dev/null 2>&1 || true
+  die "新版本未在预期时间内就绪，已终止发布。"
+}
 
 # ---- 4. 起应用 ----
 APP_UP_SERVICES=()
@@ -176,10 +271,16 @@ esac
 if [[ "$DO_BUILD" == "yes" ]]; then
   log "先构建应用镜像：${APP_BUILD_SERVICES[*]}（build 成功前不会触碰现有容器）…"
   docker compose --profile app build "${APP_BUILD_SERVICES[@]}"
+  if [[ " ${APP_BUILD_SERVICES[*]} " == *" im-server "* ]]; then
+    preflight_im_server
+  fi
   log "构建成功，启动/替换服务：${APP_UP_SERVICES[*]} …"
 else
   # --no-build：若填了镜像地址，导出为 compose 可覆盖的环境变量（需 compose 文件支持 image 覆盖）
   [[ -n "$IMAGE_IM_SERVER"  ]] && warn "镜像模式：请确认已把 compose 中 im-server 的 build 改为 image:$IMAGE_IM_SERVER"
+  if [[ " ${APP_UP_SERVICES[*]} " == *" im-server "* ]]; then
+    preflight_im_server
+  fi
   log "启动应用（使用预构建镜像，不编译）…"
 fi
 if [[ "$APP_SCOPE" == "all" ]]; then

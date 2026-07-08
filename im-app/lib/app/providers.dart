@@ -34,6 +34,7 @@ import '../data/remote/rest/file_api.dart';
 import '../data/remote/rest/friend_api.dart';
 import '../data/remote/rest/group_api.dart';
 import '../data/remote/rest/message_api.dart';
+import '../data/remote/rest/presence_api.dart';
 import '../data/remote/rest/token_store.dart';
 import '../data/attachment_sender.dart';
 import '../data/repositories/conversation_repository.dart';
@@ -110,6 +111,26 @@ final convApiProvider =
     Provider<ConvApi>((ref) => ConvApi(ref.watch(apiClientProvider)));
 final csApiProvider =
     Provider<CsApi>((ref) => CsApi(ref.watch(apiClientProvider)));
+final presenceApiProvider =
+    Provider<PresenceApi>((ref) => PresenceApi(ref.watch(apiClientProvider)));
+
+final userOnlineProvider =
+    StreamProvider.autoDispose.family<bool, String>((ref, userId) async* {
+  final api = ref.watch(presenceApiProvider);
+  final id = userId.trim();
+  if (id.isEmpty) {
+    yield false;
+    return;
+  }
+  while (true) {
+    try {
+      yield await api.isOnline(id);
+    } catch (_) {
+      yield false;
+    }
+    await Future<void>.delayed(const Duration(seconds: 10));
+  }
+});
 
 final fileDownloadUrlProvider =
     FutureProvider.autoDispose.family<String, String>((ref, objectKey) {

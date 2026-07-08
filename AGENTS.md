@@ -42,7 +42,7 @@
 | D29 | 2026-06-14 | 客服工作台权限：**未认领只看队列摘要，认领后才可看完整消息记录和内部备注**；内部备注落 `cs_internal_note`，不进入消息流、不推访客 | 对齐客服系统最小权限边界；保留离线留言与后续转接/质检需要的协作记录，同时避免未认领坐席越权查看完整对话 |
 | D30 | 2026-06-15 | 会话 seq 分配收口到 **im-common `ConversationSequenceService`**：全系统只有该服务/mapper 能执行 `UPDATE conversation SET max_seq=max_seq+1`；`nextSeq` 必须在外层事务内调用（`Propagation.MANDATORY`） | 固化 D26 的同事务、无空洞、回滚一致语义，避免 message/group 等模块复制 allocator 造成实现漂移 |
 | D31 | 2026-06-15 | 网关心跳续路由使用 **ConnEvent.RefreshRoute**，只在 Redis 当前 route 与连接上下文完全匹配时刷新 TTL；`OnConnected` 只用于首次上线/同端踢旧 | 降低几十万在线心跳续期对 Java/Redis 的额外读与踢旧逻辑耦合，防止旧连接心跳覆盖新连接路由 |
-| D32 | 2026-07-03 | **通话 MVP 修订：1v1 音视频 + 小群 mesh 通话**：WebRTC P2P/coturn/WS 信令不变，群通话只做小群 mesh，不接 SFU；`im.call.group-call-max-members` 默认 9 且代码限制 2~9；群 INVITE 只锁主叫，成员 accept 成功才占线；主叫挂断=整场结束；正式会议能力二阶段独立设计 | 先满足小群聊天的基础通话，避免 500 人群推送风暴和 mesh 媒体面爆炸，不引入会议系统复杂度 |
+| D32 | 2026-07-03 | **通话 MVP 修订：1v1 音视频 + 小群 mesh 通话**：WebRTC P2P/coturn/WS 信令不变，群通话只做小群 mesh，不接 SFU；`im.call.group-call-max-members` 默认 9 且代码限制 2~9；振铃 30s 超时；被叫全端离线不直接失败，主叫等待超时（无离线推送时被叫不响铃）；群 INVITE 只锁主叫，成员 accept 成功才占线；主叫挂断=整场结束；正式会议能力二阶段独立设计 | 先满足小群聊天的基础通话，避免 500 人群推送风暴和 mesh 媒体面爆炸，不引入会议系统复杂度 |
 
 ## 设计文档索引
 

@@ -79,9 +79,7 @@ export function CsConversationDrawer({ convId, open, onClose }: CsConversationDr
             </Typography.Title>
             <Space size={[6, 6]} wrap>
               <Tag color={csStatusColor(conv.csStatus)}>{csStatusLabel(conv.csStatus)}</Tag>
-              <Tag color={conv.visitorOnline ? 'success' : 'default'}>
-                {conv.visitorOnline ? '访客在线' : '访客离线'}
-              </Tag>
+              {conv.visitorOnline && <Tag color="success">访客在线</Tag>}
               {conv.peerUserId && <Tag>访客ID {conv.peerUserId}</Tag>}
             </Space>
             <div className="cs-drawer-meta">

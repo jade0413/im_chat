@@ -167,7 +167,8 @@ function convSubtitle(conv: import('../../../store/types').Conversation) {
     return '群聊';
   }
   if (conv.type === 3) {
-    return `客服会话 · ${csStatusLabel(conv.csStatus)} · ${conv.visitorOnline ? '访客在线' : '访客离线'}`;
+    const base = `客服会话 · ${csStatusLabel(conv.csStatus)}`;
+    return conv.visitorOnline ? `${base} · 访客在线` : base;
   }
   if (conv.type === 4) {
     return '系统通知';

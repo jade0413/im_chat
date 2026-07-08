@@ -109,7 +109,7 @@ class CallState {
 class CallEngine {
   CallEngine({
     required this.sendFrame,
-    Duration incomingTimeout = const Duration(seconds: 60),
+    Duration incomingTimeout = const Duration(seconds: 30),
   }) : _incomingTimeout = incomingTimeout;
 
   /// 发帧函数（注入 ImSocket.send，保持与连接层解耦）。
